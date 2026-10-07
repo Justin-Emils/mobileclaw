@@ -19,7 +19,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
   const fsListTool = {
     name: "fs_list",
     description:
-      "List a directory (names, sizes, types). With no path, lists the allowed roots. Use this first to orient yourself.",
+      "List one directory level: folder names and file names with sizes. With no path, lists the allowed roots. Call this to orient yourself before searching.",
     input: z.object({
       path: pathArg.optional().describe("Directory to list; omit to list the allowed roots."),
       limit: z.number().int().min(1).max(2000).optional().default(200),
@@ -29,29 +29,59 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
     summarize: (input: { path?: string }) => (input.path ? `list ${input.path}` : "list allowed roots"),
     async execute(input: { path?: string; limit: number }) {
       const fs = deps.fs;
+
       if (!input.path) {
         const roots = await fs.roots();
-        const items: Record<string, unknown>[] = [];
+        const data: Record<string, unknown>[] = [];
+        const lines: string[] = [];
         for (const root of roots) {
           try {
             const entries = await fs.list(root);
-            items.push({ root, exists: true, entries: entries.slice(0, 40) });
+            const capped = capEntries(entries, 40);
+            data.push({ root, exists: true, entries: capped.shown });
+            lines.push(
+              `${root} (${entries.length} entries)`,
+              ...capped.shown.map((entry) => `  ${formatEntry(entry)}`),
+              ...(capped.omitted > 0 ? [`  … and ${capped.omitted} more`] : []),
+            );
           } catch (error) {
-            items.push({ root, exists: false, error: String(error) });
+            data.push({ root, exists: false, error: String(error) });
+            lines.push(`${root} — not accessible: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
-        return { roots: items };
+        return { display: `Allowed roots:\n${lines.join("\n")}`, data: { roots: data } };
       }
+
       const entries = await fs.list(input.path);
+      const capped = capEntries(entries, input.limit);
+      const directories = capped.shown.filter((entry) => entry.isDirectory);
+      const files = capped.shown.filter((entry) => entry.isFile);
+
+      const lines = [
+        `${input.path} — ${entries.length} entries (${entries.filter((e) => e.isDirectory).length} folders, ${entries.filter((e) => e.isFile).length} files)`,
+      ];
+      if (directories.length > 0) {
+        lines.push(`folders:\n${directories.map((entry) => `  ${entry.name}/`).join("\n")}`);
+      }
+      if (files.length > 0) {
+        lines.push(`files:\n${files.map((entry) => `  ${formatEntry(entry)}`).join("\n")}`);
+      }
+      if (entries.length === 0) lines.push("(empty)");
+      if (capped.omitted > 0) {
+        lines.push(`… ${capped.omitted} more entries not shown; narrow the path or use fs_search.`);
+      }
+
       return {
-        path: input.path,
-        count: entries.length,
-        directories: entries.filter((entry) => entry.isDirectory).map((entry) => entry.name),
-        files: entries
-          .filter((entry) => entry.isFile)
-          .slice(0, input.limit)
-          .map((entry) => ({ name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs })),
-        truncated: entries.length > input.limit,
+        display: lines.join("\n"),
+        data: {
+          path: input.path,
+          count: entries.length,
+          directories: entries.filter((entry) => entry.isDirectory).map((entry) => entry.name),
+          files: entries
+            .filter((entry) => entry.isFile)
+            .map((entry) => ({ name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs })),
+          truncated: capped.omitted > 0,
+        },
       };
     },
   } satisfies AnyToolDefinition;
@@ -279,4 +309,35 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
     fsInfoTool,
     fsOrganizeTool,
   ];
+}
+
+/* ------------------------------------------------------------- formatting */
+
+/**
+ * Cap a listing so neither the model's context nor the transcript drowns.
+ * Returns the entries to show and how many were held back, because "there are 300
+ * more" is information the model needs to decide between listing and searching.
+ */
+function capEntries<T>(entries: T[], limit: number): { shown: T[]; omitted: number } {
+  if (entries.length <= limit) return { shown: entries, omitted: 0 };
+  return { shown: entries.slice(0, limit), omitted: entries.length - limit };
+}
+
+/** `name (1.2 MB)` — sizes are what make an "organise my downloads" task possible. */
+function formatEntry(entry: { name: string; size: number; isDirectory: boolean }): string {
+  if (entry.isDirectory) return `${entry.name}/`;
+  return `${entry.name} (${formatSize(entry.size)})`;
+}
+
+function formatSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "?";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }

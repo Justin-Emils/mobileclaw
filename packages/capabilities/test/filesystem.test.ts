@@ -192,4 +192,54 @@ describe("filesystem tools", () => {
     expect(result).toMatchObject({ dryRun: true, exists: true });
     expect(await new NodeFsDriver().stat(join(root, "keep.txt"))).toBeTruthy();
   });
+
+  it("returns a readable listing for the model and full data for the UI", async () => {
+    const { fs } = buildTools();
+    await mkdir(join(root, "logs"));
+    await writeFile(join(root, "report.pdf"), "x".repeat(2048));
+
+    const list = tool("fs_list");
+    const result = (await list.execute!({ path: root, limit: 200 } as never, call as never)) as {
+      display: string;
+      data: { count: number; directories: string[]; files: { name: string }[] };
+    };
+
+    // The model gets text it can actually read — this is what stops it from
+    // repeating the same listing because paths were cut off mid-string.
+    expect(result.display).toContain("logs/");
+    expect(result.display).toContain("report.pdf (2.0 KB)");
+    expect(result.display).not.toContain("{");
+    // The UI still gets the structured form.
+    expect(result.data.count).toBe(2);
+    expect(result.data.directories).toEqual(["logs"]);
+    expect(result.data.files.map((file) => file.name)).toEqual(["report.pdf"]);
+  });
+
+  it("says how many entries it withheld instead of silently truncating", async () => {
+    const { fs } = buildTools();
+    for (let i = 0; i < 12; i += 1) {
+      await writeFile(join(root, `f${String(i).padStart(2, "0")}.txt`), "x");
+    }
+    const list = tool("fs_list");
+    const result = (await list.execute!({ path: root, limit: 5 } as never, call as never)) as {
+      display: string;
+      data: { truncated: boolean; count: number };
+    };
+    expect(result.display).toContain("7 more entries not shown");
+    expect(result.display).toContain("12 entries");
+    expect(result.data.truncated).toBe(true);
+    expect(result.data.count).toBe(12);
+  });
+
+  it("formats sizes so an organise task can compare files", async () => {
+    const { fs } = buildTools();
+    await writeFile(join(root, "small.txt"), "x".repeat(300));
+    await writeFile(join(root, "big.bin"), "x".repeat(3 * 1024 * 1024));
+    const list = tool("fs_list");
+    const result = (await list.execute!({ path: root, limit: 200 } as never, call as never)) as {
+      display: string;
+    };
+    expect(result.display).toContain("small.txt (300 B)");
+    expect(result.display).toContain("big.bin (3.0 MB)");
+  });
 });

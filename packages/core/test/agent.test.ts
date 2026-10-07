@@ -326,4 +326,93 @@ describe("Agent", () => {
     await run(agent, "where can you look?");
     expect(provider.requests[0]?.messages[0]?.content).toContain("Allowed roots: /sdcard/Download");
   });
+
+  it("tells the model how much step budget is left", async () => {
+    const provider = new MockProvider({ turns: ["ok"] });
+    const agent = new Agent({
+      provider,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+      maxSteps: 6,
+    });
+    await run(agent, "do something");
+    const system = provider.requests[0]?.messages[0]?.content ?? "";
+    expect(system).toContain("## Budget");
+    expect(system).toContain("6 of 6 steps left");
+  });
+
+  it("urges the model to wrap up when the budget runs low", async () => {
+    const provider = new MockProvider({
+      turns: [
+        { toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        { toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        { toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+      ],
+    });
+    files.set("/sdcard/Download/notes.txt", "x");
+    const agent = new Agent({
+      provider,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+      maxSteps: 3,
+    });
+    await run(agent, "keep going");
+    // By the final step the prompt must tell the model to stop exploring.
+    const lastSystem = provider.requests.at(-1)?.messages[0]?.content ?? "";
+    expect(lastSystem).toContain("Stop exploring");
+    expect(lastSystem).toContain("1 step(s) left");
+  });
+
+  it("explains a step-limit stop and how to resume", async () => {
+    const looping = new MockProvider({
+      turns: [{ toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] }],
+      repeatLast: true,
+    });
+    files.set("/sdcard/Download/notes.txt", "loop");
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const agent = new Agent({
+      provider: looping,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store,
+      maxSteps: 2,
+    });
+    const result = await run(agent, "loop forever");
+    const conversation = await store.load(result.conversationId);
+    const notice = conversation?.entries.find((entry) => entry.kind === "notice");
+    const text = notice?.kind === "notice" ? notice.text : "";
+    expect(text).toContain("2 tool call(s)");
+    expect(text).toContain("Send another message to continue");
+  });
+
+  it("renders a tool-authored display for the model and data for the UI", async () => {
+    const registry = new ToolRegistry().register({
+      name: "fs_list",
+      description: "list",
+      input: z.object({ path: z.string() }),
+      risk: "read" as const,
+      async execute() {
+        return {
+          display: "/x — 2 entries\nfiles:\n  a.txt (1.2 KB)\n  b.txt (3 MB)",
+          data: { count: 2, files: [{ name: "a.txt" }, { name: "b.txt" }] },
+        };
+      },
+    });
+    const provider = new MockProvider({
+      turns: [{ toolCalls: [{ name: "fs_list", input: { path: "/x" } }] }, "done"],
+    });
+    const agent = new Agent({
+      provider,
+      registry,
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+    });
+    await run(agent, "list it");
+    const toolMessage = provider.requests[1]?.messages.find((message) => message.role === "tool");
+    // The model must receive the readable text, not a JSON dump cut mid-path.
+    expect(toolMessage?.content).toContain("a.txt (1.2 KB)");
+    expect(toolMessage?.content).not.toContain("{");
+  });
 });

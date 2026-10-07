@@ -144,7 +144,7 @@ export class Agent {
         }
         emit({ type: "step", step });
 
-        const system = await this.buildSystemPrompt();
+        const system = await this.buildSystemPrompt(maxSteps - step + 1, maxSteps);
         const request = {
           model: this.options.provider.model,
           messages: [{ role: "system" as const, content: system }, ...conversation.messages],
@@ -266,7 +266,12 @@ export class Agent {
         }
       }
 
-      const notice = `Reached the step limit (${maxSteps}) before the task finished.`;
+      // Say what actually happened and how to resume: a silent cut-off leaves the
+      // user with a half-finished task and no idea the run was truncated.
+      const notice = [
+        `Stopped at the step limit (${maxSteps} steps, ${toolCallCount} tool call(s)) before the task finished.`,
+        "Send another message to continue where this left off, or raise the step limit in Settings.",
+      ].join(" ");
       conversation.entries.push({
         kind: "notice",
         id: createId("entry"),
@@ -463,7 +468,14 @@ export class Agent {
     };
   }
 
-  async buildSystemPrompt(): Promise<string> {
+  /**
+   * Build the system prompt for one step.
+   *
+   * `remaining`/`maxSteps` are optional so callers (and tests) can inspect the
+   * prompt without a budget; the loop always passes them so the model knows how
+   * much room it has left.
+   */
+  async buildSystemPrompt(remaining?: number, maxSteps?: number): Promise<string> {
     const base =
       this.options.systemPrompt ??
       DEFAULT_SYSTEM_PROMPT;
@@ -477,11 +489,16 @@ export class Agent {
     const environment = this.options.environment
       ? await this.options.environment()
       : "";
+    const budget =
+      remaining !== undefined && maxSteps !== undefined
+        ? renderStepBudget(remaining, maxSteps)
+        : "";
     return [
       base,
       "",
       "## Available tools",
       inventory,
+      budget ? `\n## Budget\n${budget}` : "",
       environment ? `\n## Environment\n${environment}` : "",
     ]
       .join("\n")
@@ -523,13 +540,50 @@ Rules:
 - When a tool returns an error code, adapt: read the error, fix the input, or explain the blocker.
 - Keep replies short. Show paths, commands and results; skip filler.`;
 
-/** Tool output is both rendered to the model and previewed in the UI. */
+/**
+ * Tool output is both rendered to the model and previewed in the UI.
+ *
+ * A tool may return `{ display, data }`: `display` is the exact text the model
+ * receives, and `data` is the full structure for the UI. Without this, a tool
+ * whose JSON blows past the preview limit hands the model a truncated blob — which
+ * is how an `fs_list` once returned paths cut off at ".../5404..." and pushed the
+ * model into seven blind repeats of the same call.
+ */
 export function renderToolOutput(value: unknown): { text: string; preview: string } {
   if (typeof value === "string") {
     return { text: value, preview: truncate(value, 400) };
   }
+  if (value !== null && typeof value === "object" && "display" in value && "data" in value) {
+    const { display, data } = value as { display: unknown; data: unknown };
+    const text = typeof display === "string" ? display : safeStringify(display, 0);
+    return { text, preview: truncate(text, 400) };
+  }
   const text = safeStringify(value, 0);
   return { text, preview: truncate(text, 400) };
+}
+
+/**
+ * Per-step guidance appended to the system prompt.
+ *
+ * The model cannot see how many steps remain, so it explores until it is cut off
+ * mid-task. Telling it the budget — and what to do with the last steps — turns a
+ * silent truncation into a usable hand-off.
+ */
+export function renderStepBudget(remaining: number, maxSteps: number): string {
+  if (remaining <= 0) return "";
+  if (remaining <= 2) {
+    return [
+      `Step budget: this is step ${maxSteps - remaining + 1} of ${maxSteps}. You have ${remaining} step(s) left.`,
+      "Stop exploring. Take the most valuable action now, or reply with what you found, what is left, and what you need from the user.",
+    ].join("\n");
+  }
+  if (remaining <= Math.max(3, Math.ceil(maxSteps / 3))) {
+    return [
+      `Step budget: ${remaining} of ${maxSteps} steps left.`,
+      "Wrap up soon: act on what you already know instead of exploring further.",
+    ].join("\n");
+  }
+  return `Step budget: ${remaining} of ${maxSteps} steps left.`;
 }
 
 function truncate(text: string, max: number): string {

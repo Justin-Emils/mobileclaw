@@ -37,6 +37,10 @@ export const strings = {
     toolRunning: (name: string) => `正在执行 ${name}…`,
     denied: (name: string) => `已拒绝：${name}`,
     stoppedAfter: (steps: number) => `达到步数上限，已执行 ${steps} 步后停止。`,
+    continueRun: "继续上次未完成的任务",
+    continueHint: "上一轮在步数上限处停下，任务可能只做了一半。",
+    continueMessage:
+      "请继续完成刚才未做完的任务。先总结你已经确认的发现，然后直接执行剩下的操作，不要再重复之前的探查。",
     runFailed: "这次执行失败了",
     offlineDemo: "离线演示模式",
   },

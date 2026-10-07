@@ -42,6 +42,8 @@ export default function ChatScreen() {
   const [running, setRunning] = useState(false);
   const [conversationId, setConversationId] = useState<string | undefined>();
   const [status, setStatus] = useState<string>("");
+  /** Set when a run stopped at the step limit, so the UI can offer to resume. */
+  const [canContinue, setCanContinue] = useState(false);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const listRef = useRef<FlatList<Bubble>>(null);
 
@@ -56,18 +58,23 @@ export default function ChatScreen() {
         id: "boot-warning",
         role: "notice",
         level: "warn",
-        text: `Offline demo mode: ${state.error}`,
+        text: `${strings.chat.offlineDemo}: ${state.error}`,
       },
     ]);
   }, [ready, state.error]);
 
-  const send = useCallback(async () => {
-    const text = draft.trim();
+  /**
+   * Send one user turn. `override` lets the "continue" button send a canned
+   * message through the same path instead of duplicating the run logic.
+   */
+  const send = useCallback(async (override?: string) => {
+    const text = (override ?? draft).trim();
     if (!runtime || text === "" || running) return;
 
     setDraft("");
     setRunning(true);
     setStatus("");
+    setCanContinue(false);
     const userBubble: Bubble = { id: `u_${Date.now()}`, role: "user", text };
     const assistantId = `a_${Date.now()}`;
     setBubbles((current) => [
@@ -111,6 +118,9 @@ export default function ChatScreen() {
             ]);
           }
           if (result.stopReason === "step_limit") {
+            // Offer the way out, not just the bad news: the work so far is in the
+            // conversation, so continuing is one message away.
+            setCanContinue(true);
             setBubbles((current) => [
               ...current,
               { id: `n_${Date.now()}`, role: "notice", level: "warn", text: strings.chat.stoppedAfter(result.steps) },
@@ -149,6 +159,7 @@ export default function ChatScreen() {
     setConversationId(undefined);
     setBubbles([]);
     setTools([]);
+    setCanContinue(false);
   }, []);
 
   const data = useMemo(() => bubbles, [bubbles]);
@@ -207,6 +218,13 @@ export default function ChatScreen() {
       )}
 
       {status !== "" ? <Text style={styles.status}>{status}</Text> : null}
+
+      {canContinue && !running ? (
+        <Pressable style={styles.continueBar} onPress={() => void send(strings.chat.continueMessage)}>
+          <Text style={styles.continueText}>{strings.chat.continueRun}</Text>
+          <Text style={styles.continueHint}>{strings.chat.continueHint}</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.composer}>
         <TextInput
@@ -386,6 +404,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   status: { color: theme.colors.textFaint, fontSize: 11, paddingHorizontal: theme.space(4), paddingBottom: theme.space(1) },
+  continueBar: {
+    marginHorizontal: theme.space(3),
+    marginBottom: theme.space(2),
+    paddingHorizontal: theme.space(4),
+    paddingVertical: theme.space(3),
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.colors.accentSoft,
+    borderColor: theme.colors.accent,
+    borderWidth: 1,
+    gap: theme.space(1),
+  },
+  continueText: { color: theme.colors.text, fontWeight: "600", fontSize: 14 },
+  continueHint: { color: theme.colors.textMuted, fontSize: 11 },
   composer: {
     flexDirection: "row",
     alignItems: "flex-end",
