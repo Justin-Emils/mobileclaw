@@ -129,6 +129,99 @@ describe("Agent", () => {
     files.clear();
   });
 
+  it("persists an 'always allow' onto the conversation, not the process", async () => {
+    // The gap this closes: `authorize` reported `remember`, nothing stored it, and the
+    // gate's allowlist was a single process-wide set. So the setting was both lost on
+    // restart AND leaked into unrelated conversations.
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const approval = vi.fn().mockResolvedValue({ approved: true, remember: true });
+
+    const { agent } = buildAgent({
+      // Turn 1: call the tool. Turn 2: answer.
+      turns: [
+        { toolCalls: [{ id: "c1", name: "fs_write", input: { path: "/sdcard/Download/a.txt", content: "x" } }] },
+        "done",
+      ],
+      permissions: { defaultMode: "ask" },
+      approval,
+      store,
+    });
+
+    const first = await run(agent, "write a file");
+    expect(approval).toHaveBeenCalledOnce();
+
+    const saved = await store.load(first.conversationId);
+    expect(saved?.allowlist).toContain("fs_write");
+  });
+
+  it("does not leak an approval into a second conversation", async () => {
+    // One gate, two conversations -- which is exactly how the app is wired (a single
+    // runtime holds a single gate), so this is the regression that mattered.
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const approval = vi.fn().mockResolvedValue({ approved: true, remember: true });
+    const gate = new PermissionGate({ defaultMode: "ask" }, approval);
+    const provider = new MockProvider({
+      turns: [
+        { toolCalls: [{ id: "c1", name: "fs_write", input: { path: "/sdcard/Download/a.txt", content: "x" } }] },
+        "done",
+        { toolCalls: [{ id: "c2", name: "fs_write", input: { path: "/sdcard/Documents/b.txt", content: "y" } }] },
+        "done",
+      ],
+    });
+    const registry = new ToolRegistry().registerAll([readTool, writeTool, failingTool]);
+    const agent = new Agent({ provider, registry, permissions: gate, store });
+
+    await run(agent, "first chat");
+    await run(agent, "unrelated second chat");
+
+    // Once per conversation: the second chat must not inherit the first one's grant.
+    expect(approval).toHaveBeenCalledTimes(2);
+  });
+
+  it("assigns a conversation workspace once and persists it", async () => {
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const assignWorkspace = vi.fn((id: string) => `/workspaces/${id}`);
+    const { agent } = buildAgent({
+      turns: ["ok", "ok"],
+      permissions: { defaultMode: "allow" },
+      store,
+    });
+
+    const first = await run(agent, "hello", { assignWorkspace });
+    expect(assignWorkspace).toHaveBeenCalledOnce();
+    const saved = await store.load(first.conversationId);
+    expect(saved?.workspace).toBe(`/workspaces/${first.conversationId}`);
+
+    // Second run reuses the stored path instead of asking again, so a later change to
+    // the naming scheme cannot move an existing conversation's files.
+    await run(agent, "again", { conversationId: first.conversationId, assignWorkspace });
+    expect(assignWorkspace).toHaveBeenCalledOnce();
+  });
+
+  it("re-uses a stored approval on a later run without asking again", async () => {
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const approval = vi.fn().mockResolvedValue({ approved: true, remember: true });
+    const gate = new PermissionGate({ defaultMode: "ask" }, approval);
+    const registry = new ToolRegistry().registerAll([readTool, writeTool, failingTool]);
+
+    const provider = new MockProvider({
+      turns: [
+        { toolCalls: [{ id: "c1", name: "fs_write", input: { path: "/sdcard/Download/a.txt", content: "x" } }] },
+        "done",
+        { toolCalls: [{ id: "c2", name: "fs_write", input: { path: "/sdcard/Download/a.txt", content: "y" } }] },
+        "done",
+      ],
+    });
+    const agent = new Agent({ provider, registry, permissions: gate, store });
+
+    const first = await run(agent, "write it");
+    expect(approval).toHaveBeenCalledOnce();
+
+    // Same conversation id, so the gate is seeded from the stored allowlist.
+    await run(agent, "write it again", { conversationId: first.conversationId });
+    expect(approval).toHaveBeenCalledOnce();
+  });
+
   it("returns a plain answer without touching tools", async () => {
     const { agent } = buildAgent({ turns: ["Hello there."] });
     const result = await run(agent, "hi");

@@ -30,6 +30,7 @@ import {
 } from "./services/permissions";
 import { openAllFilesSettings } from "./services/settings-launcher";
 import { APP_PACKAGE } from "./services/app-info";
+import { describeWorkspace, workspacePath } from "./workspace";
 
 export interface RuntimeDeps {
   config: unknown;
@@ -46,6 +47,13 @@ export interface RuntimeDeps {
    */
   fetchImpl?: typeof globalThis.fetch;
   approvals?: ApprovalBroker;
+  /**
+   * App-owned directory that holds every conversation's workspace.
+   *
+   * Required rather than defaulted: guessing it would silently scatter workspaces
+   * somewhere unintended. The bootstrap passes the platform's documents directory.
+   */
+  workspaceBaseDir: string;
   /** Extra lines appended to the system prompt (device facts, roots, date). */
   environment?: () => string | Promise<string>;
   /** Persist config changes made through the UI. */
@@ -238,6 +246,21 @@ export class MobileClawRuntime {
     return openAllFilesSettings(APP_PACKAGE);
   }
 
+  /**
+   * This conversation's own output directory, creating it on first use.
+   *
+   * Rooted in the app's documents directory: it needs no permission, survives a
+   * restart, and is trivially removable. See runtime/workspace.ts for why the
+   * workspace bounds where new files go rather than what may be read.
+   */
+  private workspaceFor(conversationId: string): string {
+    const path = workspacePath(this.deps.workspaceBaseDir, conversationId);
+    // Best-effort: the driver skips creation when the directory already exists, and a
+    // failure here surfaces later as a normal tool error rather than crashing a run.
+    void this.deps.fs.mkdir(path).catch(() => undefined);
+    return path;
+  }
+
   /** Write a probe value, read it back, then restore the real key untouched. */
   private async probeSecretStore(): Promise<{ ok: boolean; detail: string }> {
     const probeKey = "diagnostics.probe";
@@ -351,6 +374,7 @@ export class MobileClawRuntime {
         ...(options.conversationId ? { conversationId: options.conversationId } : {}),
         signal: controller.signal,
         ...(options.onConversation ? { onConversation: options.onConversation } : {}),
+        assignWorkspace: (conversationId) => this.workspaceFor(conversationId),
         onEvent: (event) => queue.push(event),
       })
       .then((value) => {

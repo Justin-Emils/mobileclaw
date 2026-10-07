@@ -66,6 +66,14 @@ export interface AgentRunInput {
   signal?: AbortSignal;
   /** Called with the conversation after every mutation, for persistence/UI. */
   onConversation?: (conversation: Conversation) => void;
+  /**
+   * Supply the conversation's own output directory when it does not have one yet.
+   *
+   * A callback rather than a value because the path depends on the conversation id,
+   * which only exists once the store has created the conversation. The app owns the
+   * platform's storage layout, so it chooses the path; core only records it.
+   */
+  assignWorkspace?: (conversationId: string) => string;
   /** Per-run event observer; overrides the agent-level one for this run. */
   onEvent?: (event: AgentEvent) => void;
 }
@@ -107,6 +115,19 @@ export class Agent {
       ? (await this.store.load(input.conversationId)) ??
         (await this.store.create({ id: input.conversationId }))
       : await this.store.create({ title: titleFrom(input.input) });
+
+    // Approvals are per conversation: restore the ones this conversation already
+    // earned. Without this, reopening a conversation would ask again for a tool the
+    // user had already permanently allowed in it.
+    this.options.permissions.seedConversation(conversation.id, conversation.allowlist);
+
+    // Give the conversation its own output directory on first use. The app supplies
+    // the path (it knows the platform's storage layout) and the result is stored on
+    // the conversation, so it stays stable across restarts.
+    if (!conversation.workspace && input.assignWorkspace) {
+      const assigned = input.assignWorkspace(conversation.id);
+      if (assigned) conversation.workspace = assigned;
+    }
 
     const persist = async (): Promise<void> => {
       await this.store.save(conversation);
@@ -363,8 +384,7 @@ export class Agent {
       ...(definition ? { definition } : {}),
     });
 
-    if (!decision.allowed) {
-      const durationMs = Date.now() - started;
+    if (!decision.allowed) {      const durationMs = Date.now() - started;
       emit({ type: "denied", name: call.name, reason: decision.reason });
       emit({
         type: "tool_end",
@@ -397,10 +417,22 @@ export class Agent {
       };
     }
 
+    if (decision.allowed && decision.remember) {
+      // "Always allow" is remembered on the conversation, not on the process, so it
+      // does not leak into unrelated chats. Persisted here because `persist()` is
+      // what writes the conversation back to the store.
+      const allowlist = new Set(conversation.allowlist ?? []);
+      allowlist.add(call.name);
+      conversation.allowlist = [...allowlist];
+    }
+
     const outcome = await this.options.registry.execute(call.name, call.input, {
       signal: signal ?? new AbortController().signal,
       callId: call.id,
       conversationId: conversation.id,
+      // Carried through so tools can default their output to this conversation's own
+      // directory instead of inventing one inside the folder they were pointed at.
+      ...(conversation.workspace ? { workspace: conversation.workspace } : {}),
     });
     const durationMs = Date.now() - started;
 

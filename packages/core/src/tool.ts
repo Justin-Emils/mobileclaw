@@ -40,6 +40,14 @@ export interface ToolCallContext {
   callId: string;
   /** Conversation the call belongs to, when driven by an agent loop. */
   conversationId?: string;
+  /**
+   * Directory this conversation owns, for files the agent produces.
+   *
+   * Supplied by the app (see apps/mobile/src/runtime/workspace.ts). Tools use it as
+   * the default destination rather than inventing an output folder inside whatever
+   * directory they were pointed at; it is not an access boundary.
+   */
+  workspace?: string;
 }
 
 export type AnyToolDefinition = ToolDefinition<z.ZodTypeAny, z.ZodTypeAny>;

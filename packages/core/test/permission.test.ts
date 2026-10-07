@@ -39,8 +39,70 @@ describe("PermissionGate", () => {
     expect(approve).toHaveBeenCalledOnce();
   });
 
-  it("surfaces a decline without throwing from authorize", async () => {
-    const gate = new PermissionGate({ defaultMode: "ask" }, async () => ({ approved: false }));
+  it("remembers an approval only for the conversation it was granted in", async () => {
+    // This was the bug: "always allow" in one chat authorised the same tool in every
+    // other chat, so an approval given while organising one folder silently applied
+    // to unrelated work.
+    const approve = vi.fn().mockResolvedValue({ approved: true, remember: true });
+    const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+
+    const inChatOne = await gate.authorize(
+      request({ tool: "fs_write", risk: "write", conversationId: "c1" }),
+    );
+    expect(inChatOne.allowed).toBe(true);
+    expect(inChatOne.remember).toBe(true);
+    expect(approve).toHaveBeenCalledOnce();
+
+    // Same conversation: already allowed, no second prompt.
+    const again = await gate.authorize(request({ tool: "fs_write", risk: "write", conversationId: "c1" }));
+    expect(again.allowed).toBe(true);
+    expect(approve).toHaveBeenCalledOnce();
+
+    // Different conversation: must ask again.
+    const elsewhere = await gate.authorize(
+      request({ tool: "fs_write", risk: "write", conversationId: "c2" }),
+    );
+    expect(elsewhere.allowed).toBe(true);
+    expect(approve).toHaveBeenCalledTimes(2);
+  });
+
+  it("seeds a conversation's approvals from its stored allowlist", async () => {
+    const approve = vi.fn().mockResolvedValue({ approved: false });
+    const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+    gate.seedConversation("c1", ["fs_write"]);
+
+    // Restored from storage, so reopening a conversation does not re-ask.
+    const decision = await gate.authorize(request({ tool: "fs_write", risk: "write", conversationId: "c1" }));
+    expect(decision.allowed).toBe(true);
+    expect(decision.reason).toContain("this conversation");
+    expect(approve).not.toHaveBeenCalled();
+
+    // A conversation without the entry still asks.
+    await gate.authorize(request({ tool: "fs_write", risk: "write", conversationId: "c2" }));
+    expect(approve).toHaveBeenCalledOnce();
+  });
+
+  it("keeps global config approvals separate from conversation approvals", async () => {
+    const gate = new PermissionGate({ defaultMode: "ask", allowlist: ["fs_read"] });
+    // From the settings screen, so it applies everywhere.
+    expect(gate.evaluate(request({ tool: "fs_read", conversationId: "c1" })).allowed).toBe(true);
+    expect(gate.evaluate(request({ tool: "fs_read", conversationId: "c2" })).allowed).toBe(true);
+    expect(gate.evaluate(request({ tool: "fs_read" })).allowed).toBe(true);
+
+    gate.allowForSession("fs_write", "c1");
+    expect(gate.sessionAllows("c1")).toContain("fs_write");
+    expect(gate.sessionAllows("c2")).not.toContain("fs_write");
+  });
+
+  it("forgets a conversation's approvals when it is dropped", async () => {
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.seedConversation("c1", ["fs_write"]);
+    expect(gate.evaluate(request({ tool: "fs_write", conversationId: "c1" })).allowed).toBe(true);
+    gate.forgetConversation("c1");
+    expect(gate.evaluate(request({ tool: "fs_write", conversationId: "c1" })).allowed).toBe(false);
+  });
+
+  it("surfaces a decline without throwing from authorize", async () => {    const gate = new PermissionGate({ defaultMode: "ask" }, async () => ({ approved: false }));
     const decision = await gate.authorize(request({ tool: "fs_organize", risk: "write" }));
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toMatch(/user declined/);

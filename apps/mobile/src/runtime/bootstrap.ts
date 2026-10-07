@@ -17,6 +17,7 @@ import { MemoryShellService } from "./services/memory-shell";
 import {
   createExpoFileSystem,
   defaultAppRoots,
+  uriToPath,
   type ExpoFsLike,
 } from "./services/expo-file-system";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
@@ -80,6 +81,8 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     http,
     system,
     environment: () => describeEnvironment(roots, fs),
+    // App-owned storage: no permission needed, survives updates, easy to inspect.
+    workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),
     onConfigChange: async (next) => {
       await kv.set(CONFIG_KEY, JSON.stringify(next));
     },

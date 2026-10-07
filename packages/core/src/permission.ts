@@ -47,6 +47,7 @@ export interface PermissionDecision {
   reason: string;
   /** True when the decision came from a human approval callback. */
   approved?: boolean;
+  /** True when the user asked to stop being asked about this tool. */
   remember?: boolean;
 }
 
@@ -89,9 +90,23 @@ export const permissionConfigSchema = z.object({
  *
  * `evaluate` never blocks; `authorize` may, by calling the host's approval
  * callback (in the app: a modal; in tests: a stub).
+ *
+ * ## Scope of "always allow"
+ *
+ * Approvals are **per conversation**. `sessionAllowlist` is the fallback for calls
+ * that name no conversation (a one-off script, a test); anything carrying a
+ * `conversationId` is matched only against that conversation's own list.
+ *
+ * This used to be a single set, so "always allow" in one chat silently authorised
+ * the same tool in every other chat — including ones about unrelated folders. The
+ * caller owns persistence: when `authorize` reports `remember: true`, the agent
+ * appends the tool to the conversation's `allowlist` and saves it, then seeds the
+ * gate from that list on the next run via `seedConversation`.
  */
 export class PermissionGate {
-  private readonly sessionAllowlist = new Set<string>();
+  private readonly defaultAllowlist = new Set<string>();
+  /** conversationId -> tool names the user permanently allowed in it. */
+  private readonly conversationAllowlists = new Map<string, Set<string>>();
   private current: PermissionConfig;
 
   constructor(
@@ -99,7 +114,7 @@ export class PermissionGate {
     private readonly approval?: ApprovalHandler,
   ) {
     this.current = config;
-    for (const tool of config.allowlist ?? []) this.sessionAllowlist.add(tool);
+    for (const tool of config.allowlist ?? []) this.defaultAllowlist.add(tool);
   }
 
   get config(): PermissionConfig {
@@ -108,25 +123,61 @@ export class PermissionGate {
 
   update(config: Partial<PermissionConfig>): void {
     this.current = { ...this.current, ...config };
-    for (const tool of config.allowlist ?? []) this.sessionAllowlist.add(tool);
+    // Config edits are global (they come from the settings screen), so they land in
+    // the default list rather than in whichever conversation happens to be open.
+    for (const tool of config.allowlist ?? []) this.defaultAllowlist.add(tool);
   }
 
-  allowForSession(tool: string): void {
-    this.sessionAllowlist.add(tool);
+  /** Restore the tools permanently allowed in a stored conversation. */
+  seedConversation(conversationId: string, tools: string[] | undefined): void {
+    const set = this.conversationAllowlists.get(conversationId) ?? new Set<string>();
+    for (const tool of tools ?? []) set.add(tool);
+    this.conversationAllowlists.set(conversationId, set);
   }
 
-  revoke(tool: string): void {
-    this.sessionAllowlist.delete(tool);
+  /** Drop a conversation's approvals, e.g. when it is deleted. */
+  forgetConversation(conversationId: string): void {
+    this.conversationAllowlists.delete(conversationId);
   }
 
-  sessionAllows(): string[] {
-    return [...this.sessionAllowlist];
+  allowForSession(tool: string, conversationId?: string): void {
+    if (!conversationId) {
+      this.defaultAllowlist.add(tool);
+      return;
+    }
+    const set = this.conversationAllowlists.get(conversationId) ?? new Set<string>();
+    set.add(tool);
+    this.conversationAllowlists.set(conversationId, set);
+  }
+
+  revoke(tool: string, conversationId?: string): void {
+    if (!conversationId) {
+      this.defaultAllowlist.delete(tool);
+      return;
+    }
+    this.conversationAllowlists.get(conversationId)?.delete(tool);
+  }
+
+  /** Tool names allowed in a given conversation, defaults included. */
+  sessionAllows(conversationId?: string): string[] {
+    if (!conversationId) return [...this.defaultAllowlist];
+    const scoped = this.conversationAllowlists.get(conversationId);
+    return [...new Set([...this.defaultAllowlist, ...(scoped ?? [])])];
+  }
+
+  private isAllowed(tool: string, conversationId?: string): boolean {
+    if (this.defaultAllowlist.has(tool)) return true;
+    if (!conversationId) return false;
+    return this.conversationAllowlists.get(conversationId)?.has(tool) ?? false;
   }
 
   /** Pure verdict; no user interaction. */
   evaluate(request: PermissionRequest): PermissionDecision {
-    if (this.sessionAllowlist.has(request.tool)) {
-      return { allowed: true, reason: "allowlisted for this session" };
+    if (this.isAllowed(request.tool, request.conversationId)) {
+      return {
+        allowed: true,
+        reason: request.conversationId ? "allowlisted for this conversation" : "allowlisted",
+      };
     }
 
     for (const rule of this.config.rules ?? []) {
@@ -181,12 +232,14 @@ export class PermissionGate {
     if (!approved) {
       return { allowed: false, reason: `user declined "${request.tool}"`, approved: false };
     }
-    if (remember) this.sessionAllowlist.add(request.tool);
+    // Recorded in this conversation only; the caller persists it onto the
+    // conversation so the next run can seed the gate from there.
+    if (remember) this.allowForSession(request.tool, request.conversationId);
     return {
       allowed: true,
       reason: `user approved "${request.tool}"`,
       approved: true,
-      remember,
+      ...(remember ? { remember: true } : {}),
     };
   }
 }

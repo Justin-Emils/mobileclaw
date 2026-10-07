@@ -262,6 +262,14 @@ export interface Conversation {
   entries: TranscriptEntry[];
   /** Tool names the user permanently allowed for this conversation. */
   allowlist?: string[];
+  /**
+   * Directory this conversation owns for files the agent produces.
+   *
+   * Stored rather than derived on every run so it survives a restart and stays
+   * stable even if the naming scheme changes later. Assigned by the app on the
+   * conversation's first run (see apps/mobile/src/runtime/workspace.ts).
+   */
+  workspace?: string;
 }
 
 export interface ConversationStore {

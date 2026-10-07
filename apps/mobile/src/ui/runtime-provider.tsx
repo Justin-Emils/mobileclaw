@@ -151,6 +151,8 @@ async function createOfflineRuntime(reason: string): Promise<MobileClawRuntime> 
     http: new ExpoHttpService(),
     system: new ExpoSystemService({ async openUrl() {} }),
     approvals: new ApprovalBroker(),
+    // The demo filesystem is rooted at `demoRoot`, so keep workspaces inside it.
+    workspaceBaseDir: demoRoot,
     // A transport that always answers with the same scripted turn: the demo has
     // no API key, so the runtime would otherwise fail before streaming anything.
     fetchImpl: demoFetch,

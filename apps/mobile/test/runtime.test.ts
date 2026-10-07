@@ -353,6 +353,7 @@ describe("MobileClawRuntime", () => {
       secrets,
       kv,
       fs,
+      workspaceBaseDir: "/demo/.workspaces",
       shell: new MemoryShellService({ available: false, reason: "none" }),
       http: new ExpoHttpService(),
       system: new ExpoSystemService({ async openUrl() {} }),
