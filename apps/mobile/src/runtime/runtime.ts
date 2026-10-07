@@ -23,7 +23,7 @@ import { capabilityPlugins, type CapabilityDeps } from "@mobileclaw/capabilities
 import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
-import { API_KEY_SECRET, type SecretStore } from "./services/secrets";
+import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./services/secrets";
 import {
   probeAllFilesAccess,
   type AllFilesAccessReport,
@@ -217,6 +217,8 @@ export class MobileClawRuntime {
     apiKeyPresent: boolean;
     apiKeyLength: number;
     secretStore: { ok: boolean; detail: string };
+    /** Which backend holds the API key, and whether it is encrypted. */
+    secretBackend: SecretStorageStatus;
     provider: { id: string; label: string; model: string; baseUrl: string };
     roots: string[];
     tools: number;
@@ -231,6 +233,11 @@ export class MobileClawRuntime {
       apiKeyPresent: this.apiKey !== "",
       apiKeyLength: this.apiKey.length,
       secretStore,
+      secretBackend: this.deps.secrets.status?.() ?? {
+        backend: "keychain" as const,
+        encrypted: true,
+        detail: "此实现未报告后端",
+      },
       provider: {
         ...this.providerInfo(),
         baseUrl: this.config.provider.baseUrl,

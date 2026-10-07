@@ -10,7 +10,7 @@ import * as Notifications from "expo-notifications";
 import { Share } from "react-native";
 import { AdapterKeyValueStore } from "./services/storage";
 import { SqliteKvAdapter } from "./services/sqlite-kv";
-import { ExpoSecretStore, API_KEY_SECRET } from "./services/secrets";
+import { createSecretStore, API_KEY_SECRET } from "./services/secrets";
 import { ExpoHttpService } from "./services/expo-http";
 import { ExpoSystemService, type ExpoSystemPorts } from "./services/expo-system";
 import { MemoryShellService } from "./services/memory-shell";
@@ -88,7 +88,9 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // --- persistence ---------------------------------------------------------
   const db = await openDatabaseAsync("mobileclaw.db");
   const kv = new AdapterKeyValueStore(new SqliteKvAdapter(db));
-  const secrets = new ExpoSecretStore(SecureStore);
+  // Probing here means the backend is known before the key is first read, and a device
+  // with a broken Keystore degrades to the app's own storage instead of being unusable.
+  const secrets = await createSecretStore(SecureStore, new AdapterKeyValueStore(new SqliteKvAdapter(db, "secret_fallback")));
 
   const storedConfig = await kv.get(CONFIG_KEY);
   let parsedConfig: unknown = DEFAULT_CONFIG;

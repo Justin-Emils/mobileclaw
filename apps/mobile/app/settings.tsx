@@ -263,6 +263,20 @@ export default function SettingsScreen() {
               ok={diag.apiKeyPresent}
             />
             <DiagRow label={strings.settings.diagSecretStore} value={diag.secretStore.detail} ok={diag.secretStore.ok} />
+            {/* An unencrypted fallback is a security downgrade, so it is stated plainly
+                rather than hidden behind a green tick. */}
+            <DiagRow
+              label={strings.settings.diagSecretBackend}
+              value={
+                diag.secretBackend.encrypted
+                  ? strings.settings.secretEncrypted
+                  : strings.settings.secretUnencrypted
+              }
+              ok={diag.secretBackend.encrypted}
+            />
+            {diag.secretBackend.encrypted ? null : (
+              <Text style={styles.warning}>{strings.settings.secretUnencryptedWarning}</Text>
+            )}
             <DiagRow label={strings.settings.diagProvider} value={`${diag.provider.label} · ${diag.provider.model}`} ok />
             <DiagRow label={strings.settings.diagBaseUrl} value={diag.provider.baseUrl} ok />
             <DiagRow label={strings.settings.diagTools} value={strings.settings.diagToolsValue(diag.tools)} ok={diag.tools > 0} />
@@ -464,6 +478,7 @@ const styles = StyleSheet.create({
   },
   buttonGhostText: { color: theme.colors.text, fontWeight: "600", fontSize: 13 },
   hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
+  warning: { color: theme.colors.warning, fontSize: 12, lineHeight: 18, marginTop: theme.space(1) },
   strong: { color: theme.colors.text, fontWeight: "600" },
   statusBox: {
     borderRadius: theme.radius.md,

@@ -123,6 +123,12 @@ export const strings = {
     diagApiKeyPresent: (chars: number) => `已配置（${chars} 字符）`,
     diagApiKeyMissing: "缺失",
     diagSecretStore: "密钥存储",
+    /** 密钥后端未加密时的警示：这是安全降级，必须让用户知道。 */
+    diagSecretBackend: "密钥保存方式",
+    secretEncrypted: "系统加密存储（Android Keystore）",
+    secretUnencrypted: "应用私有存储（未加密）",
+    secretUnencryptedWarning:
+      "这台设备的系统加密存储不可用，密钥已改存在应用私有目录里。应用沙箱仍然保护它，但不再有硬件加密：root 过的设备可以读取，卸载应用会一并删除。如果你在意，可以清除密钥并改用不支持密钥的功能。",
     diagProvider: "服务商",
     diagBaseUrl: "接口地址",
     diagTools: "工具",
