@@ -129,13 +129,50 @@ export class MobileClawRuntime {
     return this.getConfig();
   }
 
-  async setApiKey(key: string): Promise<void> {
-    this.apiKey = key.trim();
-    if (this.apiKey === "") await this.deps.secrets.delete(API_KEY_SECRET);
-    else await this.deps.secrets.set(API_KEY_SECRET, this.apiKey);
+  /**
+   * Persist the key, then read it back and adopt whatever storage actually holds.
+   *
+   * The read-back is the point. Trusting the in-memory value after a successful
+   * `set` hides a store that accepts writes but loses them, which then shows up
+   * far away as "no API key configured" during a chat turn. Adopting the read-back
+   * value means the runtime can only ever be as configured as the device really is.
+   */
+  async setApiKey(key: string): Promise<{ stored: boolean; detail: string }> {
+    const trimmed = key.trim();
+    if (trimmed === "") {
+      await this.deps.secrets.delete(API_KEY_SECRET);
+    } else {
+      await this.deps.secrets.set(API_KEY_SECRET, trimmed);
+    }
+
+    const readBack = await this.deps.secrets.get(API_KEY_SECRET);
+    this.apiKey = readBack ?? "";
     this.provider = this.createProvider();
     this.agent = this.createAgent();
     await this.publishState();
+
+    if (trimmed === "") {
+      return { stored: true, detail: "key cleared" };
+    }
+    if (this.apiKey === "") {
+      return {
+        stored: false,
+        detail: "the secret store accepted the key but returned nothing on read-back",
+      };
+    }
+    if (this.apiKey !== trimmed) {
+      return { stored: false, detail: "the secret store returned a different value on read-back" };
+    }
+    return { stored: true, detail: `stored (${this.apiKey.length} chars)` };
+  }
+
+  /** Re-read the key from storage; used by the self-check and after resume. */
+  async reloadApiKey(): Promise<boolean> {
+    const stored = (await this.deps.secrets.get(API_KEY_SECRET)) ?? "";
+    this.apiKey = stored;
+    this.provider = this.createProvider();
+    this.agent = this.createAgent();
+    return stored !== "";
   }
 
   hasApiKey(): boolean {
@@ -188,7 +225,19 @@ export class MobileClawRuntime {
           detail: `wrote a value but read back ${readBack === undefined ? "nothing" : "a different value"}`,
         };
       }
-      return { ok: true, detail: "write/read/delete round trip succeeded" };
+      // Also report what the *real* key looks like in storage, which is the value
+      // a cold start would load — not just what this session happens to hold.
+      const persistedKey = (await this.deps.secrets.get(API_KEY_SECRET)) ?? "";
+      if (this.apiKey !== "" && persistedKey === "") {
+        return {
+          ok: false,
+          detail: "the round trip works, but the saved API key is not in storage (it would be lost on restart)",
+        };
+      }
+      return {
+        ok: true,
+        detail: `write/read/delete round trip succeeded; API key in storage: ${persistedKey ? `${persistedKey.length} chars` : "none"}`,
+      };
     } catch (error) {
       return {
         ok: false,

@@ -45,23 +45,22 @@ export default function SettingsScreen() {
     }
     setBusy(true);
     try {
-      await runtime.setApiKey(apiKey);
-      const stored = runtime.hasApiKey();
-      setKeyLoaded(stored);
-      setApiKey("");
-      // Re-run the self check so the panel reflects the new state immediately.
-      setDiag(await runtime.diagnostics());
+      // setApiKey re-reads the value from storage and reports what it found, so a
+      // store that accepts writes but loses them is caught here rather than as a
+      // mystery "no API key" during a later chat turn.
+      const outcome = await runtime.setApiKey(apiKey);
+      setKeyLoaded(runtime.hasApiKey());
+      if (outcome.stored) setApiKey("");
+      const diag = await runtime.diagnostics();
+      setDiag(diag);
       Alert.alert(
-        stored ? "Key saved" : "Key NOT saved",
-        stored
-          ? "Stored in SecureStore. You can send a message now."
-          : "The key did not reach the runtime. Open the self-check above for details.",
+        outcome.stored ? "Key saved" : "Key NOT saved",
+        outcome.stored
+          ? `${outcome.detail}. You can send a message now.`
+          : `${outcome.detail}. See the self-check below.`,
       );
     } catch (error) {
-      Alert.alert(
-        "Could not save the key",
-        error instanceof Error ? error.message : String(error),
-      );
+      Alert.alert("Could not save the key", error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }

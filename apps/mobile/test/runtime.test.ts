@@ -501,6 +501,42 @@ describe("MobileClawRuntime", () => {
     expect(diag.apiKeyLength).toBe(0);
   });
 
+  it("verifies the key by reading it back, and notices when it does not persist", async () => {
+    const { runtime, secrets } = buildRuntime();
+    await runtime.start();
+
+    const ok = await runtime.setApiKey("sk-fresh");
+    expect(ok.stored).toBe(true);
+    expect(ok.detail).toContain("stored");
+    expect(runtime.hasApiKey()).toBe(true);
+
+    // A store that accepts writes but loses them must be reported at save time.
+    const originalSet = secrets.set.bind(secrets);
+    secrets.set = async (key: string, value: string) => {
+      if (key === "provider.apiKey") return; // the write vanishes
+      await originalSet(key, value);
+    };
+    const lost = await runtime.setApiKey("sk-vanishing");
+    expect(lost.stored).toBe(false);
+    // Storage still holds the previous key, so the runtime adopts that rather
+    // than the value the user just typed. A failed save must not leave the app
+    // claiming to use a key it never stored.
+    expect(lost.detail).toMatch(/returned a different value on read-back/);
+    expect(await secrets.get("provider.apiKey")).toBe("sk-fresh");
+    expect(runtime.hasApiKey()).toBe(true);
+  });
+
+  it("reloadApiKey picks up a key written outside the runtime", async () => {
+    const { runtime, secrets } = buildRuntime();
+    await runtime.start();
+    await runtime.setApiKey("");
+
+    await secrets.set("provider.apiKey", "sk-external");
+    expect(runtime.hasApiKey()).toBe(false);
+    expect(await runtime.reloadApiKey()).toBe(true);
+    expect(runtime.hasApiKey()).toBe(true);
+  });
+
   it("stops an in-flight run", async () => {
     const { runtime } = buildRuntime();
     await runtime.start();
