@@ -1,0 +1,35 @@
+// Gradle init script: pin CMake for every Android library project.
+//
+// Why
+// ---
+// The SDK's default CMake is 3.22.1, whose Ninja generator emits a self-regeneration
+// rule with no declared inputs and `restat = 1`:
+//
+//     build CMakeFiles/rebuild_cache.util: CUSTOM_COMMAND
+//       COMMAND = ... cmake.exe --regenerate-during-build ...
+//       restat = 1
+//
+// ninja therefore considers build.ninja permanently stale, re-runs CMake, sees the
+// file change and restarts, until it aborts with
+// "ninja: error: manifest 'build.ninja' still dirty after 100 tries". That failed
+// react-native-screens and react-native-worklets, and with them every local build.
+//
+// CMake 3.30.5 (installed via sdkmanager) does not have this behaviour. Pinning the
+// version is set through `CmakeOptions.version`, which is the one injection point AGP
+// still exposes — `arguments` was removed in AGP 9 (verified by dumping the object).
+//
+// Usage:
+//   gradle assembleDebug -I eng/pin-cmake-version.init.gradle
+
+def targetCmakeVersion = System.getenv("MOBILECLAW_CMAKE_VERSION") ?: "3.30.5"
+
+allprojects { project ->
+    project.plugins.withId("com.android.library") {
+        try {
+            project.android.externalNativeBuild.cmake.version = targetCmakeVersion
+            project.logger.lifecycle("[cmake] ${project.name} -> ${targetCmakeVersion}")
+        } catch (Exception e) {
+            project.logger.warn("[cmake] could not set version for ${project.name}: ${e.message}")
+        }
+    }
+}

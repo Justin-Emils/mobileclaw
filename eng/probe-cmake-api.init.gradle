@@ -1,0 +1,47 @@
+// Diagnostic init script: print the real CmakeOptions API and AGP version.
+//
+// Two attempts to inject -DCMAKE_SUPPRESS_REGENERATION=ON failed with
+// "Could not find method arguments()" and then "Could not get unknown property
+// 'arguments'", so the property has been renamed in this AGP. Rather than guess a
+// third time, this prints what the object actually offers.
+//
+// Usage: gradle <task> -I eng/probe-cmake-api.init.gradle
+
+allprojects { project ->
+    project.plugins.withId("com.android.library") {
+        project.afterEvaluate {
+            try {
+                def cmake = project.android.externalNativeBuild.cmake
+                println "[probe] project=${project.name}"
+                println "[probe] cmake class=${cmake.getClass().name}"
+                println "[probe] cmake metaClass properties:"
+                cmake.metaClass.properties.each { p ->
+                    if (p.name != "class" && p.name != "metaClass") {
+                        println "[probe]    - ${p.name} (${p.type?.name})"
+                    }
+                }
+                println "[probe] cmake declared methods:"
+                cmake.getClass().getMethods().findAll { m ->
+                    m.declaringClass.name.contains("Cmake")
+                }.each { m -> println "[probe]    - ${m.name}(${m.parameterTypes*.simpleName.join(', ')})" }
+
+                def android = project.android
+                println "[probe] android class=${android.getClass().name}"
+                println "[probe] externalNativeBuild class=${android.externalNativeBuild.getClass().name}"
+            } catch (Exception e) {
+                println "[probe] FAILED for ${project.name}: ${e.message}"
+            }
+        }
+    }
+}
+
+gradle.projectsEvaluated {
+    def agp = null
+    try {
+        agp = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+    } catch (Throwable ignored) {
+        agp = "unknown (com.android.Version not on classpath)"
+    }
+    println "[probe] AGP version = ${agp}"
+    println "[probe] Gradle version = ${gradle.gradleVersion}"
+}

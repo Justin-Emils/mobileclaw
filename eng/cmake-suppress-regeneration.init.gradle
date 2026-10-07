@@ -1,0 +1,42 @@
+// Gradle init script: inject CMake arguments into every Android library project.
+//
+// Why this exists
+// ---------------
+// CMake 3.22 (the version bundled with the Android SDK) emits a regeneration rule
+// into build.ninja with `restat = 1`:
+//
+//     build CMakeFiles/rebuild_cache.util: CUSTOM_COMMAND
+//       COMMAND = ... cmake.exe --regenerate-during-build ...
+//       restat = 1
+//
+// The rule declares no inputs, so ninja always considers build.ninja stale, re-runs
+// CMake, sees build.ninja change, and restarts. It gives up with:
+//
+//     ninja: error: manifest 'build.ninja' still dirty after 100 tries
+//
+// which failed react-native-screens and react-native-worklets on every local build.
+// CMAKE_SUPPRESS_REGENERATION=ON stops CMake from emitting that rule at all.
+//
+// An init script is used rather than a change in app/build.gradle because the
+// React Native Gradle plugin configures externalNativeBuild in its own
+// afterEvaluate; setting the arguments earlier is what makes them stick (a
+// CMakeCache check confirmed the earlier attempt never reached CMake).
+//
+// Usage:
+//   gradle assembleDebug -I <repo>/eng/cmake-suppress-regeneration.init.gradle
+
+allprojects { project ->
+    project.plugins.withId("com.android.library") {
+        try {
+            // AGP 8+: `arguments` is a List property, not a closure method.
+            def cmake = project.android.externalNativeBuild.cmake
+            def current = cmake.arguments ?: []
+            if (!current.contains("-DCMAKE_SUPPRESS_REGENERATION=ON")) {
+                cmake.arguments = current + ["-DCMAKE_SUPPRESS_REGENERATION=ON"]
+            }
+            project.logger.lifecycle("[init] CMAKE_SUPPRESS_REGENERATION=ON -> ${project.name} (${cmake.arguments})")
+        } catch (Exception e) {
+            project.logger.warn("[init] could not configure ${project.name}: ${e.message}")
+        }
+    }
+}

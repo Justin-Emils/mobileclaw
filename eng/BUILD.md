@@ -7,6 +7,88 @@ pnpm check      # typecheck + 114 tests + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
 
+## Local Android build (`eng/build-local.ps1`)
+
+This machine already has a complete Android toolchain in `E:\code\Eng`, so a local
+build needs no EAS quota:
+
+| Component | Path | Version |
+| --- | --- | --- |
+| JDK | `E:\code\Eng\.jdk21` | Temurin 21.0.12 (PATH only has Java 8 — `JAVA_HOME` must be set) |
+| Android SDK | `E:\code\Eng\.android-sdk` | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006, cmake 3.22.1 |
+| adb | `.android-sdk\platform-tools\adb.exe` | 1.0.41 |
+| Gradle | `E:\code\Eng\.gradle-home` | 9.3.1, pre-extracted with a warm cache |
+
+```powershell
+.\eng\build-local.ps1 -Variant debug          # fastest, debug-signed
+.\eng\build-local.ps1 -Variant release -GenerateKeystore
+.\eng\build-local.ps1 -Install                # adb install when it succeeds
+```
+
+### Progress: four of five blockers solved
+
+1. **Gradle wrapper tried to download 9.3.1 and timed out.** A complete distribution
+   is already extracted under `.gradle-home\wrapper\dists\...\<hash>\gradle-9.3.1`,
+   but the wrapper hashes its own directory from `gradle-wrapper.properties` and
+   looked in a different (half-downloaded) one. The script now invokes the extracted
+   `bin\gradle.bat` directly.
+2. **`NODE_ENV` was unset**, which the Expo Gradle plugin refuses to build without.
+   The script sets it per variant.
+3. **CMake object paths exceeded its 250-character limit** (252 measured): pnpm's
+   isolated store costs ~93 characters before the package name even starts, so
+   `...\.pnpm\react-native-worklets@0.13._82ad66a5…\node_modules\react-native-worklets\…`
+   plus CMake's own directory overflowed. Mapping the repo to a short drive helps:
+   ```powershell
+   subst S: E:\code\mobileclaw      # 252 -> 229 characters
+   ```
+   Note `node-linker=hoisted` and `virtual-store-dir` are both ignored by pnpm 11,
+   so moving `.npmrc` to the workspace root does not flatten the tree.
+4. **`expo prebuild` must be invoked as `node_modules\.bin\expo.cmd`**; `npx
+   --no-install expo` fails to resolve the binary in this workspace layout.
+
+### Remaining blocker: CMake 3.22's self-regeneration loop
+
+Every local build still fails the two C++ targets with:
+
+```
+> Task :react-native-screens:buildCMakeDebug[arm64-v8a] FAILED
+C/C++: ninja: error: manifest 'build.ninja' still dirty after 100 tries
+```
+
+Root cause, confirmed by reading the generated file:
+
+```ninja
+build CMakeFiles/rebuild_cache.util: CUSTOM_COMMAND
+  COMMAND = cmd.exe /C "cd /D <build dir> && cmake.exe --regenerate-during-build -S<src> -B<build>"
+  restat = 1
+```
+
+The rule declares **no inputs**, so ninja considers `build.ninja` permanently stale;
+it re-runs CMake, CMake rewrites `build.ninja` (verified: the timestamp does advance),
+ninja restarts, and gives up after 100 attempts. It is not a stale file, a stale
+timestamp or a future-dated source — the rule itself can never converge.
+
+`CMAKE_SUPPRESS_REGENERATION=ON` is the documented switch, but it could not be
+injected: AGP 9 removed `arguments` from `CmakeOptions` (verified by dumping the
+object's members — only `path`, `version`, `buildStagingDirectory` remain), so the
+Gradle-property routes and a `subprojects {}` block both fail to reach CMake. Patching
+`build.ninja` to remove that one command was not enough either; a second regeneration
+hook remains.
+
+**The promising fix to try next: use an older CMake.** This `restat = 1`
+regeneration loop is a known CMake 3.22/Ninja interaction that 3.18 and 3.20 do not
+have, and the SDK ships only 3.22.1:
+
+```powershell
+E:\code\Eng\.android-sdk\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.18.1"
+```
+
+Then pin it for all native modules and rebuild. `sdkmanager` needs network, so the
+proxy problem applies (`NO_PROXY=*`).
+
+Until that is resolved, **cloud builds remain the way to produce an APK** — see below.
+Local tooling is otherwise ready, and the JS/TS side of a local build is unaffected.
+
 ## Cloud build (no Android SDK needed)
 
 ```bash
