@@ -198,6 +198,65 @@ describe("Agent", () => {
     expect(assignWorkspace).toHaveBeenCalledOnce();
   });
 
+  it("passes the conversation workspace into the tool call context", async () => {
+    // The workspace is only useful if it reaches the tool, and nothing else asserted
+    // that hop: the earlier test proved it was *stored*, not that a tool ever saw it.
+    const seen: (string | undefined)[] = [];
+    const spyTool = {
+      name: "fs_probe",
+      description: "records the workspace it was given",
+      input: z.object({ path: z.string() }),
+      risk: "read" as const,
+      paths: (input: { path: string }) => [input.path],
+      async execute(_input: unknown, ctx: { workspace?: string }) {
+        seen.push(ctx.workspace);
+        return { ok: true };
+      },
+    };
+
+    const { agent } = buildAgent({
+      turns: [
+        { toolCalls: [{ id: "c1", name: "fs_probe", input: { path: "/sdcard/a.txt" } }] },
+        "done",
+      ],
+      permissions: { defaultMode: "allow" },
+      tools: [spyTool],
+    });
+
+    await run(agent, "probe", { assignWorkspace: (id: string) => `/workspaces/${id}` });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatch(/^\/workspaces\//);
+  });
+
+  it("omits the workspace from the context when a conversation has none", async () => {
+    // Tools must be able to tell "no workspace" from "workspace at an empty string".
+    const seen: (string | undefined)[] = [];
+    const spyTool = {
+      name: "fs_probe",
+      description: "records the workspace it was given",
+      input: z.object({ path: z.string() }),
+      risk: "read" as const,
+      paths: (input: { path: string }) => [input.path],
+      async execute(_input: unknown, ctx: { workspace?: string }) {
+        seen.push(ctx.workspace);
+        return { ok: true };
+      },
+    };
+
+    const { agent } = buildAgent({
+      turns: [
+        { toolCalls: [{ id: "c1", name: "fs_probe", input: { path: "/sdcard/a.txt" } }] },
+        "done",
+      ],
+      permissions: { defaultMode: "allow" },
+      tools: [spyTool],
+    });
+
+    await run(agent, "probe");
+    expect(seen).toEqual([undefined]);
+  });
+
   it("re-uses a stored approval on a later run without asking again", async () => {
     const store = new KeyValueConversationStore(new MemoryKeyValueStore());
     const approval = vi.fn().mockResolvedValue({ approved: true, remember: true });

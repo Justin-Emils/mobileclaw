@@ -363,6 +363,19 @@ describe("MobileClawRuntime", () => {
     return { runtime, files, broker, bodies: transport.bodies, secrets, kv };
   }
 
+  /** Drive one turn to completion and return the conversation id it landed in. */
+  async function runToEnd(
+    runtime: MobileClawRuntime,
+    input: string,
+    conversationId?: string,
+  ): Promise<string> {
+    const stream = runtime.send(input, conversationId ? { conversationId } : {});
+    while (true) {
+      const step = await stream.next();
+      if (step.done) return step.value.conversationId;
+    }
+  }
+
   it("loads every capability plugin with its tools", async () => {
     const { runtime } = buildRuntime();
     await runtime.start();
@@ -372,6 +385,44 @@ describe("MobileClawRuntime", () => {
     expect(tools).toContain("web_fetch");
     expect(tools).toContain("system_open");
     expect(runtime.pluginStatus().every((plugin) => plugin.status === "loaded")).toBe(true);
+  });
+
+  it("reports storage access as unknown when no probe path is allowed at all", async () => {
+    // buildRuntime roots the fake fs at /demo, so every shared-storage probe is
+    // rejected by the path guard. That is a third state on purpose: "cannot even
+    // look" is not the same as "allowed to look and it is empty", and only the latter
+    // means the user must grant all-files access.
+    const harness = buildRuntime();
+    await harness.runtime.start();
+    const report = await harness.runtime.checkStorageAccess();
+    expect(report.status).toBe("unknown");
+    expect(report.detail).toContain("无法探测");
+  });
+
+  it("gives each conversation its own workspace and keeps approvals apart", async () => {
+    // The app's actual wiring: one runtime (and therefore one permission gate) serving
+    // several conversations. This is where a leak or a shared workspace would show up.
+    const harness = buildRuntime({ scripts: [textTurn("ok"), textTurn("ok")] });
+    await harness.runtime.start();
+
+    const first = await runToEnd(harness.runtime, "第一个会话");
+    const second = await runToEnd(harness.runtime, "第二个会话");
+    expect(first).not.toBe(second);
+
+    const one = await harness.runtime.loadConversation(first);
+    const two = await harness.runtime.loadConversation(second);
+    expect(one?.workspace).toBeTruthy();
+    expect(two?.workspace).toBeTruthy();
+    // Different directories, or the "separate workspace" guarantee is empty.
+    expect(one?.workspace).not.toBe(two?.workspace);
+
+    // Approvals granted in one must not be visible to the other. Ask the gate the
+    // same question the agent asks, for both conversations.
+    harness.broker.autoAnswer = () => ({ approved: true, remember: true });
+    const gate = harness.runtime.permissions;
+    await gate.authorize({ tool: "fs_write", risk: "write", input: {}, conversationId: first });
+    expect(gate.evaluate({ tool: "fs_write", risk: "write", input: {}, conversationId: first }).allowed).toBe(true);
+    expect(gate.evaluate({ tool: "fs_write", risk: "write", input: {}, conversationId: second }).allowed).toBe(false);
   });
 
   it("keeps conversations across a restart", async () => {

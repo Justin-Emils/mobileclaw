@@ -70,13 +70,20 @@ export interface RuntimeDeps {
 export class MobileClawRuntime {
   readonly approvals: ApprovalBroker;
   readonly store: ConversationStore;
+  /**
+   * The permission gate, exposed alongside `store` and `approvals`.
+   *
+   * Read-only for callers; tests assert that an approval granted in one conversation
+   * is not visible in another, which is a property of this object rather than of any
+   * single return value.
+   */
+  readonly permissions: PermissionGate;
   readonly registry = new ToolRegistry();
   readonly host: PluginHost;
   readonly ctx: Context;
 
   private config: AppConfig;
   private apiKey = "";
-  private gate: PermissionGate;
   private provider: LlmProvider;
   private agent: Agent;
   private readonly deps: RuntimeDeps;
@@ -91,7 +98,7 @@ export class MobileClawRuntime {
     this.host = new PluginHost(this.ctx, this.registry);
     // Pass the bound handler, not the broker: the gate needs a plain function so
     // it can also be replaced by a headless approver in tests.
-    this.gate = new PermissionGate(this.config.permissions, this.approvals.request);
+    this.permissions = new PermissionGate(this.config.permissions, this.approvals.request);
     this.provider = this.createProvider();
     this.agent = this.createAgent();
   }
@@ -134,7 +141,7 @@ export class MobileClawRuntime {
   async updateConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
     const next = mergeConfig({ ...this.config, ...patch });
     this.config = next;
-    this.gate.update(next.permissions);
+    this.permissions.update(next.permissions);
     // Always rebuild: the provider is a projection of the config, so keeping a
     // stale instance would make providerInfo() disagree with the settings screen.
     this.provider = this.createProvider();
@@ -427,7 +434,7 @@ export class MobileClawRuntime {
     return new Agent({
       provider: this.provider,
       registry: this.registry,
-      permissions: this.gate,
+      permissions: this.permissions,
       store: this.store,
       systemPrompt: this.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
       maxSteps: this.config.provider.maxSteps,
