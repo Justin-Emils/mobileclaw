@@ -103,9 +103,16 @@ if (-not (Test-Path $androidDir)) {
     Write-Host "`n=== expo prebuild ===" -ForegroundColor Cyan
     # Invoke the local CLI directly rather than through `npx --no-install`, which
     # fails to resolve the binary in this pnpm workspace layout.
-    $expoCli = Join-Path $appDir "node_modules\.bin\expo.cmd"
-    if (-not (Test-Path $expoCli)) {
-        throw "expo CLI not found at $expoCli (run `pnpm install` at the repo root)"
+    # The CLI sits next to the app under pnpm's isolated layout, but at the workspace
+    # root once `nodeLinker: hoisted` (pnpm-workspace.yaml) flattens node_modules, so
+    # check both instead of assuming one.
+    $expoCandidates = @(
+        (Join-Path $appDir "node_modules\.bin\expo.cmd"),
+        (Join-Path $repoRoot "node_modules\.bin\expo.cmd")
+    )
+    $expoCli = $expoCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $expoCli) {
+        throw "expo CLI not found (looked in: $($expoCandidates -join '; ')); run `pnpm install` at the repo root"
     }
     Push-Location $appDir
     try {

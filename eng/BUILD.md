@@ -12,8 +12,10 @@ pnpm check      # typecheck + 130 tests + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
 
-> **The repository was moved to `E:\code\mobileclaw` on 2026-10-07** (from
-> `E:\code\mobileclaw`). Commands below assume that path.
+> **The repository lives at `E:\code\mobileclaw`.** On 2026-10-07 it was briefly moved to
+> `E:\mc\mobileclaw` and moved back: the migration was chasing a path-length problem that
+> turned out to be the Android SDK's bundled ninja being too old — see Blocker 2. Commands
+> below assume this path.
 
 ## Local Android build (`eng/build-local.ps1`)
 
@@ -23,17 +25,24 @@ build needs no EAS quota:
 | Component | Path | Version |
 | --- | --- | --- |
 | JDK | `E:\code\Eng\.jdk21` | Temurin 21.0.12 (PATH only has Java 8 — `JAVA_HOME` must be set) |
-| Android SDK | `E:\code\Eng\.android-sdk` | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006, cmake 3.22.1 |
+| Android SDK | `E:\code\Eng\.android-sdk` | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006 |
+| CMake | `.android-sdk\cmake\3.30.5` | 3.30.5, pinned by `eng/pin-cmake-version.init.gradle` (3.22.1 loops — Blocker 1) |
+| ninja | `.android-sdk\cmake\{3.30.5,3.22.1}\bin\ninja.exe` | both swapped to 1.12.1 by hand; each original kept beside it as `ninja-1.10.2.exe.bak` (Blocker 2) |
 | adb | `.android-sdk\platform-tools\adb.exe` | 1.0.41 |
 | Gradle | `E:\code\Eng\.gradle-home` | 9.3.1, pre-extracted with a warm cache |
 
+The machine's execution policy refuses unsigned scripts, and that error does not land in a
+redirected log — it exits silently. Launch it through a Bypass host:
+
 ```powershell
-.\eng\build-local.ps1 -Variant debug          # fastest, debug-signed
-.\eng\build-local.ps1 -Variant release -GenerateKeystore
-.\eng\build-local.ps1 -Install                # adb install when it succeeds
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Variant debug
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Variant release -GenerateKeystore
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Install   # adb install
+
+Unblock-File eng\build-local.ps1     # after that, plain .\eng\build-local.ps1 works too
 ```
 
-### Progress: four of five blockers solved
+### Progress: every blocker solved (2026-10-07)
 
 1. **Gradle wrapper tried to download 9.3.1 and timed out.** A complete distribution
    is already extracted under `.gradle-home\wrapper\dists\...\<hash>\gradle-9.3.1`,
@@ -42,17 +51,22 @@ build needs no EAS quota:
    `bin\gradle.bat` directly.
 2. **`NODE_ENV` was unset**, which the Expo Gradle plugin refuses to build without.
    The script sets it per variant.
-3. **CMake object paths exceeded its 250-character limit** (252 measured): pnpm's
-   isolated store costs ~93 characters before the package name even starts, so
+3. **CMake's 250-character object-path message is a warning, not a failure** (252 measured;
+   the log says `The build may not work correctly`). The isolated store still cost ~93
+   characters before the package name even starts, so it was worth fixing properly:
    `...\.pnpm\react-native-worklets@0.13._82ad66a5…\node_modules\react-native-worklets\…`
    plus CMake's own directory overflowed. Mapping the repo to a short drive helps:
    ```powershell
    subst S: E:\code\mobileclaw      # 252 -> 229 characters
    ```
-   Note `node-linker=hoisted` and `virtual-store-dir` are both ignored by pnpm 11,
-   so moving `.npmrc` to the workspace root does not flatten the tree.
-4. **`expo prebuild` must be invoked as `node_modules\.bin\expo.cmd`**; `npx
-   --no-install expo` fails to resolve the binary in this workspace layout.
+   Note the flat layout is configured by `nodeLinker: hoisted` in `pnpm-workspace.yaml`,
+   **not** by `node-linker=hoisted` in `.npmrc` — pnpm 11 reads layout settings only from
+   the workspace file, so the old `.npmrc` entry was inert and was mistaken for pnpm
+   dropping the setting. `virtualStoreDir` exists too, but it does not move `.cxx`.
+4. **`expo prebuild` must go through a `.cmd` shim, never `npx --no-install expo`** (which
+   cannot resolve the binary in this workspace layout). The shim moved when the layout went
+   flat: with `nodeLinker: hoisted` it is `node_modules\.bin\expo.cmd` at the repository root,
+   not under `apps\mobile`. The script checks both.
 
 ### Blocker 1: CMake 3.22's self-regeneration loop — SOLVED
 
@@ -87,29 +101,38 @@ E:\code\Eng\.android-sdk\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.30.5"
 pinned by `eng/pin-cmake-version.init.gradle` (pass `-I` to Gradle). With this,
 `react-native-screens` and most of `expo-modules-core` compile successfully.
 
-### Blocker 2: ninja's 260-character path limit — NOT solvable here
+### Blocker 2: ninja's 260-character guard — SOLVED (two independent fixes)
 
-With the CMake fix in place, the failure moves to:
+With the CMake fix in place, the failure moved to:
 
 ```
 ninja: error: rebuilding 'build.ninja':
   Stat(.../react-native-workletsConfigVersion.cmake): Filename longer than 260 characters
 ```
 
-Measured, not guessed: the longest generated path is **265 characters**, and the portion
-that is *not* the repository root is **258 characters** on its own. Even with the repo at
-a drive root (`E:\`) the total is 262. pnpm's isolated store alone accounts for ~120 of
-those characters, and pnpm 11 ignores `node-linker=hoisted`, `shamefully-hoist` and
-`virtual-store-dir`.
+That 260 is **ninja's own hard-coded guard, not a Windows limit**, and it only exists in old
+ninja builds. Upstream `src/disk_interface.cc` now writes it as
+`if (!path.empty() && !AreLongPathsEnabled() && path[0] != '\\' && path.size() > MAX_PATH)`,
+where `AreLongPathsEnabled()` probes ntdll's `RtlAreLongPathsEnabled`. This machine already
+has long paths on (registry `LongPathsEnabled=1`, `RtlAreLongPathsEnabled()==1`) — but the
+SDK's CMake 3.30.5 bundles **ninja 1.10.2**, which predates that probe: its binary carries
+the literal error text and no `RtlAreLongPathsEnabled` at all. Two fixes, both applied:
 
-**So local APK builds are impossible on this machine for this project** until either
-ninja gains long-path support, or the dependency tree stops nesting under `.pnpm`.
-Everything short of native compilation does work locally. The full table of attempted
-workarounds and why each failed is in
-[`docs/dev-environment.md`](../docs/dev-environment.md#三路径长度这是硬约束不是洁癖) —
-check there before retrying any of them.
+1. **ninja 1.10.2 -> 1.12.1** at `E:\code\Eng\.android-sdk\cmake\3.30.5\bin\ninja.exe`
+   (the exact path AGP invokes; the original sits beside it as `ninja-1.10.2.exe.bak`).
+   A/B on one `build.ninja` with a 340-character input path: 1.10.2 exits 1 with the error
+   above, 1.12.1 exits 0 and runs the command.
+2. **`nodeLinker: hoisted`** in `pnpm-workspace.yaml`, which deletes the
+   `node_modules/.pnpm/<name>@<version>_<hash>/node_modules/` prefix. Worst measured prefab
+   path: **265 -> 181 characters**, below both ninja's old 260 and CMake's 250 warning line.
+   That also shortens what NDK `clang.exe` and CMake itself must open, and neither of those
+   carries a long-path manifest.
 
-**Therefore: cloud builds remain the way to produce an APK** — see below.
+The earlier "even a drive root leaves 262, so this is impossible" note was based on the
+isolated layout plus the old ninja; it is wrong. Details, measurements and the revert
+commands are in [`docs/dev-environment.md`](../docs/dev-environment.md).
+
+Cloud builds still work and remain a useful fallback — see below.
 
 ## Cloud build (no Android SDK needed)
 

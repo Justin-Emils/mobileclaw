@@ -2,6 +2,23 @@ packages:
   - "packages/*"
   - "apps/*"
 
+# Flat, npm-style node_modules instead of pnpm's isolated store.
+#
+# pnpm 11 reads node_modules-layout settings ONLY from this file: `.npmrc` is now
+# restricted to auth and registry keys, so the `node-linker=hoisted` that used to
+# live there was silently inert. That is a placement change, not a removed feature
+# -- `nodeLinker`, `shamefullyHoist` and `virtualStoreDir` are all still supported,
+# in camelCase, here.
+#
+# Why this repo needs it: the isolated layout nests every package at
+#   node_modules/.pnpm/<name>@<version>_<peerhash>/node_modules/<name>
+# which costs ~80-120 characters before the package name even starts. Android's
+# CMake/prefab output then lands past the 260-character limit that the SDK's
+# bundled ninja hard-codes. The flat layout deletes that prefix: the worst
+# measured path drops from 265 to 185 characters.
+# See docs/dev-environment.md, section 3.
+nodeLinker: hoisted
+
 # pnpm 11 renamed `onlyBuiltDependencies` to this map form. With the old key the
 # setting is silently ignored, and a fresh install then exits 1 with
 # [ERR_PNPM_IGNORED_BUILDS] -- which is what failed the EAS build (the install

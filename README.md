@@ -47,10 +47,11 @@ reported precisely instead of failing mid-conversation.
 | `apps/mobile` | Expo app (SDK 57): runtime wiring, chat UI, approval sheet, settings, permission matrix, EAS config. |
 | `docs/android-capabilities.md` | Hard-won detail on what Android actually allows, and the native-module plan. |
 | `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
-| `docs/dev-environment.md` | **Read this before building anything.** Toolchain paths (`E:\code\Eng`), the Windows 260-character path constraint, and seven environment-specific traps with symptoms and fixes. Shared across projects. |
+| `docs/dev-environment.md` | **Read this before building anything.** Toolchain paths (`E:\code\Eng`), why the SDK's outdated ninja blocked local native builds (and the two fixes), and fourteen environment-specific traps with symptoms and fixes. Shared across projects. |
 
-> **Repository location:** `E:\code\mobileclaw` (moved from `E:\code\mobileclaw` on
-> 2026-10-07). See `docs/dev-environment.md`.
+> **Repository location:** `E:\code\mobileclaw`. (On 2026-10-07 it was briefly moved to
+> `E:\mc\mobileclaw` and moved back — the migration was chasing a path-length problem that
+> turned out to be an outdated bundled ninja.) See `docs/dev-environment.md`.
 
 ## Quick start
 
@@ -66,7 +67,17 @@ checking and unit tests both resolve the `@/*` aliases and `.ts` sources themsel
 catch the two failures that actually block a device build: Metro not reading tsconfig `paths`, and
 `.js` suffixes on extensionless TypeScript imports. Only a real bundle does.
 
-Building an installable APK **in the cloud, with no Android SDK on your machine**:
+Building an installable APK.
+
+**Locally** (uses the `E:\code\Eng` toolchain; see `docs/dev-environment.md`). The machine's
+execution policy refuses unsigned scripts, hence the explicit host:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Variant debug
+# -> artifacts\mobileclaw-local-debug.apk
+```
+
+**In the cloud**, with no Android SDK on your machine:
 
 ```bash
 npx eas-cli login
