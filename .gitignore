@@ -16,3 +16,6 @@ apps/mobile/ios/
 Thumbs.db
 *.log
 coverage/
+
+# Auto-commit job output (see eng/commit.ps1)
+.logs/
