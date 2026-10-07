@@ -1,49 +1,42 @@
 /**
- * Scripted model transport for the in-app self-test.
+ * Scripted model provider for the in-app self-test.
  *
  * Purpose: let the whole agent pipeline run on a device with **no API key, no network and
  * no user input** -- which is what makes it possible to verify the parts that only appear
  * on a real run: the tool registry, the permission gate, the workspace assigned on a
  * conversation's first turn, the transcript entry, and the persistence that follows.
  *
- * It calls a tool rather than answering directly. A canned text reply would stream to the
- * transcript and skip every one of those.
+ * It asks for a tool rather than answering directly. A canned text reply would stream to
+ * the transcript and skip every one of those.
  *
- * Lives here rather than in runtime-provider so `runtime.ts` can use it without importing
- * the provider (which imports the runtime - a cycle).
+ * Why a provider and not a fake `fetch`: an earlier version scripted the HTTP layer, which
+ * needs `response.body.getReader()`. A `ReadableStream` constructed in JS is not bridged to
+ * `response.body` by React Native's global fetch -- the property comes back null and the
+ * provider reports "provider returned an empty response body". Node's fetch does bridge it,
+ * so the unit tests passed while the device failed. The SSE parsing that this gives up is
+ * covered by the provider's own tests; what the self-test is for is the pipeline above it.
  */
 
-/** One SSE chunk in the OpenAI wire format. */
-function sse(payload: unknown): string {
-  return `data: ${JSON.stringify(payload)}\n\n`;
-}
+import type { CompletionRequest, LlmProvider, StreamEvent } from "@mobileclaw/core";
 
-/** First turn: ask for `fs_list` on a path the demo filesystem actually has. */
-function toolCallTurn(path: string): string {
-  return (
-    sse({ choices: [{ delta: { role: "assistant", content: "" } }] }) +
-    sse({
-      choices: [
-        {
-          delta: {
-            tool_calls: [
-              { index: 0, id: "call_selftest", type: "function", function: { name: "fs_list", arguments: "" } },
-            ],
-          },
-        },
-      ],
-    }) +
-    // Arguments arrive fragmented, as a real provider sends them.
-    sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }] }) +
-    sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: JSON.stringify(path) } }] } }] }) +
-    sse({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "}" } }] } }] }) +
-    sse({ choices: [{ delta: {}, finish_reason: "tool_calls" }] }) +
-    "data: [DONE]\n\n"
-  );
+/** First turn: ask for `fs_list` on the given path. */
+function toolCallEvents(path: string): StreamEvent[] {
+  // Every fragment repeats the id, because `StreamEvent` has no index and the agent keys
+  // its accumulator on `event.id`. Fragments sent with an empty id opened a *second* call
+  // whose name was empty, failing with `E_TOOL_NOT_FOUND unknown tool ""` -- visible on a
+  // device, invisible in the unit tests, which is what made this worth spelling out.
+  const id = "call_selftest";
+  return [
+    { type: "tool_call", id, name: "fs_list", inputDelta: "" },
+    { type: "tool_call", id, name: "", inputDelta: '{"path":' },
+    { type: "tool_call", id, name: "", inputDelta: JSON.stringify(path) },
+    { type: "tool_call", id, name: "", inputDelta: "}" },
+    { type: "done", finishReason: "tool_calls" },
+  ];
 }
 
 /** Second turn: answer once the tool result is in the conversation. */
-function answerTurn(): string {
+function answerEvents(): StreamEvent[] {
   const answer = [
     "自检完成：已经真正调用过一次工具。",
     "",
@@ -55,49 +48,51 @@ function answerTurn(): string {
     "",
     "**说明**：这条回答由脚本生成，不是真实模型。它能验证界面、工具链路与持久化，但内容是固定的。",
   ].join("\n");
-  let out = sse({ choices: [{ delta: { role: "assistant", content: "" } }] });
+  const events: StreamEvent[] = [];
   for (const part of answer.match(/[\s\S]{1,20}/g) ?? []) {
-    out += sse({ choices: [{ delta: { content: part } }] });
+    events.push({ type: "text", delta: part });
   }
-  return out + sse({ choices: [{ delta: {}, finish_reason: "stop" }] }) + "data: [DONE]\n\n";
+  events.push({ type: "done", finishReason: "stop" });
+  return events;
 }
 
-export interface SelfTestTransport {
-  fetch: typeof globalThis.fetch;
+export interface SelfTestProvider extends LlmProvider {
   /** True once a request arrived carrying a tool result. */
   sawToolResult: () => boolean;
 }
 
 /**
- * Build a transport that asks for a tool on the first request and answers on the second.
+ * Build the scripted provider.
  *
- * Exposed as a small object so the caller can assert that the tool result actually came
- * back, rather than trusting that the loop completed.
+ * Whether a tool result is present is read from the messages the agent sends, so the second
+ * turn only happens after a real tool result came back. If the tool never ran the flow
+ * stalls exactly as it would with a real model, and the self-test reports that rather than
+ * papering over it.
  */
-export function createSelfTestTransport(path = "/demo/Download"): SelfTestTransport {
+export function createSelfTestProvider(path = "/demo/Download"): SelfTestProvider {
   let toolResultSeen = false;
-  const fetchImpl = (async (_url: string, init?: RequestInit) => {
-    let hasToolResult = false;
-    try {
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-      hasToolResult = Array.isArray(body?.messages)
-        ? body.messages.some((message: { role?: string }) => message.role === "tool")
-        : false;
-    } catch {
-      hasToolResult = false;
-    }
-    if (hasToolResult) toolResultSeen = true;
-    const script = toolResultSeen ? answerTurn() : toolCallTurn(path);
-    const encoder = new TextEncoder();
-    return new Response(
-      new ReadableStream<Uint8Array>({
-        start(controller) {
-          controller.enqueue(encoder.encode(script));
-          controller.close();
-        },
-      }),
-      { status: 200, headers: { "content-type": "text/event-stream" } },
-    );
-  }) as unknown as typeof globalThis.fetch;
-  return { fetch: fetchImpl, sawToolResult: () => toolResultSeen };
+  return {
+    id: "selftest",
+    label: "自检（脚本）",
+    model: "selftest",
+    sawToolResult: () => toolResultSeen,
+    async *stream(request: CompletionRequest): AsyncGenerator<StreamEvent> {
+      const sawTool = request.messages.some((message) => message.role === "tool");
+      if (sawTool) toolResultSeen = true;
+      const events = sawTool ? answerEvents() : toolCallEvents(path);
+      for (const event of events) {
+        yield event;
+      }
+    },
+    async complete(request: CompletionRequest) {
+      let text = "";
+      for await (const event of this.stream(request)) {
+        if (event.type === "text") text += event.delta;
+      }
+      return { message: { role: "assistant" as const, content: text } };
+    },
+    async ping() {
+      return { ok: true, message: "自检提供方（脚本，不联网）" };
+    },
+  };
 }

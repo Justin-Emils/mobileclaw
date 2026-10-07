@@ -95,6 +95,10 @@ describe("runSelfTest", () => {
     // The scripted model asked for fs_list, so the tool really ran.
     expect(result.toolCalls).toContain("fs_list");
     expect(result.detail).toContain("工具结果回到模型: 是");
+    // Exactly one call. Fragmented arguments once opened a second, empty-named call that
+    // errored with `E_TOOL_NOT_FOUND unknown tool ""` while the self-test still passed.
+    expect(result.toolCalls).toEqual(["fs_list"]);
+    expect(result.detail).not.toContain("工具错误:");
   });
 
   it("persists the turn, which is the thing worth proving", async () => {

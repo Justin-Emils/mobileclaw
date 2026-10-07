@@ -24,7 +24,7 @@ import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./services/secrets";
-import { createSelfTestTransport } from "./services/self-test";
+import { createSelfTestProvider } from "./services/self-test";
 
 /**
  * Prompt for the in-app self-test. Phrased as a real request so the scripted transport's
@@ -421,35 +421,51 @@ export class MobileClawRuntime {
     workspace: string;
     toolCalls: string[];
   }> {
-    const savedFetch = this.deps.fetchImpl;
+    const savedProvider = this.provider;
     const savedKey = this.apiKey;
-    const transport = createSelfTestTransport();
+    const scripted = createSelfTestProvider();
     const conversation = await this.store.create({ title: SELF_TEST_TITLE });
     const conversationId = conversation.id;
     const workspace = this.workspaceFor(conversationId);
     const toolCalls: string[] = [];
+    const toolFailures: string[] = [];
     let failure: string | undefined;
 
     try {
-      // A key is required before the provider will issue a request; the value is never
-      // sent anywhere, because the transport below answers locally.
-      this.deps.fetchImpl = transport.fetch;
+      // The provider is swapped rather than the transport, so no request is made and no
+      // API key is needed. The placeholder below only satisfies the provider interface.
+      this.provider = scripted;
       this.apiKey = "selftest-not-a-real-key";
-      this.provider = this.createProvider();
       this.agent = this.createAgent();
 
-      for await (const event of this.send(SELF_TEST_PROMPT, { conversationId })) {
+      // Driven by hand rather than `for await`, because a generator's *return value*
+      // carries the run result -- including the CoreError behind `stopReason: "error"`.
+      // `for await` discards it, which is why the first version could only say
+      // "运行以 error 结束" without saying why.
+      const run = this.send(SELF_TEST_PROMPT, { conversationId });
+      let step = await run.next();
+      while (!step.done) {
+        const event = step.value;
         if (event.type === "tool_start") toolCalls.push(event.name);
-        if (event.type === "done" && event.stopReason === "error") {
-          failure = "运行以 error 结束";
+        if (event.type === "tool_end" && event.status !== "ok") {
+          toolFailures.push(`${event.name}: ${event.error ?? event.status}`);
         }
+        if (event.type === "denied") {
+          toolFailures.push(`${event.name} 被拒绝: ${event.reason}`);
+        }
+        step = await run.next();
+      }
+      const result = step.value;
+      if (result.error) {
+        failure = `${result.error.code}: ${result.error.message}`;
+      } else if (result.stopReason !== "completed") {
+        failure = `运行结束于 ${result.stopReason}`;
       }
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     } finally {
-      this.deps.fetchImpl = savedFetch;
+      this.provider = savedProvider;
       this.apiKey = savedKey;
-      this.provider = this.createProvider();
       this.agent = this.createAgent();
       await this.publishState();
     }
@@ -458,14 +474,22 @@ export class MobileClawRuntime {
     // point of the exercise is that the turn was persisted.
     const stored = await this.loadConversation(conversationId);
     const persisted = (stored?.entries?.length ?? 0) > 0;
-    const sawTool = transport.sawToolResult();
-    const ok = !failure && sawTool && toolCalls.length > 0 && persisted;
+    const sawTool = scripted.sawToolResult();
+    // A tool failure must fail the self-test even if the run itself completed. The first
+    // version passed while a spurious empty tool call had errored, which is exactly the
+    // kind of "green light hiding a real problem" the check exists to avoid.
+    const ok = !failure && toolFailures.length === 0 && sawTool && toolCalls.length > 0 && persisted;
 
+    // Surface a tool error even when the run itself finished, and name the tools that
+    // exist -- an unknown tool name is the likeliest cause of "调用了但没结果".
+    const available = this.toolNames();
     const lines = [
       `工具调用: ${toolCalls.length > 0 ? toolCalls.join(", ") : "无"}`,
       `工具结果回到模型: ${sawTool ? "是" : "否"}`,
       `会话已写入存储: ${persisted ? `是（${stored?.entries?.length ?? 0} 条记录）` : "否"}`,
       `会话工作区: ${workspace}`,
+      `已注册工具: ${available.length > 0 ? available.join(", ") : "无"}`,
+      ...(toolFailures.length > 0 ? [`工具错误: ${toolFailures.join("; ")}`] : []),
       ...(failure ? [`错误: ${failure}`] : []),
     ];
     return { ok, detail: lines.join("\n"), conversationId, workspace, toolCalls };
