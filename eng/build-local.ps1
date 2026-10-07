@@ -172,6 +172,17 @@ if (-not (Test-Path $androidDir)) {
 }
 
 # --- keystore --------------------------------------------------------------
+#
+# Two independent steps, deliberately not nested under one condition:
+#
+#   1. create the keystore, only if missing
+#   2. ensure android/gradle.properties carries the signing entries
+#
+# They were previously combined as `if ($GenerateKeystore -and -not (Test-Path
+# $keystorePath))`, so once the keystore existed the properties were never written
+# again. `-Clean` deletes android/ (and with it gradle.properties), after which a
+# release build silently fell back to the debug key -- producing a "release" APK
+# that could not be installed over an EAS build. Step 2 now runs on every build.
 $keystorePath = Join-Path $PSScriptRoot "mobileclaw.keystore"
 $gradleProps = Join-Path $androidDir "gradle.properties"
 
@@ -185,18 +196,38 @@ if ($GenerateKeystore -and -not (Test-Path $keystorePath)) {
         -storepass mobileclaw -keypass mobileclaw `
         -dname "CN=MobileClaw, OU=local, O=MobileClaw, L=, S=, C=CN"
     if ($LASTEXITCODE -ne 0) { throw "keytool failed ($LASTEXITCODE)" }
+    Write-Host "keystore written to $keystorePath" -ForegroundColor Green
+}
 
-    $entry = @"
+# Always reconcile gradle.properties with the keystore on disk. Prebuild regenerates
+# android/ from the template, so these entries do not survive on their own.
+if (Test-Path $keystorePath) {
+    if (-not (Test-Path $gradleProps)) { throw "gradle.properties missing at $gradleProps" }
+    $props = Get-Content $gradleProps -Raw
+    if ($props -notmatch 'MOBILECLAW_UPLOAD_STORE_FILE') {
+        $entry = @"
 
 # --- local release signing (added by eng/build-local.ps1) -------------------
+# Backslashes are escaped because this is read as Java properties, where a lone \
+# is an escape character. The matching Gradle wiring lives in
+# apps/mobile/app.config.ts as the withLocalReleaseSigning config plugin, so it
+# survives `expo prebuild`.
 MOBILECLAW_UPLOAD_STORE_FILE=$($keystorePath -replace '\\','\\')
 MOBILECLAW_UPLOAD_KEY_ALIAS=mobileclaw
 MOBILECLAW_UPLOAD_STORE_PASSWORD=mobileclaw
 MOBILECLAW_UPLOAD_KEY_PASSWORD=mobileclaw
 "@
-    Add-Content -Path $gradleProps -Value $entry -Encoding UTF8
-    Write-Host "keystore written to $keystorePath and wired into gradle.properties" -ForegroundColor Green
-    Write-Host "NOTE: local builds cannot upgrade an EAS-built install; uninstall once." -ForegroundColor Yellow
+        Add-Content -Path $gradleProps -Value $entry -Encoding UTF8
+        Write-Host "signing  = eng/mobileclaw.keystore wired into android/gradle.properties" -ForegroundColor Green
+    } else {
+        Write-Host "signing  = eng/mobileclaw.keystore (already wired)" -ForegroundColor Gray
+    }
+    if ($Variant -eq "release") {
+        Write-Host "NOTE: a locally signed release cannot upgrade an EAS-signed install; uninstall once." -ForegroundColor Yellow
+    }
+} elseif ($Variant -eq "release") {
+    Write-Host "`n!! release build without a keystore: the APK will be signed with the DEBUG" -ForegroundColor Yellow
+    Write-Host "   key and cannot be installed over an EAS build. Re-run with -GenerateKeystore." -ForegroundColor Yellow
 }
 
 # --- build -----------------------------------------------------------------
