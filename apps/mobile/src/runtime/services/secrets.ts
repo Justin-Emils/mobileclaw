@@ -5,6 +5,13 @@
  * Two Android caveats worth knowing:
  *   - values are lost on uninstall (no backup), so the user re-enters the key;
  *   - a rooted/Shizuku device can extract them, so treat the key as scoped.
+ *
+ * A third, observed rather than documented: on an API 30 emulator, `setItemAsync`
+ * rewrote `shared_prefs/SecureStore.xml` but left it empty (`<map />`), so the key never
+ * persisted. `MobileClawRuntime.setApiKey` reads the value back and reports
+ * `stored: false` in that case, so the failure surfaces instead of looking like success
+ * -- which is exactly why that read-back exists. Whether a physical device behaves the
+ * same is unverified.
  */
 export interface SecretStore {
   get(key: string): Promise<string | undefined>;
