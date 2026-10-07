@@ -25,6 +25,8 @@ export default function SettingsScreen() {
   const [busy, setBusy] = useState(false);
   const [diag, setDiag] = useState<Diagnostics | undefined>();
   const [diagBusy, setDiagBusy] = useState(false);
+  const [selfTest, setSelfTest] = useState<Awaited<ReturnType<ReturnType<typeof useRuntime>["runSelfTest"]>> | undefined>();
+  const [selfTestBusy, setSelfTestBusy] = useState(false);
   /** Legacy shared-storage permissions; a separate mechanism from all-files access. */
   const [runtimePermission, setRuntimePermission] = useState<
     Awaited<ReturnType<ReturnType<typeof useRuntime>["checkStoragePermissions"]>> | undefined
@@ -84,6 +86,23 @@ export default function SettingsScreen() {
       setProbe(strings.settings.testFailed(error instanceof Error ? error.message : String(error)));
     } finally {
       setBusy(false);
+    }
+  }, [runtime]);
+
+  const runAgentSelfTest = useCallback(async () => {
+    setSelfTestBusy(true);
+    try {
+      setSelfTest(await runtime.runSelfTest());
+    } catch (error) {
+      setSelfTest({
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+        conversationId: "",
+        workspace: "",
+        toolCalls: [],
+      });
+    } finally {
+      setSelfTestBusy(false);
     }
   }, [runtime]);
 
@@ -240,6 +259,28 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title={strings.settings.selfCheck}>
+        <Text style={styles.hint}>{strings.settings.agentSelfTestHint}</Text>
+        {/* Runs one turn through the real agent pipeline with a scripted model, so the
+            tool registry, permission gate, workspace and persistence are all exercised
+            without a key. The result is read back from storage rather than trusted. */}
+        <Pressable
+          style={[styles.buttonGhost, selfTestBusy ? styles.buttonDisabled : null]}
+          onPress={() => void runAgentSelfTest()}
+          disabled={selfTestBusy}
+        >
+          <Text style={styles.buttonGhostText}>
+            {selfTestBusy ? strings.settings.runningAgentSelfTest : strings.settings.runAgentSelfTest}
+          </Text>
+        </Pressable>
+        {selfTest ? (
+          <View style={styles.diagBox}>
+            <DiagRow
+              label={selfTest.ok ? strings.settings.agentSelfTestOk : strings.settings.agentSelfTestFailed}
+              value={selfTest.detail}
+              ok={selfTest.ok}
+            />
+          </View>
+        ) : null}
         <Text style={styles.hint}>{strings.settings.selfCheckHint}</Text>
         <Pressable
           style={[styles.buttonGhost, diagBusy ? styles.buttonDisabled : null]}

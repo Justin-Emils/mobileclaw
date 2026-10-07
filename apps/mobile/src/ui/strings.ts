@@ -123,6 +123,13 @@ export const strings = {
     diagApiKeyPresent: (chars: number) => `已配置（${chars} 字符）`,
     diagApiKeyMissing: "缺失",
     diagSecretStore: "密钥存储",
+    /** 一键端到端自检：用脚本模型跑一轮真实工具调用，无需密钥。 */
+    runAgentSelfTest: "运行完整自检（不需要密钥）",
+    runningAgentSelfTest: "自检运行中…",
+    agentSelfTestHint:
+      "用一段脚本代替模型，跑完一轮真实的智能体流程：调用工具、经过权限门、写入会话记录。用来确认这台设备上的工具链路和持久化是否正常。回答内容是固定的，不是真实模型。",
+    agentSelfTestOk: "自检通过",
+    agentSelfTestFailed: "自检未通过",
     /** 密钥后端未加密时的警示：这是安全降级，必须让用户知道。 */
     diagSecretBackend: "密钥保存方式",
     secretEncrypted: "系统加密存储（Android Keystore）",

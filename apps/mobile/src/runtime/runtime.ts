@@ -24,6 +24,14 @@ import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./services/secrets";
+import { createSelfTestTransport } from "./services/self-test";
+
+/**
+ * Prompt for the in-app self-test. Phrased as a real request so the scripted transport's
+ * tool call reads naturally in the transcript.
+ */
+const SELF_TEST_PROMPT = "自检：请列出下载目录里的文件";
+const SELF_TEST_TITLE = "自检会话";
 import {
   probeAllFilesAccess,
   type AllFilesAccessReport,
@@ -391,6 +399,76 @@ export class MobileClawRuntime {
 
   createConversationId(): string {
     return createId("conv");
+  }
+
+  /**
+   * Run one turn through the real pipeline using a scripted transport.
+   *
+   * Why this exists: proving the agent works end to end otherwise needs an API key and a
+   * model, which makes it impossible to check on a device that has neither -- and the parts
+   * that only appear on a real run (the tool registry, the permission gate, the workspace
+   * assigned on a conversation's first turn, the transcript, the persistence) are exactly
+   * the parts worth checking. Nothing is faked except the model's *words*: the tool call is
+   * a genuine `fs_list`, gated and executed by the same code a real turn uses.
+   *
+   * The scripted transport and a placeholder key are installed only for the duration and
+   * always restored, so a self-test cannot change how the app behaves afterwards.
+   */
+  async runSelfTest(): Promise<{
+    ok: boolean;
+    detail: string;
+    conversationId: string;
+    workspace: string;
+    toolCalls: string[];
+  }> {
+    const savedFetch = this.deps.fetchImpl;
+    const savedKey = this.apiKey;
+    const transport = createSelfTestTransport();
+    const conversation = await this.store.create({ title: SELF_TEST_TITLE });
+    const conversationId = conversation.id;
+    const workspace = this.workspaceFor(conversationId);
+    const toolCalls: string[] = [];
+    let failure: string | undefined;
+
+    try {
+      // A key is required before the provider will issue a request; the value is never
+      // sent anywhere, because the transport below answers locally.
+      this.deps.fetchImpl = transport.fetch;
+      this.apiKey = "selftest-not-a-real-key";
+      this.provider = this.createProvider();
+      this.agent = this.createAgent();
+
+      for await (const event of this.send(SELF_TEST_PROMPT, { conversationId })) {
+        if (event.type === "tool_start") toolCalls.push(event.name);
+        if (event.type === "done" && event.stopReason === "error") {
+          failure = "运行以 error 结束";
+        }
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.deps.fetchImpl = savedFetch;
+      this.apiKey = savedKey;
+      this.provider = this.createProvider();
+      this.agent = this.createAgent();
+      await this.publishState();
+    }
+
+    // Read the conversation back from storage rather than trusting in-memory state: the
+    // point of the exercise is that the turn was persisted.
+    const stored = await this.loadConversation(conversationId);
+    const persisted = (stored?.entries?.length ?? 0) > 0;
+    const sawTool = transport.sawToolResult();
+    const ok = !failure && sawTool && toolCalls.length > 0 && persisted;
+
+    const lines = [
+      `工具调用: ${toolCalls.length > 0 ? toolCalls.join(", ") : "无"}`,
+      `工具结果回到模型: ${sawTool ? "是" : "否"}`,
+      `会话已写入存储: ${persisted ? `是（${stored?.entries?.length ?? 0} 条记录）` : "否"}`,
+      `会话工作区: ${workspace}`,
+      ...(failure ? [`错误: ${failure}`] : []),
+    ];
+    return { ok, detail: lines.join("\n"), conversationId, workspace, toolCalls };
   }
 
   /* ------------------------------------------------------------------- runs */
