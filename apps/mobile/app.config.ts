@@ -75,6 +75,28 @@ const withPackageQueries: ConfigPlugin = (config) =>
   });
 
 /**
+ * Removes MANAGE_EXTERNAL_STORAGE for Play-safe builds.
+ *
+ * `android.blockedPermissions` alone does not work: Expo only uses that list to
+ * filter permissions contributed by *library modules*, so the entry declared
+ * directly in `android.permissions` still lands in the manifest (verified by
+ * generating the manifest with MOBILECLAW_PLAY_SAFE=1 and finding it present).
+ * Deleting the node is the only reliable way.
+ */
+const withPlaySafeStorage: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (manifestConfig) => {
+    const manifest = manifestConfig.modResults.manifest as {
+      "uses-permission"?: { $?: Record<string, string> }[];
+    };
+    const list = manifest["uses-permission"];
+    if (!Array.isArray(list)) return manifestConfig;
+    manifest["uses-permission"] = list.filter(
+      (entry) => entry?.$?.["android:name"] !== "android.permission.MANAGE_EXTERNAL_STORAGE",
+    );
+    return manifestConfig;
+  });
+
+/**
  * MobileClaw app configuration.
  *
  * Notable choices, each backed by the Android capability research:
@@ -141,8 +163,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       // Expo runs function plugins at runtime, but its config *type* only models
-      // the string/serializable forms, hence the cast.
+      // the string/serializable forms, hence the casts.
       withPackageQueries as unknown as string,
+      ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],
     experiments: {
       typedRoutes: true,
