@@ -142,6 +142,61 @@ export class MobileClawRuntime {
     return this.apiKey !== "";
   }
 
+  /**
+   * Capability self-check, surfaced in Settings.
+   *
+   * The API-key round trip is the important part: it writes a probe value to the
+   * secret store and reads it back, so a store that silently fails (a missing
+   * native module, a Keystore problem) is reported as a storage fault instead of
+   * showing up later as "no API key configured" during a chat turn.
+   */
+  async diagnostics(): Promise<{
+    apiKeyPresent: boolean;
+    apiKeyLength: number;
+    secretStore: { ok: boolean; detail: string };
+    provider: { id: string; label: string; model: string; baseUrl: string };
+    roots: string[];
+    tools: number;
+    plugins: { name: string; status: string; tools: number; error?: string }[];
+  }> {
+    const secretStore = await this.probeSecretStore();
+    return {
+      apiKeyPresent: this.apiKey !== "",
+      apiKeyLength: this.apiKey.length,
+      secretStore,
+      provider: {
+        ...this.providerInfo(),
+        baseUrl: this.config.provider.baseUrl,
+      },
+      roots: [...this.config.roots],
+      tools: this.registry.names().length,
+      plugins: this.pluginStatus(),
+    };
+  }
+
+  /** Write a probe value, read it back, then restore the real key untouched. */
+  private async probeSecretStore(): Promise<{ ok: boolean; detail: string }> {
+    const probeKey = "diagnostics.probe";
+    const token = `probe_${Date.now()}`;
+    try {
+      await this.deps.secrets.set(probeKey, token);
+      const readBack = await this.deps.secrets.get(probeKey);
+      await this.deps.secrets.delete(probeKey);
+      if (readBack !== token) {
+        return {
+          ok: false,
+          detail: `wrote a value but read back ${readBack === undefined ? "nothing" : "a different value"}`,
+        };
+      }
+      return { ok: true, detail: "write/read/delete round trip succeeded" };
+    } catch (error) {
+      return {
+        ok: false,
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   providerInfo(): { id: string; label: string; model: string } {
     return { id: this.provider.id, label: this.provider.label, model: this.provider.model };
   }

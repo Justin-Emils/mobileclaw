@@ -459,6 +459,48 @@ describe("MobileClawRuntime", () => {
     expect(result?.error?.message).toContain("no API key configured");
   });
 
+  it("reports a healthy self-check when the key is stored", async () => {
+    const { runtime } = buildRuntime();
+    await runtime.start();
+    const diag = await runtime.diagnostics();
+    expect(diag.apiKeyPresent).toBe(true);
+    expect(diag.apiKeyLength).toBeGreaterThan(0);
+    // The probe write/read/delete round trip is what proves the store works.
+    expect(diag.secretStore.ok).toBe(true);
+    expect(diag.tools).toBeGreaterThan(15);
+    expect(diag.plugins.every((plugin) => plugin.status === "loaded")).toBe(true);
+    expect(diag.provider.baseUrl).toBe("https://test.local/v1");
+  });
+
+  it("flags a secret store that silently drops writes, instead of failing later", async () => {
+    const { runtime, secrets } = buildRuntime();
+    await runtime.start();
+    // Simulate a device where writes do not stick (missing native module, broken
+    // Keystore). Without this check it would only surface as "no API key
+    // configured" in the middle of a chat turn.
+    const originalSet = secrets.set.bind(secrets);
+    secrets.set = async (key: string, value: string) => {
+      if (key === "diagnostics.probe") return; // the write vanishes
+      await originalSet(key, value);
+    };
+
+    const diag = await runtime.diagnostics();
+    expect(diag.secretStore.ok).toBe(false);
+    expect(diag.secretStore.detail).toMatch(/read back nothing/);
+    // The probe must not disturb the real key.
+    expect(diag.apiKeyPresent).toBe(true);
+    expect(await secrets.get("provider.apiKey")).toBe("sk-test");
+  });
+
+  it("reports a missing key explicitly in the self-check", async () => {
+    const { runtime } = buildRuntime();
+    await runtime.start();
+    await runtime.setApiKey("");
+    const diag = await runtime.diagnostics();
+    expect(diag.apiKeyPresent).toBe(false);
+    expect(diag.apiKeyLength).toBe(0);
+  });
+
   it("stops an in-flight run", async () => {
     const { runtime } = buildRuntime();
     await runtime.start();

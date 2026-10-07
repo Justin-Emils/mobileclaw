@@ -91,13 +91,21 @@ export default function ChatScreen() {
         if (step.done) {
           const result = step.value;
           if (result.error) {
+            const raw = result.error.message;
+            // Turn the two failures a new user actually hits into instructions
+            // rather than a dead end. A missing key is a setup step, not a bug.
+            const text = raw.includes("no API key configured")
+              ? "No API key yet. Open Settings → API key, paste a key and tap Save key (typing alone does not store it). Settings → Self-check confirms it landed."
+              : raw.includes("HTTP 401") || raw.includes("HTTP 403")
+                ? `${raw} — the key was rejected. Check it against your provider's dashboard.`
+                : raw;
             setBubbles((current) => [
               ...current,
               {
                 id: `e_${Date.now()}`,
                 role: "notice",
                 level: "error",
-                text: result.error?.message ?? "the run failed",
+                text,
               },
             ]);
           }

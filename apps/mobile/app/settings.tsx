@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Link } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
 import { theme } from "@/ui/theme";
+
+type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics"]>>;
 
 /**
  * Provider and capability settings.
@@ -17,9 +19,11 @@ export default function SettingsScreen() {
 
   const [config, setConfig] = useState<AppConfig>(() => runtime.getConfig());
   const [apiKey, setApiKey] = useState("");
-  const [keyLoaded, setKeyLoaded] = useState(false);
+  const [keyLoaded, setKeyLoaded] = useState(() => runtime.hasApiKey());
   const [probe, setProbe] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [diag, setDiag] = useState<Diagnostics | undefined>();
+  const [diagBusy, setDiagBusy] = useState(false);
 
   useEffect(() => {
     setConfig(runtime.getConfig());
@@ -35,12 +39,29 @@ export default function SettingsScreen() {
   );
 
   const saveKey = useCallback(async () => {
+    if (apiKey.trim() === "") {
+      Alert.alert("Nothing to save", "Paste an API key first.");
+      return;
+    }
     setBusy(true);
     try {
       await runtime.setApiKey(apiKey);
-      setKeyLoaded(runtime.hasApiKey());
+      const stored = runtime.hasApiKey();
+      setKeyLoaded(stored);
       setApiKey("");
-      Alert.alert("Saved", "The API key is stored in the device keystore (SecureStore).");
+      // Re-run the self check so the panel reflects the new state immediately.
+      setDiag(await runtime.diagnostics());
+      Alert.alert(
+        stored ? "Key saved" : "Key NOT saved",
+        stored
+          ? "Stored in SecureStore. You can send a message now."
+          : "The key did not reach the runtime. Open the self-check above for details.",
+      );
+    } catch (error) {
+      Alert.alert(
+        "Could not save the key",
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setBusy(false);
     }
@@ -52,8 +73,21 @@ export default function SettingsScreen() {
     try {
       const result = await runtime.checkProvider();
       setProbe(result.ok ? `OK — ${result.message}` : `Failed — ${result.message}`);
+    } catch (error) {
+      setProbe(`Failed — ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
+    }
+  }, [runtime]);
+
+  const runDiagnostics = useCallback(async () => {
+    setDiagBusy(true);
+    try {
+      setDiag(await runtime.diagnostics());
+    } catch (error) {
+      setProbe(`Self-check failed — ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setDiagBusy(false);
     }
   }, [runtime]);
 
@@ -138,8 +172,15 @@ export default function SettingsScreen() {
       </Section>
 
       <Section title="API key">
+        <View style={[styles.statusBox, keyLoaded ? styles.statusOk : styles.statusBad]}>
+          <Text style={[styles.statusText, keyLoaded ? styles.statusTextOk : styles.statusTextBad]}>
+            {keyLoaded ? "✓ API key loaded" : "✗ No API key — the agent cannot call the model"}
+          </Text>
+        </View>
         <Text style={styles.hint}>
-          {keyLoaded ? "A key is stored on this device." : "No key stored yet — the agent cannot call the model."}
+          Paste the key, then tap <Text style={styles.strong}>Save key</Text>. Typing alone changes
+          nothing: the key is only stored when you save it. It goes to SecureStore (Android
+          Keystore), never into the config file.
         </Text>
         <TextInput
           style={styles.input}
@@ -160,6 +201,40 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
         {probe !== "" ? <Text style={styles.hint}>{probe}</Text> : null}
+      </Section>
+
+      <Section title="Self-check">
+        <Text style={styles.hint}>
+          Confirms that the secret store really works on this device and shows what the agent loaded.
+        </Text>
+        <Pressable
+          style={[styles.buttonGhost, diagBusy ? styles.buttonDisabled : null]}
+          onPress={() => void runDiagnostics()}
+          disabled={diagBusy}
+        >
+          <Text style={styles.buttonGhostText}>{diagBusy ? "Checking…" : "Run self-check"}</Text>
+        </Pressable>
+        {diagBusy && diag === undefined ? <ActivityIndicator color={theme.colors.accent} /> : null}
+        {diag ? (
+          <View style={styles.diagBox}>
+            <DiagRow label="API key" value={diag.apiKeyPresent ? `present (${diag.apiKeyLength} chars)` : "MISSING"} ok={diag.apiKeyPresent} />
+            <DiagRow label="Secret store" value={diag.secretStore.detail} ok={diag.secretStore.ok} />
+            <DiagRow label="Provider" value={`${diag.provider.label} · ${diag.provider.model}`} ok />
+            <DiagRow label="Base URL" value={diag.provider.baseUrl} ok />
+            <DiagRow label="Tools" value={`${diag.tools} registered`} ok={diag.tools > 0} />
+            <DiagRow
+              label="Plugins"
+              value={`${diag.plugins.filter((plugin) => plugin.status === "loaded").length}/${diag.plugins.length} loaded`}
+              ok={diag.plugins.every((plugin) => plugin.status === "loaded")}
+            />
+            <DiagRow label="Storage roots" value={diag.roots.join("\n") || "(none)"} ok={diag.roots.length > 0} />
+            {diag.plugins
+              .filter((plugin) => plugin.status !== "loaded")
+              .map((plugin) => (
+                <DiagRow key={plugin.name} label={plugin.name} value={plugin.error ?? plugin.status} ok={false} />
+              ))}
+          </View>
+        ) : null}
       </Section>
 
       <Section title="Capabilities">
@@ -215,6 +290,19 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+/** One line of the self-check panel: label, value, and a pass/fail marker. */
+function DiagRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <View style={styles.diagRow}>
+      <Text style={[styles.diagMark, { color: ok ? theme.colors.success : theme.colors.danger }]}>
+        {ok ? "✓" : "✗"}
+      </Text>
+      <Text style={styles.diagLabel}>{label}</Text>
+      <Text style={styles.diagValue}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: theme.colors.background },
   content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
@@ -262,6 +350,28 @@ const styles = StyleSheet.create({
   },
   buttonGhostText: { color: theme.colors.text, fontWeight: "600", fontSize: 13 },
   hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
+  strong: { color: theme.colors.text, fontWeight: "600" },
+  statusBox: {
+    borderRadius: theme.radius.md,
+    paddingHorizontal: theme.space(3),
+    paddingVertical: theme.space(2.5),
+    borderWidth: 1,
+  },
+  statusOk: { backgroundColor: "rgba(63,199,138,0.12)", borderColor: theme.colors.success },
+  statusBad: { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger },
+  statusText: { fontSize: 13, fontWeight: "600" },
+  statusTextOk: { color: theme.colors.success },
+  statusTextBad: { color: theme.colors.danger },
+  diagBox: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.md,
+    padding: theme.space(3),
+    gap: theme.space(2),
+  },
+  diagRow: { flexDirection: "row", alignItems: "flex-start", gap: theme.space(2) },
+  diagMark: { fontSize: 12, fontWeight: "700", width: 14 },
+  diagLabel: { color: theme.colors.textMuted, fontSize: 12, width: 96 },
+  diagValue: { color: theme.colors.text, fontSize: 12, flex: 1, fontFamily: theme.font.mono },
   pluginRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
   dot: { width: 8, height: 8, borderRadius: 4 },
   pluginName: { color: theme.colors.text, fontSize: 12, fontFamily: theme.font.mono, flex: 1 },
