@@ -25,6 +25,26 @@ export const strings = {
     back: "返回",
   },
 
+  /** 富文本渲染层用到的文案。 */
+  code: {
+    copyAction: "复制",
+    copied: "已复制",
+  },
+
+  /** 历史会话列表。 */
+  conversations: {
+    title: "历史会话",
+    open: "历史会话",
+    empty: "还没有历史会话。发一条消息之后，这里会留下记录，可随时回来继续。",
+    untitled: "未命名会话",
+    hint: "点按打开并继续；长按可删除。",
+    deleteTitle: "删除这个会话？",
+    justNow: "刚刚",
+    minutesAgo: (n: number) => `${n} 分钟前`,
+    hoursAgo: (n: number) => `${n} 小时前`,
+    daysAgo: (n: number) => `${n} 天前`,
+  },
+
   chat: {
     starting: "启动中…",
     loadingCapabilities: "正在加载能力…",

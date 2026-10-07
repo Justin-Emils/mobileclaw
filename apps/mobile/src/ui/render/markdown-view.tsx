@@ -2,6 +2,7 @@ import { memo, useMemo } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { InlineNode, ListItemNode, MarkdownBlock } from "@/ui/render/markdown";
 import { parseMarkdown } from "@/ui/render/markdown";
+import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
 /**
@@ -20,12 +21,21 @@ export interface MarkdownProps {
   streaming?: boolean;
   /** Base text colour, so the same renderer works inside bubbles and notices. */
   color?: string;
+  /**
+   * Copy handler for code blocks.
+   *
+   * Passed in rather than imported so this module stays free of Expo/RN platform
+   * modules (the contract in vitest.config.ts). When absent, no copy affordance is
+   * drawn — which is also why it is optional rather than required.
+   */
+  onCopyCode?: (code: string) => void;
 }
 
 export const MarkdownText = memo(function MarkdownText({
   text,
   streaming = false,
   color,
+  onCopyCode,
 }: MarkdownProps) {
   const blocks = useMemo(() => parseMarkdown(text, streaming), [text, streaming]);
   const baseColor = color ?? theme.colors.text;
@@ -35,7 +45,10 @@ export const MarkdownText = memo(function MarkdownText({
     // tail as monospace text keeps the answer visibly progressing.
     if (text.trim() === "") return null;
     return (
-      <Text style={[styles.paragraph, { color: theme.colors.textMuted, fontFamily: theme.font.mono }]}>
+      <Text
+        selectable
+        style={[styles.paragraph, { color: theme.colors.textMuted, fontFamily: theme.font.mono }]}
+      >
         {blocks.pending || text}
       </Text>
     );
@@ -43,11 +56,23 @@ export const MarkdownText = memo(function MarkdownText({
 
   return (
     <View>
+      {/* `selectable` is threaded down to the leaf <Text> nodes rather than set once
+          on a wrapper. A wrapper <Text> would be neater, but React Native forbids
+          nesting a <View> inside <Text>, and code blocks and tables are Views. */}
       {blocks.blocks.map((block, index) => (
-        <BlockView key={index} block={block} color={baseColor} first={index === 0} />
+        <BlockView
+          key={index}
+          block={block}
+          color={baseColor}
+          first={index === 0}
+          {...(onCopyCode ? { onCopyCode } : {})}
+        />
       ))}
       {streaming && blocks.pending ? (
-        <Text style={[styles.paragraph, { color: baseColor, fontFamily: theme.font.mono, opacity: 0.75 }]}>
+        <Text
+          selectable
+          style={[styles.paragraph, { color: baseColor, fontFamily: theme.font.mono, opacity: 0.75 }]}
+        >
           {blocks.pending}
         </Text>
       ) : null}
@@ -59,15 +84,18 @@ const BlockView = memo(function BlockView({
   block,
   color,
   first,
+  onCopyCode,
 }: {
   block: MarkdownBlock;
   color: string;
   first: boolean;
+  onCopyCode?: (code: string) => void;
 }) {
   switch (block.type) {
     case "heading":
       return (
         <Text
+          selectable
           style={[
             headingStyle(block.level),
             { color: theme.colors.text, marginTop: first ? 0 : theme.space(3) },
@@ -79,7 +107,7 @@ const BlockView = memo(function BlockView({
 
     case "paragraph":
       return (
-        <Text style={[styles.paragraph, { color, marginTop: first ? 0 : theme.space(2.5) }]}>
+        <Text selectable style={[styles.paragraph, { color, marginTop: first ? 0 : theme.space(2.5) }]}>
           <Inline nodes={block.content} color={color} />
         </Text>
       );
@@ -87,7 +115,14 @@ const BlockView = memo(function BlockView({
     case "code":
       return (
         <View style={styles.codeBlock}>
-          {block.language ? <Text style={styles.codeLang}>{block.language}</Text> : null}
+          <View style={styles.codeHeader}>
+            {block.language ? <Text style={styles.codeLang}>{block.language}</Text> : <View />}
+            {onCopyCode ? (
+              <Pressable onPress={() => onCopyCode(block.text)} hitSlop={8}>
+                <Text style={styles.copyAction}>{strings.code.copyAction}</Text>
+              </Pressable>
+            ) : null}
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <Text style={styles.codeText} selectable>
               {block.text}
@@ -143,8 +178,10 @@ const ListItem = memo(function ListItem({
 }) {
   return (
     <View style={styles.listRow}>
-      <Text style={[styles.listMarker, { color: theme.colors.textMuted }]}>{marker}</Text>
-      <Text style={[styles.paragraph, styles.listContent, { color }]}>
+      <Text selectable style={[styles.listMarker, { color: theme.colors.textMuted }]}>
+        {marker}
+      </Text>
+      <Text selectable style={[styles.paragraph, styles.listContent, { color }]}>
         <Inline nodes={item.content} color={color} />
       </Text>
     </View>
@@ -312,6 +349,13 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space(2),
     paddingHorizontal: theme.space(3),
   },
+  codeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: theme.space(1),
+  },
+  copyAction: { color: theme.colors.accent, fontSize: 11, fontWeight: "600" },
   codeLang: {
     color: theme.colors.textFaint,
     fontSize: 10,

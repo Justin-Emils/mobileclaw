@@ -24,6 +24,13 @@ export interface RenderContext {
   streaming?: boolean;
   /** Base text colour, so the renderer fits its container. */
   color?: string;
+  /**
+   * Copy one code block.
+   *
+   * Supplied by the caller rather than implemented here, so the render layer never
+   * imports a platform clipboard module and stays unit-testable.
+   */
+  onCopyCode?: (code: string) => void;
 }
 
 export interface ContentRenderer {
@@ -39,7 +46,12 @@ const markdownRenderer: ContentRenderer = {
   kind: "markdown",
   label: "Markdown",
   render: (text, context) => (
-    <MarkdownText text={text} streaming={context.streaming} color={context.color} />
+    <MarkdownText
+      text={text}
+      streaming={context.streaming}
+      color={context.color}
+      {...(context.onCopyCode ? { onCopyCode: context.onCopyCode } : {})}
+    />
   ),
   toPlainText: (text) => blocksToPlainText(parseMarkdown(text).blocks),
 };
@@ -53,7 +65,12 @@ const plainRenderer: ContentRenderer = {
   kind: "plain",
   label: "Plain text",
   render: (text, context) => (
-    <MarkdownText text={text} streaming={context.streaming} color={context.color} />
+    <MarkdownText
+      text={text}
+      streaming={context.streaming}
+      color={context.color}
+      {...(context.onCopyCode ? { onCopyCode: context.onCopyCode } : {})}
+    />
   ),
   toPlainText: (text) => text,
 };

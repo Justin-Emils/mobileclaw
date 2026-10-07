@@ -287,6 +287,19 @@ describe("system service", () => {
 describe("MobileClawRuntime", () => {
   /** A runtime over an in-memory filesystem with a scripted model transport. */
   function buildRuntime(options: { scripts?: string[]; approve?: boolean } = {}) {
+    return buildRuntimeOver(new AdapterKeyValueStore(new MemoryKvAdapter()), options);
+  }
+
+  /**
+   * Same, but over a caller-supplied key-value store.
+   *
+   * Lets a test construct a second runtime on the store a first one wrote to, which
+   * is how a restart is modelled without touching the filesystem.
+   */
+  function buildRuntimeOver(
+    kv: AdapterKeyValueStore,
+    options: { scripts?: string[]; approve?: boolean } = {},
+  ) {
     const files = new Map<string, string>([["/demo/a.txt", "content"]]);
     const fs = new GuardedFileSystem({
       driver: {
@@ -338,7 +351,7 @@ describe("MobileClawRuntime", () => {
         provider: { ...mergeConfig(undefined).provider, baseUrl: "https://test.local/v1" },
       }),
       secrets,
-      kv: new AdapterKeyValueStore(new MemoryKvAdapter()),
+      kv,
       fs,
       shell: new MemoryShellService({ available: false, reason: "none" }),
       http: new ExpoHttpService(),
@@ -346,7 +359,7 @@ describe("MobileClawRuntime", () => {
       fetchImpl: transport.fetch,
       approvals: broker,
     });
-    return { runtime, files, broker, bodies: transport.bodies, secrets };
+    return { runtime, files, broker, bodies: transport.bodies, secrets, kv };
   }
 
   it("loads every capability plugin with its tools", async () => {
@@ -358,6 +371,47 @@ describe("MobileClawRuntime", () => {
     expect(tools).toContain("web_fetch");
     expect(tools).toContain("system_open");
     expect(runtime.pluginStatus().every((plugin) => plugin.status === "loaded")).toBe(true);
+  });
+
+  it("keeps conversations across a restart", async () => {
+    const harness = buildRuntime({ scripts: [textTurn("第一次回答")] });
+    await harness.runtime.start();
+
+    let conversationId = "";
+    const stream = harness.runtime.send("第一个问题");
+    while (true) {
+      const step = await stream.next();
+      if (step.done) {
+        conversationId = step.value.conversationId;
+        break;
+      }
+    }
+    expect(conversationId).not.toBe("");
+
+    const listed = await harness.runtime.listConversations();
+    expect(listed.map((entry) => entry.id)).toContain(conversationId);
+    expect(listed[0]?.title).toContain("第一个问题");
+
+    // A second runtime over the same key-value store is exactly what a restart is:
+    // in-memory state is gone, storage is not. This is the behaviour the app was
+    // missing entirely -- conversations were written but never read back.
+    const restarted = buildRuntimeOver(harness.kv);
+    await restarted.runtime.start();
+
+    const afterRestart = await restarted.runtime.listConversations();
+    expect(afterRestart.map((entry) => entry.id)).toContain(conversationId);
+
+    const restored = await restarted.runtime.loadConversation(conversationId);
+    expect(
+      restored?.messages.some((message) => message.role === "user" && message.content === "第一个问题"),
+    ).toBe(true);
+    expect(
+      restored?.messages.some(
+        (message) => message.role === "assistant" && message.content.includes("第一次回答"),
+      ),
+    ).toBe(true);
+    // The transcript cards need the tool entries too, not just the prose.
+    expect(Array.isArray(restored?.entries)).toBe(true);
   });
 
   it("streams a full turn and records the transcript", async () => {

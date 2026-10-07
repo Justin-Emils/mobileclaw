@@ -10,13 +10,15 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Link, useFocusEffect } from "expo-router";
-import type { AgentEvent, TranscriptEntry } from "@mobileclaw/core";
+import { Link, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import * as Clipboard from "expo-clipboard";
+import type { AgentEvent, ChatMessage, TranscriptEntry } from "@mobileclaw/core";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { ApprovalSheet } from "@/ui/approval-sheet";
 import { ToolCard } from "@/ui/tool-card";
 import { renderContent } from "@/ui/render";
 import type { AllFilesAccessReport } from "@/runtime/services/permissions";
+import { toBubbles as toTranscriptBubbles } from "@/ui/conversation-view";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
@@ -38,11 +40,14 @@ interface Bubble {
  */
 export default function ChatScreen() {
   const state = useRuntimeState();
+  const params = useLocalSearchParams<{ id?: string }>();
+  const router = useRouter();
+  const { setParams } = router;
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [tools, setTools] = useState<TranscriptEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [running, setRunning] = useState(false);
-  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [conversationId, setConversationId] = useState<string | undefined>(params.id);
   const [status, setStatus] = useState<string>("");
   /** Set when a run stopped at the step limit, so the UI can offer to resume. */
   const [canContinue, setCanContinue] = useState(false);
@@ -54,11 +59,45 @@ export default function ChatScreen() {
    * so the agent reports "no files" and the user blames the agent.
    */
   const [storageAccess, setStorageAccess] = useState<AllFilesAccessReport | undefined>();
+  /** Guards the hydrate effect against a slower load overwriting a newer one. */
+  const hydrateToken = useRef(0);
+  /** The conversation id already loaded into `bubbles`, so it loads once. */
+  const hydratedRef = useRef<string | undefined>(undefined);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const listRef = useRef<FlatList<Bubble>>(null);
 
   const runtime = state.runtime;
   const ready = state.status === "ready" && runtime !== undefined;
+
+  /**
+   * Restore a stored conversation.
+   *
+   * The store was always written on every run (`onConversation`), but nothing ever
+   * read it back, so every launch started from an empty transcript. This is the
+   * missing half.
+   */
+  useEffect(() => {
+    if (!ready || !runtime) return;
+    const id = params.id;
+    if (!id) return;
+    // A ref, not state: re-hydrating on every bubble append would fight the stream.
+    if (hydratedRef.current === id) return;
+
+    const token = ++hydrateToken.current;
+    void runtime.loadConversation(id).then((conversation) => {
+      if (token !== hydrateToken.current) return;
+      if (!conversation) {
+        // Deleted from the list, or a stale deep link: fall back to a fresh chat.
+        setConversationId(undefined);
+        setParams({});
+        return;
+      }
+      hydratedRef.current = id;
+      setConversationId(conversation.id);
+      setBubbles(toBubbles(conversation.messages));
+      setTools(conversation.entries);
+    });
+  }, [ready, runtime, params.id, setParams]);
 
   // Re-probe on focus: the user grants access in system settings and comes back.
   useFocusEffect(
@@ -115,7 +154,11 @@ export default function ChatScreen() {
       const stream = runtime.send(text, {
         ...(conversationId ? { conversationId } : {}),
         signal: controller.signal,
-        onConversation: (conversation) => setConversationId(conversation.id),
+        onConversation: (conversation) => {
+          setConversationId(conversation.id);
+          // Keep the URL in step so a reload lands back in this conversation.
+          setParams({ id: conversation.id });
+        },
       });
 
       while (true) {
@@ -181,10 +224,13 @@ export default function ChatScreen() {
 
   const newChat = useCallback(() => {
     setConversationId(undefined);
+    hydratedRef.current = undefined;
     setBubbles([]);
     setTools([]);
     setCanContinue(false);
-  }, []);
+    // Drop the id from the URL too, or the hydrate effect would reload the old one.
+    setParams({});
+  }, [setParams]);
 
   const data = useMemo(() => bubbles, [bubbles]);
 
@@ -198,6 +244,11 @@ export default function ChatScreen() {
           {runtime ? `${runtime.providerInfo().label} · ${runtime.providerInfo().model}` : strings.chat.starting}
         </Text>
         <View style={styles.headerActions}>
+          <Link href="/conversations" asChild>
+            <Pressable style={styles.headerButton}>
+              <Text style={styles.headerButtonText}>{strings.conversations.open}</Text>
+            </Pressable>
+          </Link>
           <Pressable onPress={newChat} style={styles.headerButton}>
             <Text style={styles.headerButtonText}>{strings.common.new}</Text>
           </Pressable>
@@ -304,6 +355,19 @@ function ToolCardList({ tools }: { tools: TranscriptEntry[] }) {
 }
 
 function BubbleView({ bubble }: { bubble: Bubble }) {
+  /** Briefly show "已复制" after a copy, so the tap has visible feedback. */
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  const copy = useCallback((value: string) => {
+    void Clipboard.setStringAsync(value);
+    setCopied(true);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(false), 1400);
+  }, []);
+
   if (bubble.role === "notice") {
     const color =
       bubble.level === "error"
@@ -313,25 +377,51 @@ function BubbleView({ bubble }: { bubble: Bubble }) {
           : theme.colors.textMuted;
     return (
       <View style={styles.notice}>
-        <Text style={[styles.noticeText, { color }]}>{bubble.text}</Text>
+        <Text selectable style={[styles.noticeText, { color }]}>
+          {bubble.text}
+        </Text>
       </View>
     );
   }
   const mine = bubble.role === "user";
-  const textColor = mine ? theme.colors.text : theme.colors.text;
+  const textColor = theme.colors.text;
   return (
     <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : null]}>
       <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
         {renderContent(mine ? "plain" : "markdown", bubble.text, {
           streaming: bubble.streaming,
           color: textColor,
+          onCopyCode: copy,
         })}
         {bubble.streaming && bubble.text === "" ? (
           <Text style={[styles.bubbleText, { color: theme.colors.textMuted }]}>…</Text>
         ) : null}
+        {/* Whole-message copy. Selecting text by hand is possible now, but on a phone
+            it is fiddly, and "copy the whole answer" is the common intent. */}
+        {bubble.text !== "" && !bubble.streaming ? (
+          <Pressable
+            onPress={() => copy(bubble.text)}
+            hitSlop={8}
+            style={[styles.bubbleAction, mine ? styles.bubbleActionMine : null]}
+          >
+            <Text style={styles.bubbleActionText}>
+              {copied ? strings.code.copied : strings.code.copyAction}
+            </Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
+}
+
+/**
+ * Project a stored conversation onto the transcript.
+ *
+ * Delegates to `@/ui/conversation-view` so the projection is unit-tested; see the
+ * notes there for why tool messages and empty assistant turns are skipped.
+ */
+function toBubbles(messages: ChatMessage[]): Bubble[] {
+  return toTranscriptBubbles(messages);
 }
 
 /** Fold one agent event into React state. */
@@ -455,6 +545,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.accentSoft,
   },
   storageBannerButtonText: { color: theme.colors.text, fontSize: 12, fontWeight: "600" },
+  bubbleAction: { alignSelf: "flex-end", marginTop: theme.space(2), paddingVertical: theme.space(1) },
+  bubbleActionMine: { alignSelf: "flex-end" },
+  bubbleActionText: { color: theme.colors.textMuted, fontSize: 11, fontWeight: "600" },
   toolList: { gap: theme.space(2), marginBottom: theme.space(2) },
   sectionLabel: {
     color: theme.colors.textFaint,
