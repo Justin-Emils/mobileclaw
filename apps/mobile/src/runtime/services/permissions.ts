@@ -27,6 +27,25 @@ const PROBE_PATHS = [
   "/sdcard",
 ] as const;
 
+/** The legacy permissions that gate shared storage up to Android 12L (API 32). */
+export const LEGACY_STORAGE_PERMISSIONS = [
+  "android.permission.READ_EXTERNAL_STORAGE",
+  "android.permission.WRITE_EXTERNAL_STORAGE",
+] as const;
+
+/**
+ * Which legacy permissions are worth asking for on a given API level.
+ *
+ * Pure so the version gating is testable without a device. Android 13+ (API 33)
+ * replaced these with the granular READ_MEDIA_* permissions and no longer grants
+ * them, so prompting there would show nothing and look broken. Kept next to the
+ * detection logic because the two are read together: one says whether access is
+ * missing, the other what to do about it.
+ */
+export function legacyStoragePermissionsFor(apiLevel: number): string[] {
+  return apiLevel <= 32 ? [...LEGACY_STORAGE_PERMISSIONS] : [];
+}
+
 export type AllFilesAccess = "granted" | "denied" | "unknown";
 
 export interface AllFilesAccessReport {

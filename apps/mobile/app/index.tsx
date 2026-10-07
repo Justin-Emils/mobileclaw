@@ -22,8 +22,7 @@ import { toBubbles as toTranscriptBubbles } from "@/ui/conversation-view";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
-interface Bubble {
-  id: string;
+interface Bubble {  id: string;
   role: "user" | "assistant" | "notice";
   text: string;
   streaming?: boolean;
@@ -38,6 +37,8 @@ interface Bubble {
  * Keeping them separate means a long answer renders incrementally without
  * rewriting the whole list.
  */
+const PERMISSION_PROMPT_FLAG = "storage.permissionPrompted";
+
 export default function ChatScreen() {
   const state = useRuntimeState();
   const params = useLocalSearchParams<{ id?: string }>();
@@ -63,6 +64,8 @@ export default function ChatScreen() {
   const hydrateToken = useRef(0);
   /** The conversation id already loaded into `bubbles`, so it loads once. */
   const hydratedRef = useRef<string | undefined>(undefined);
+  /** Set in-memory so the permission dialog cannot fire twice in one mount. */
+  const permissionAsked = useRef(false);
   const abortRef = useRef<AbortController | undefined>(undefined);
   const listRef = useRef<FlatList<Bubble>>(null);
 
@@ -112,6 +115,41 @@ export default function ChatScreen() {
       };
     }, [ready, runtime]),
   );
+
+  /**
+   * Ask for the dialog-based storage permissions once, on first launch.
+   *
+   * `MANAGE_EXTERNAL_STORAGE` has no dialog, but `READ_EXTERNAL_STORAGE` /
+   * `WRITE_EXTERNAL_STORAGE` do, and on Android 12 and below those are what actually
+   * gate reading a file. Nothing requested them before, so the app was denied shared
+   * storage while appearing to have asked for it.
+   *
+   * Guarded by a persisted flag: a system dialog that reappears on every launch is
+   * worse than one the user has to find in settings.
+   */
+  useEffect(() => {
+    if (!ready || !runtime || storageAccess?.status !== "denied" || permissionAsked.current) return;
+    permissionAsked.current = true;
+    void (async () => {
+      const stored = await runtime.getFlag(PERMISSION_PROMPT_FLAG).catch(() => undefined);
+      if (stored === "1") return;
+      const outcome = await runtime.requestStoragePermissions().catch(() => undefined);
+      await runtime.setFlag(PERMISSION_PROMPT_FLAG, "1").catch(() => undefined);
+      if (outcome && !outcome.granted && !outcome.notNeeded) {
+        setBubbles((current) => [
+          ...current,
+          {
+            id: "perm-notice",
+            role: "notice",
+            level: "warn",
+            text: `${strings.settings.runtimeHint}${strings.settings.runtimeMissing}`,
+          },
+        ]);
+      }
+      const report = await runtime.checkStorageAccess().catch(() => undefined);
+      if (report) setStorageAccess(report);
+    })();
+  }, [ready, runtime, storageAccess?.status]);
 
   useEffect(() => {
     if (!ready || !state.error) return;

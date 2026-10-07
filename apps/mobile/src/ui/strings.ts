@@ -148,6 +148,16 @@ export const strings = {
     storageSettingsFailed: (detail: string) => `无法打开系统设置 —— ${detail}`,
     recheckStorage: "重新检测",
 
+    // --- 运行时存储权限（Android 12 及以下）---
+    diagRuntimePermission: "读写存储权限",
+    runtimeGranted: "已授予",
+    runtimeNotNeeded: "此系统版本不需要",
+    runtimeMissing: "未授予",
+    runtimeHint:
+      "Android 12 及以下读取共享存储还需要「读写存储权限」，它会在首次授权时弹出系统对话框。没有它，即使开了「所有文件访问」，路径能列名但文件内容依然读不到。",
+    requestRuntimePermission: "申请读写权限",
+    runtimeRequested: (detail: string) => `权限申请结果：${detail}`,
+
     capabilities: "能力",
     openPermissions: "权限与可访问目录",
     capabilitySummary: (tools: number, plugins: number) => `已注册 ${tools} 个工具，来自 ${plugins} 个插件。`,

@@ -20,6 +20,10 @@ export default defineConfig({
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
       "expo-intent-launcher": fileURLToPath(new URL("./test/stubs/expo-intent-launcher.ts", import.meta.url)),
+      // `runtime.ts` reaches PermissionsAndroid through storage-permissions. The real
+      // react-native entry point is Flow-typed and unparseable here, and the dialog it
+      // drives is a device concern anyway.
+      "react-native": fileURLToPath(new URL("./test/stubs/react-native.ts", import.meta.url)),
     },
   },
   test: {

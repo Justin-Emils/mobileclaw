@@ -25,6 +25,10 @@ export default function SettingsScreen() {
   const [busy, setBusy] = useState(false);
   const [diag, setDiag] = useState<Diagnostics | undefined>();
   const [diagBusy, setDiagBusy] = useState(false);
+  /** Legacy shared-storage permissions; a separate mechanism from all-files access. */
+  const [runtimePermission, setRuntimePermission] = useState<
+    Awaited<ReturnType<ReturnType<typeof useRuntime>["checkStoragePermissions"]>> | undefined
+  >();
 
   useEffect(() => {
     setConfig(runtime.getConfig());
@@ -87,12 +91,23 @@ export default function SettingsScreen() {
     setDiagBusy(true);
     try {
       setDiag(await runtime.diagnostics());
+      // Checked separately because it is a different Android mechanism: a dialog-based
+      // runtime permission, not the settings-only all-files switch.
+      setRuntimePermission(await runtime.checkStoragePermissions());
     } catch (error) {
       setProbe(strings.settings.selfCheckFailed(error instanceof Error ? error.message : String(error)));
     } finally {
       setDiagBusy(false);
     }
   }, [runtime]);
+
+  const requestRuntimePermission = useCallback(async () => {
+    const outcome = await runtime.requestStoragePermissions();
+    setRuntimePermission(outcome);
+    setProbe(strings.settings.runtimeRequested(outcome.detail));
+    // Re-probe the all-files state too: granting one often changes the other's verdict.
+    void runDiagnostics();
+  }, [runtime, runDiagnostics]);
 
   /**
    * Android gives no dialog for all-files access, so this is the only route: jump to
@@ -294,6 +309,33 @@ export default function SettingsScreen() {
                     <Text style={styles.buttonGhostText}>{strings.settings.recheckStorage}</Text>
                   </Pressable>
                 </View>
+              </>
+            ) : null}
+
+            {/* The legacy permissions are enforced separately from all-files access, and
+                on Android 12 and below they are what actually gates reading a file. */}
+            <DiagRow
+              label={strings.settings.diagRuntimePermission}
+              value={
+                runtimePermission === undefined
+                  ? strings.settings.storageUnknown
+                  : runtimePermission.notNeeded
+                    ? strings.settings.runtimeNotNeeded
+                    : runtimePermission.granted
+                      ? strings.settings.runtimeGranted
+                      : strings.settings.runtimeMissing
+              }
+              ok={runtimePermission?.granted !== false}
+            />
+            {runtimePermission && !runtimePermission.granted && !runtimePermission.notNeeded ? (
+              <>
+                <Text style={styles.hint}>{strings.settings.runtimeHint}</Text>
+                <Pressable
+                  style={[styles.buttonGhost, styles.buttonFlex]}
+                  onPress={() => void requestRuntimePermission()}
+                >
+                  <Text style={styles.buttonGhostText}>{strings.settings.requestRuntimePermission}</Text>
+                </Pressable>
               </>
             ) : null}
             {diag.plugins

@@ -29,6 +29,11 @@ import {
   type AllFilesAccessReport,
 } from "./services/permissions";
 import { openAllFilesSettings } from "./services/settings-launcher";
+import {
+  checkLegacyStoragePermissions,
+  requestLegacyStoragePermissions,
+  type RuntimePermissionOutcome,
+} from "./services/storage-permissions";
 import { APP_PACKAGE } from "./services/app-info";
 import { describeWorkspace, workspacePath } from "./workspace";
 
@@ -251,6 +256,37 @@ export class MobileClawRuntime {
   /** Open the system screen where all-files access is toggled for this app. */
   async openStorageSettings(): Promise<{ opened: boolean; detail: string }> {
     return openAllFilesSettings(APP_PACKAGE);
+  }
+
+  /**
+   * Ask for the legacy shared-storage permissions.
+   *
+   * Separate from the all-files probe: `MANAGE_EXTERNAL_STORAGE` cannot be requested
+   * and only lives in system settings, while these two do have a dialog and are what
+   * Android 12 and below actually enforce.
+   */
+  async requestStoragePermissions(): Promise<RuntimePermissionOutcome> {
+    return requestLegacyStoragePermissions();
+  }
+
+  /** Whether those permissions are already granted, without prompting. */
+  async checkStoragePermissions(): Promise<RuntimePermissionOutcome> {
+    return checkLegacyStoragePermissions();
+  }
+
+  /**
+   * Small persisted flags, for "have we already done this once" questions.
+   *
+   * A generic pair rather than one method per flag: the alternative is a new runtime
+   * method every time the UI needs to remember something, and these carry no domain
+   * meaning worth modelling.
+   */
+  async getFlag(key: string): Promise<string | undefined> {
+    return this.deps.kv.get(`flag:${key}`);
+  }
+
+  async setFlag(key: string, value: string): Promise<void> {
+    await this.deps.kv.set(`flag:${key}`, value);
   }
 
   /**

@@ -36,6 +36,36 @@ a Play-style build.
 Because the agent works in **real paths**, `PathGuard` containment is what keeps it honest: the
 configured roots are the contract, and everything outside them is refused with an explanation.
 
+### Two storage permissions, not one
+
+Easy to conflate, and conflating them produces "the folder is empty" for a folder that is full:
+
+| Permission | Android | How it is granted | Without it |
+| --- | --- | --- | --- |
+| `READ_EXTERNAL_STORAGE` / `WRITE_EXTERNAL_STORAGE` (`maxSdkVersion=32` in the manifest) | ≤ 12 (API 32) | **Runtime dialog** (`PermissionsAndroid.requestMultiple`) | Shared storage is denied outright: names may still list, contents never read |
+| `MANAGE_EXTERNAL_STORAGE` | 11+ (API 30) | **No dialog** — only `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` in settings | Names list, but every file reports as non-existent |
+
+Declaring either in the manifest grants nothing. The app declared both and requested
+neither, which is the likeliest reason shared storage read as empty. Where the code lives:
+
+- `apps/mobile/src/runtime/services/permissions.ts` — pure: probes whether access is in
+  effect, and decides which legacy permissions a given API level needs. Unit-tested.
+- `apps/mobile/src/runtime/services/storage-permissions.ts` — device-only: the runtime
+  request and the settings jump. `runtime.ts` imports it, so vitest aliases `react-native`
+  to a stub (see `apps/mobile/vitest.config.ts`).
+- The chat screen asks once on first launch, guarded by a persisted flag; the settings
+  screen exposes both an "申请读写权限" button and the all-files settings jump.
+
+On Android 13+ the legacy pair is replaced by granular `READ_MEDIA_*`, so
+`legacyStoragePermissionsFor` returns nothing there — prompting would show no dialog and
+look like a silent failure.
+
+**Two failure modes look identical and are not.** "Not allowed to look" and "allowed to
+look and it is empty" both surface as an empty listing. `probeAllFilesAccess` distinguishes
+them by probing directories that are never empty on a real phone, and both `fs_list` and
+`fs_search` report entries they could not read instead of dropping them — a silent drop is
+what let the agent conclude a full folder was empty.
+
 ## 2. Executing commands and binaries
 
 Two hard constraints:

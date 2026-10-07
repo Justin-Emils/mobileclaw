@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { DirEntry, FileSystemService } from "@mobileclaw/core";
 import {
   describeStorageAccess,
+  legacyStoragePermissionsFor,
   probeAllFilesAccess,
   type AllFilesAccessReport,
 } from "@/runtime/services/permissions";
@@ -89,6 +90,33 @@ describe("probeAllFilesAccess", () => {
     const report = await probeAllFilesAccess(fs);
     expect(report.status).toBe("granted");
     expect(report.probe).toBe("/storage/emulated/0");
+  });
+});
+
+describe("legacyStoragePermissionsFor", () => {
+  // Declaring a permission in the manifest does not grant it; on Android 12 and below
+  // these two are what actually gate reading a file in shared storage, and nothing
+  // requested them until now.
+  it("asks for both legacy permissions up to Android 12L", () => {
+    expect(legacyStoragePermissionsFor(29)).toEqual([
+      "android.permission.READ_EXTERNAL_STORAGE",
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+    ]);
+    expect(legacyStoragePermissionsFor(30)).toHaveLength(2);
+    expect(legacyStoragePermissionsFor(32)).toHaveLength(2);
+  });
+
+  it("asks for nothing on Android 13 and later", () => {
+    // API 33 replaced them with READ_MEDIA_*; prompting would show no dialog at all
+    // and the attempt would look like a silent failure.
+    expect(legacyStoragePermissionsFor(33)).toEqual([]);
+    expect(legacyStoragePermissionsFor(34)).toEqual([]);
+    expect(legacyStoragePermissionsFor(36)).toEqual([]);
+  });
+
+  it("still asks on ancient releases, where the permissions existed", () => {
+    expect(legacyStoragePermissionsFor(23)).toHaveLength(2);
+    expect(legacyStoragePermissionsFor(0)).toHaveLength(2);
   });
 });
 
