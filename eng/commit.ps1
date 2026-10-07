@@ -117,40 +117,46 @@ try {
     # ------------------------------------------------------------------- sanity
     Push-Location $RepoRoot
     try {
-        git rev-parse --is-inside-work-tree 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { Fail "$RepoRoot is not a git work tree" }
+        # Every git call goes through Invoke-Native. Even a benign warning on
+        # stderr (git prints CRLF notices there) would otherwise terminate the
+        # script under $ErrorActionPreference = 'Stop'.
+        if ((Invoke-Native -File 'git' -Arguments @('rev-parse', '--is-inside-work-tree')).Code -ne 0) {
+            Fail "$RepoRoot is not a git work tree"
+        }
 
-        $name = git config user.name
-        $email = git config user.email
+        $name = (Invoke-Native -File 'git' -Arguments @('config', 'user.name')).Output
+        $email = (Invoke-Native -File 'git' -Arguments @('config', 'user.email')).Output
         if ([string]::IsNullOrWhiteSpace($name) -or [string]::IsNullOrWhiteSpace($email)) {
             Fail 'git user.name / user.email are not configured; commits would fail or be unattributed'
         }
 
-        $remote = git remote get-url origin 2>$null
-        if ($LASTEXITCODE -ne 0) {
+        $remoteResult = Invoke-Native -File 'git' -Arguments @('remote', 'get-url', 'origin')
+        $remote = if ($remoteResult.Code -eq 0) { $remoteResult.Output } else { '' }
+        if (-not $remote) {
             Write-Log 'no "origin" remote configured; committing locally only' 'WARN'
             $NoPush = $true
         }
 
         # ------------------------------------------------------------- changes
-        $dirty = git status --porcelain
-        if (-not $dirty) {
+        $status = Invoke-Native -File 'git' -Arguments @('status', '--porcelain')
+        if ($status.Code -ne 0) { Fail "git status failed: $($status.Output)" }
+        if ([string]::IsNullOrWhiteSpace($status.Output)) {
             Write-Log 'no changes to commit'
             exit 0
         }
 
-        $changed = @($dirty | Where-Object { $_ -match '\S' })
-        git add -A
-        if ($LASTEXITCODE -ne 0) { Fail 'git add failed' }
+        $added = Invoke-Native -File 'git' -Arguments @('add', '-A')
+        if ($added.Code -ne 0) { Fail "git add failed: $($added.Output)" }
 
         # Count what is actually staged: this is what would enter history.
-        $staged = @(git diff --cached --name-only)
+        $stagedResult = Invoke-Native -File 'git' -Arguments @('diff', '--cached', '--name-only')
+        $staged = @($stagedResult.Output -split "`n" | Where-Object { $_.Trim() -ne '' })
         if ($staged.Count -eq 0) {
             Write-Log 'nothing staged after add (only ignored paths changed?)' 'WARN'
             exit 0
         }
         if ($staged.Count -gt $MaxFiles) {
-            git reset -q
+            Invoke-Native -File 'git' -Arguments @('reset', '-q') | Out-Null
             Fail "refusing to commit $($staged.Count) files (limit $MaxFiles): check .gitignore before committing a generated tree"
         }
 
@@ -164,9 +170,9 @@ try {
             $message = "chore: checkpoint $stamp`n`n$($staged.Count) file(s): $summary"
         }
 
-        git commit -q -m $message
-        if ($LASTEXITCODE -ne 0) { Fail 'git commit failed' }
-        $sha = (git rev-parse --short HEAD).Trim()
+        $commit = Invoke-Native -File 'git' -Arguments @('commit', '-q', '-m', $message)
+        if ($commit.Code -ne 0) { Fail "git commit failed: $($commit.Output)" }
+        $sha = (Invoke-Native -File 'git' -Arguments @('rev-parse', '--short', 'HEAD')).Output
         Write-Log "committed $sha ($($staged.Count) file(s))" 'OK'
 
         # ----------------------------------------------------------------- push
