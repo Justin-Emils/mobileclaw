@@ -11,14 +11,16 @@
   "scripts": {
     "typecheck": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" run typecheck",
     "test": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" run test",
-    "check": "pnpm run typecheck && pnpm run test",
+    "bundle": "pnpm --filter @mobileclaw/mobile run bundle",
+    "doctor": "pnpm --filter @mobileclaw/mobile exec expo-doctor",
+    "check": "pnpm run typecheck && pnpm run test && pnpm run bundle",
     "mobile": "pnpm --filter @mobileclaw/mobile run start",
     "android": "pnpm --filter @mobileclaw/mobile run prebuild && pnpm --filter @mobileclaw/mobile run android",
-    "doctor": "pnpm --filter @mobileclaw/mobile run doctor",
     "apk": "pnpm --filter @mobileclaw/mobile run build:apk",
     "apk:dev": "pnpm --filter @mobileclaw/mobile run build:dev"
   },
   "devDependencies": {
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "expo-doctor": "^1.20.4"
   }
 }

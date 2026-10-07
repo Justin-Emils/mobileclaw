@@ -19,3 +19,6 @@ coverage/
 
 # Auto-commit job output (see eng/commit.ps1)
 .logs/
+
+# Local Metro bundle used by `pnpm bundle` to verify the app compiles
+apps/mobile/.expo-export-check/

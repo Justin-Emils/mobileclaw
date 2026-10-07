@@ -52,9 +52,15 @@ reported precisely instead of failing mid-conversation.
 
 ```bash
 pnpm install
-pnpm check            # typecheck + 114 unit tests, no device needed
+pnpm check            # typecheck + 114 tests + a real Metro bundle, no device needed
+pnpm doctor           # expo-doctor: dependency/SDK consistency (21 checks)
 pnpm mobile           # Metro for a dev build (needs a dev client installed)
 ```
+
+`pnpm check` deliberately includes **`pnpm bundle`** (`expo export --platform android`). Type
+checking and unit tests both resolve the `@/*` aliases and `.ts` sources themselves, so they cannot
+catch the two failures that actually block a device build: Metro not reading tsconfig `paths`, and
+`.js` suffixes on extensionless TypeScript imports. Only a real bundle does.
 
 Building an installable APK **in the cloud, with no Android SDK on your machine**:
 
@@ -70,6 +76,15 @@ The default `production` profile builds an `.aab` for stores; `preview` and `dev
 
 Then, in the app: **Settings → pick a provider preset → paste an API key → Test connection**.
 The key is written to `expo-secure-store`.
+
+### Two rules to keep the bundle green
+
+1. **Never pin an Expo package version by hand.** SDK 57 versions them all as `~57.x`; guessing from
+   an older SDK era produces a bundle that installs but breaks. Add dependencies with
+   `npx expo install <pkg>` and re-check with `pnpm doctor`.
+2. **No file extensions on relative or aliased imports.** Use `from "./foo"`, not `from "./foo.js"` —
+   Metro cannot map `./foo.js` onto `foo.ts`, while `tsc` and vitest happily can, so the mistake is
+   invisible until you bundle.
 
 ## What the agent can do today
 
