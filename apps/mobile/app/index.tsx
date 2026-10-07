@@ -175,11 +175,11 @@ export default function ChatScreen() {
         </Text>
         <View style={styles.headerActions}>
           <Pressable onPress={newChat} style={styles.headerButton}>
-            <Text style={styles.headerButtonText}>New</Text>
+            <Text style={styles.headerButtonText}>{strings.common.new}</Text>
           </Pressable>
           <Link href="/settings" asChild>
             <Pressable style={styles.headerButton}>
-              <Text style={styles.headerButtonText}>Settings</Text>
+              <Text style={styles.headerButtonText}>{strings.common.settings}</Text>
             </Pressable>
           </Link>
         </View>
@@ -240,7 +240,7 @@ export default function ChatScreen() {
         />
         {running ? (
           <Pressable style={[styles.send, styles.stop]} onPress={stop}>
-            <Text style={styles.sendText}>Stop</Text>
+            <Text style={styles.sendText}>{strings.common.stop}</Text>
           </Pressable>
         ) : (
           <Pressable
@@ -248,7 +248,7 @@ export default function ChatScreen() {
             onPress={() => void send()}
             disabled={!ready || draft.trim() === ""}
           >
-            <Text style={styles.sendText}>Run</Text>
+            <Text style={styles.sendText}>{strings.common.run}</Text>
           </Pressable>
         )}
       </View>

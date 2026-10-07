@@ -231,6 +231,44 @@ describe("filesystem tools", () => {
     expect(result.data.count).toBe(12);
   });
 
+  it("flags hidden and app-owned entries so the model asks before touching them", async () => {
+    const { fs } = buildTools();
+    await mkdir(join(root, ".csj"));
+    await mkdir(join(root, "Telegram"));
+    await mkdir(join(root, "MyStuff"));
+    await writeFile(join(root, "notes.md"), "x");
+
+    const list = tool("fs_list");
+    const result = (await list.execute!({ path: root, limit: 200 } as never, call as never)) as {
+      display: string;
+      data: { special: { name: string; reason: string }[] };
+    };
+
+    // Separated and labelled: these must not be reorganised without asking.
+    expect(result.display).toContain("special or app-owned entries");
+    expect(result.display).toContain(".csj/ [hidden]");
+    expect(result.display).toContain("Telegram/ [owned by another app]");
+    // The user's own folder stays in the normal list.
+    expect(result.display).toContain("MyStuff/");
+    expect(result.display).not.toContain("MyStuff/ [");
+
+    expect(result.data.special.map((entry) => entry.name).sort()).toEqual([".csj", "Telegram"]);
+    expect(result.data.special.find((entry) => entry.name === ".csj")?.reason).toBe("hidden");
+  });
+
+  it("tells the model that an empty search is not an empty folder", async () => {
+    const { fs } = buildTools();
+    await mkdir(join(root, "Telegram"));
+    const search = tool("fs_search");
+    const result = (await search.execute!(
+      { glob: "**/*", path: root, limit: 50, ignoreCase: false } as never,
+      call as never,
+    )) as { display: string };
+    expect(result.display).toContain("0 file(s)");
+    expect(result.display).toContain("No results");
+    expect(result.display).toContain("glob matches FILES, not directories");
+  });
+
   it("formats sizes so an organise task can compare files", async () => {
     const { fs } = buildTools();
     await writeFile(join(root, "small.txt"), "x".repeat(300));

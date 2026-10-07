@@ -387,6 +387,37 @@ describe("Agent", () => {
     expect(text).toContain("Send another message to continue");
   });
 
+  it("instructs the model to answer in the user's language", async () => {
+    const provider = new MockProvider({ turns: ["ok"] });
+    const agent = new Agent({
+      provider,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+    });
+    await run(agent, "整理我的下载目录");
+    const system = provider.requests[0]?.messages[0]?.content ?? "";
+    // The instruction has to be explicit: a soft "use the user's language" was
+    // ignored in practice and the model answered a Chinese request in English.
+    expect(system).toMatch(/same language as the user's most recent message/i);
+    expect(system).toMatch(/never switch to English/i);
+  });
+
+  it("tells the model to ask before touching app-owned folders", async () => {
+    const provider = new MockProvider({ turns: ["ok"] });
+    const agent = new Agent({
+      provider,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+    });
+    await run(agent, "tidy up");
+    const system = provider.requests[0]?.messages[0]?.content ?? "";
+    expect(system).toMatch(/do NOT move or delete them on your own/i);
+    expect(system).toContain("WeiXin");
+    expect(system).toContain(".thumbnails");
+  });
+
   it("renders a tool-authored display for the model and data for the UI", async () => {
     const registry = new ToolRegistry().register({
       name: "fs_list",

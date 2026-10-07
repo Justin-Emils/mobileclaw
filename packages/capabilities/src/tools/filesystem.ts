@@ -54,8 +54,10 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
 
       const entries = await fs.list(input.path);
       const capped = capEntries(entries, input.limit);
-      const directories = capped.shown.filter((entry) => entry.isDirectory);
-      const files = capped.shown.filter((entry) => entry.isFile);
+      const special = capped.shown.filter(isSpecialEntry);
+      const regular = capped.shown.filter((entry) => !isSpecialEntry(entry));
+      const directories = regular.filter((entry) => entry.isDirectory);
+      const files = regular.filter((entry) => entry.isFile);
 
       const lines = [
         `${input.path} — ${entries.length} entries (${entries.filter((e) => e.isDirectory).length} folders, ${entries.filter((e) => e.isFile).length} files)`,
@@ -65,6 +67,15 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       }
       if (files.length > 0) {
         lines.push(`files:\n${files.map((entry) => `  ${formatEntry(entry)}`).join("\n")}`);
+      }
+      if (special.length > 0) {
+        // Named and separated on purpose: these are app-owned or hidden and must
+        // not be moved without asking, so the model has to see them as a group.
+        lines.push(
+          `special or app-owned entries (ask the user before moving or deleting these):\n${special
+            .map((entry) => `  ${entry.name}${entry.isDirectory ? "/" : ""} [${specialReason(entry)}]`)
+            .join("\n")}`,
+        );
       }
       if (entries.length === 0) lines.push("(empty)");
       if (capped.omitted > 0) {
@@ -80,6 +91,11 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
           files: entries
             .filter((entry) => entry.isFile)
             .map((entry) => ({ name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs })),
+          special: special.map((entry) => ({
+            name: entry.name,
+            isDirectory: entry.isDirectory,
+            reason: specialReason(entry),
+          })),
           truncated: capped.omitted > 0,
         },
       };
@@ -198,11 +214,13 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
         throw new CoreError("E_TOOL_INPUT", "provide `glob`, `content` or both");
       }
       const result: Record<string, unknown> = {};
+      let globbed: string[] | undefined;
       if (input.glob) {
-        result["files"] = await fs.glob(input.glob, {
+        globbed = await fs.glob(input.glob, {
           ...(input.path ? { cwd: input.path } : {}),
           limit: input.limit,
         });
+        result["files"] = globbed;
       }
       if (input.content) {
         result["matches"] = await fs.grep(input.content, {
@@ -211,7 +229,32 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
           ignoreCase: input.ignoreCase,
         });
       }
-      return result;
+
+      // A search that finds nothing is a result the model must not misread as
+      // "the folder is empty" — a listing that showed folders proves otherwise.
+      const found =
+        (Array.isArray(globbed) ? globbed.length : 0) +
+        (Array.isArray(result["matches"]) ? (result["matches"] as unknown[]).length : 0);
+      const lines: string[] = [];
+      if (Array.isArray(globbed)) {
+        lines.push(`glob ${input.glob}: ${globbed.length} file(s)`);
+        for (const file of globbed.slice(0, 40)) lines.push(`  ${file}`);
+        if (globbed.length > 40) lines.push(`  … ${globbed.length - 40} more`);
+      }
+      if (Array.isArray(result["matches"])) {
+        const matches = result["matches"] as { path: string; line: number; text: string }[];
+        lines.push(`content /${input.content}/: ${matches.length} match(es)`);
+        for (const match of matches.slice(0, 40)) {
+          lines.push(`  ${match.path}:${match.line}: ${match.text}`);
+        }
+      }
+      if (found === 0) {
+        lines.push(
+          "No results. Note: a glob matches FILES, not directories — reaching files inside deep app folders often needs an explicit path (e.g. path=…/Telegram) or `**/*` with a smaller base directory.",
+        );
+      }
+
+      return { display: lines.join("\n"), data: result };
     },
   } satisfies AnyToolDefinition;
 
@@ -312,6 +355,46 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
 }
 
 /* ------------------------------------------------------------- formatting */
+
+/**
+ * Folders owned by other apps. Moving their contents usually breaks that app or
+ * gets silently recreated, so a listing calls them out instead of treating them
+ * like the user's own files.
+ */
+const APP_OWNED_FOLDERS = new Set([
+  "android",
+  "telegram",
+  "weixin",
+  "qq",
+  "baidu",
+  "baidunetdisk",
+  "quark",
+  "quarkscan",
+  "midrive",
+  "xiaomi",
+  "neteasemusic",
+  "downloaded_rom",
+  "tencent",
+  "alipay",
+  "taobao",
+  "bilibili",
+  "douyin",
+  "kugou",
+  "thumbnails",
+  ".thumbnails",
+]);
+
+/** Hidden (dot-prefixed) or owned by another app. */
+export function isSpecialEntry(entry: { name: string }): boolean {
+  if (entry.name.startsWith(".")) return true;
+  return APP_OWNED_FOLDERS.has(entry.name.toLowerCase());
+}
+
+/** Why an entry is flagged, worded for the model to relay to the user. */
+export function specialReason(entry: { name: string; isDirectory: boolean }): string {
+  if (entry.name.startsWith(".")) return "hidden";
+  return entry.isDirectory ? "owned by another app" : "possibly another app's file";
+}
 
 /**
  * Cap a listing so neither the model's context nor the transcript drowns.
