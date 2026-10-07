@@ -24,6 +24,12 @@ import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore } from "./services/secrets";
+import {
+  openAllFilesSettings,
+  probeAllFilesAccess,
+  type AllFilesAccessReport,
+} from "./services/permissions";
+import { APP_PACKAGE } from "./services/app-info";
 
 export interface RuntimeDeps {
   config: unknown;
@@ -195,8 +201,12 @@ export class MobileClawRuntime {
     roots: string[];
     tools: number;
     plugins: { name: string; status: string; tools: number; error?: string }[];
+    storageAccess: AllFilesAccessReport;
   }> {
     const secretStore = await this.probeSecretStore();
+    // Probed on every call rather than cached: the user can grant access in system
+    // settings and come straight back, and a cached "denied" would then be a lie.
+    const storageAccess = await this.checkStorageAccess();
     return {
       apiKeyPresent: this.apiKey !== "",
       apiKeyLength: this.apiKey.length,
@@ -208,7 +218,24 @@ export class MobileClawRuntime {
       roots: [...this.config.roots],
       tools: this.registry.names().length,
       plugins: this.pluginStatus(),
+      storageAccess,
     };
+  }
+
+  /**
+   * Whether shared storage is genuinely readable, with the evidence.
+   *
+   * Without all-files access an Android app still sees directory *names* in shared
+   * storage while every file inside reads as non-existent, so the agent concluded
+   * folders were empty. This distinguishes "empty" from "not allowed to look".
+   */
+  async checkStorageAccess(): Promise<AllFilesAccessReport> {
+    return probeAllFilesAccess(this.deps.fs);
+  }
+
+  /** Open the system screen where all-files access is toggled for this app. */
+  async openStorageSettings(): Promise<{ opened: boolean; detail: string }> {
+    return openAllFilesSettings(APP_PACKAGE);
   }
 
   /** Write a probe value, read it back, then restore the real key untouched. */
