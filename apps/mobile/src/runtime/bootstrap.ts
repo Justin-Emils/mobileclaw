@@ -83,6 +83,8 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),
+    // Diagnostics only: lets the storage probe compare path forms against the real API.
+    fileCtorForDiagnostics: expoFsModule().File,
     onConfigChange: async (next) => {
       await kv.set(CONFIG_KEY, JSON.stringify(next));
     },

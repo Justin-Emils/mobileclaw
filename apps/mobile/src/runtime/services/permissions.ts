@@ -99,6 +99,48 @@ function isTopLevelSharedRoot(path: string): boolean {
 }
 
 /**
+ * Diagnostic: try writing the same shared-storage path three ways.
+ *
+ * The guarded path failed with "Call to function 'FileSystemFile.create' has been
+ * rejected" even with all-files access granted and a working write to app-private
+ * storage, so the question is what the driver hands to expo-file-system. Reported
+ * through the probe detail, which is logged on every check.
+ */
+export interface FileCtor {
+  // Deliberately loose: expo's `File` has a richer surface (size, text(), ...) and its
+  // `create` takes an options object. This only needs to construct, create and write.
+  new (path: string): any;
+}
+
+export async function describeWriteVariants(
+  fileCtor: FileCtor,
+  dir: string,
+  name: string,
+): Promise<string> {
+  const plain = `${dir}/${name}`;
+  const withScheme = `file://${plain}`;
+  const encoded = `file://${plain.split("/").map(encodeURIComponent).join("/")}`;
+  const out: string[] = [];
+  for (const [label, target] of [
+    ["inherit-path", plain],
+    ["file-scheme", withScheme],
+    ["encoded-uri", encoded],
+  ] as const) {
+    try {
+      const file = new fileCtor(target);
+      if (!file.exists) file.create();
+      file.write("ok");
+      file.delete();
+      out.push(`${label}=OK`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      out.push(`${label}=${message.slice(0, 70)}`);
+    }
+  }
+  return out.join(" | ");
+}
+
+/**
  * Decide whether all-files access is in effect, by writing then reading a file.
  *
  * Three earlier attempts were wrong, and each looked fine in unit tests:
@@ -118,6 +160,7 @@ function isTopLevelSharedRoot(path: string): boolean {
 export async function probeAllFilesAccess(
   fs: FileSystemService,
   roots: string[] = [],
+  writeVariants?: (dir: string, name: string) => Promise<string>,
 ): Promise<AllFilesAccessReport> {
   const sharedRoots = roots.filter((root) => isSharedStorageRoot(root));
   if (sharedRoots.length === 0) {
@@ -149,20 +192,27 @@ export async function probeAllFilesAccess(
 
   const evidence: string[] = [];
   let sawRefusal = false;
+  /**
+   * Whether the app's own storage is writable.
+   *
+   * This is the control in the experiment. The file API obviously works when a private
+   * write round-trips, so a shared-storage failure is then about *that location's*
+   * permission rather than about the API. Without this distinction the message sends
+   * users to Settings when the cause could be something else entirely.
+   */
+  let privateWritable = false;
 
-  // Diagnostic first pass: can the app create a file ANYWHERE its own roots allow?
-  // If private storage also refuses, the problem is the file API, not the permission --
-  // and reporting "denied" would send the user to Settings for nothing.
   for (const root of roots.filter((candidate) => !isSharedStorageRoot(candidate))) {
     const privatePath = `${root.replace(/\/+$/, "")}/${PROBE_FILE_NAME}`;
     try {
       await fs.write(privatePath, "ok");
       const readBack = await fs.read(privatePath);
       await fs.remove(privatePath).catch(() => undefined);
+      privateWritable = readBack === "ok";
       evidence.push(`私有根可写(读回=${readBack === "ok" ? "ok" : "不符"})`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      evidence.push(`私有根写入失败=${message.slice(0, 100)}`);
+      evidence.push(`私有根写入失败=${message.slice(0, 80)}`);
     }
     break;
   }
@@ -196,12 +246,26 @@ export async function probeAllFilesAccess(
     }
   }
 
-  if (sawRefusal) {
+  if (sawRefusal && privateWritable) {
+    // The file API works (private writes round-trip) and shared storage refuses. On
+    // Android that is the all-files-access signature, so send the user there.
     return {
       status: "denied",
       detail:
-        `共享存储存在但写入/读取被拒（探测：${evidence.slice(0, 3).join("; ")}）。` +
-        "这通常是「无所有文件访问权限」的表现。请在系统设置里为本应用开启「所有文件访问」。",
+        `共享存储可列名但写入被拒，而应用自身目录可写（${evidence.slice(0, 2).join("; ")}）。` +
+        "这通常是「无所有文件访问权限」的表现，请在系统设置里为本应用开启「所有文件访问」。",
+      entries: 0,
+    };
+  }
+  if (sawRefusal) {
+    // Shared storage refuses AND private writes fail: the problem is not the storage
+    // permission, so telling the user to grant one would waste their time. Verified on
+    // an emulator that shared writes can fail while the permission is granted.
+    return {
+      status: "unknown",
+      detail:
+        `共享存储与应用自身目录都无法写入（${evidence.slice(0, 2).join("; ")}）。` +
+        "这不像是权限问题，请在设置页运行自检并把结果反馈。",
       entries: 0,
     };
   }

@@ -28,7 +28,12 @@ interface FakeFs {
   restricted: (path: string) => boolean;
 }
 
-function fakeFs(options: { roots: string[]; restrictAll?: boolean; failWrite?: boolean }): FakeFs {
+function fakeFs(options: {
+  roots: string[];
+  restrictAll?: boolean;
+  /** Which writes fail: only those under this prefix, or every write. */
+  failWrite?: "all" | string;
+}): FakeFs {
   const files = new Map<string, string>();
   const restricted = (path: string): boolean => {
     if (options.restrictAll) return true;
@@ -38,6 +43,11 @@ function fakeFs(options: { roots: string[]; restrictAll?: boolean; failWrite?: b
     if (restricted(path)) {
       throw new Error(`read is restricted to: ${options.roots.join(", ")}`);
     }
+  };
+  const writeFails = (path: string): boolean => {
+    if (options.failWrite === undefined) return false;
+    if (options.failWrite === "all") return true;
+    return path.startsWith(options.failWrite);
   };
   const fs = {
     async read(path: string) {
@@ -49,7 +59,7 @@ function fakeFs(options: { roots: string[]; restrictAll?: boolean; failWrite?: b
     async write(path: string, data: string | Uint8Array) {
       guard(path);
       // A directory that exists but refuses writes is the denial signature.
-      if (options.failWrite) throw new Error("EACCES: permission denied");
+      if (writeFails(path)) throw new Error("EACCES: permission denied");
       const text = typeof data === "string" ? data : new TextDecoder().decode(data);
       files.set(path, text);
       return { path, name: path.split("/").pop() ?? path, size: text.length, isDirectory: false, isFile: true };
@@ -80,12 +90,24 @@ describe("probeAllFilesAccess", () => {
     expect(files.size).toBe(0);
   });
 
-  it("reports denied when writes inside a shared root are refused", async () => {
-    // Scoped storage without all-files access: the path exists, the write does not.
-    const { fs } = fakeFs({ roots: SHARED_ONLY_ROOTS, failWrite: true });
-    const report = await probeAllFilesAccess(fs, SHARED_ONLY_ROOTS);
+  it("reports denied when shared writes are refused but private writes work", async () => {
+    // The denial signature needs a control: if the app can write its own directory, the
+    // file API works and the refusal really is about shared-storage permission. Without
+    // the control there is nothing to conclude, which the next case covers.
+    const { fs } = fakeFs({ roots: ROOTS, failWrite: SHARED_ROOT });
+    const report = await probeAllFilesAccess(fs, ROOTS);
     expect(report.status).toBe("denied");
     expect(report.detail).toContain("所有文件访问");
+  });
+
+  it("concludes nothing when both shared and private writes fail", async () => {
+    // Telling a user to grant a storage permission would be wrong here: something else
+    // is broken. Found on an emulator, where shared writes failed even with the
+    // permission granted.
+    const { fs } = fakeFs({ roots: ROOTS, failWrite: "all" });
+    const report = await probeAllFilesAccess(fs, ROOTS);
+    expect(report.status).toBe("unknown");
+    expect(report.detail).toContain("不像是权限问题");
   });
 
   it("reports unknown when every candidate is outside the roots", async () => {

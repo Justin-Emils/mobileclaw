@@ -45,20 +45,45 @@ export interface ExpoDirectoryLike {
   move(target: ExpoFileLike | ExpoDirectoryLike): void;
 }
 
-/** Convert a `file://` URI (Expo) to a plain path (the guard's vocabulary). */
+/**
+ * Convert a `file://` URI (Expo) to a plain path (the guard's vocabulary).
+ *
+ * Handles both `file:///abs/path` (empty authority, Android's usual form) and a
+ * malformed `file://abs/path`, where the first segment was taken as the host.
+ */
 export function uriToPath(uri: string): string {
   if (!uri.startsWith("file://")) return uri;
-  const withoutScheme = uri.slice("file://".length);
+  const rest = uri.slice("file://".length);
+  // `file:///a/b` -> rest = "/a/b"; `file://a/b` -> rest = "a/b" (host was "a").
+  const withoutAuthority = rest.startsWith("/") ? rest : `/${rest}`;
   try {
-    return decodeURIComponent(withoutScheme);
+    // Collapse any accidental double slash left by an encoded leading separator.
+    return decodeURIComponent(withoutAuthority).replace(/^\/{2,}/, "/");
   } catch {
-    return withoutScheme;
+    return withoutAuthority.replace(/^\/{2,}/, "/");
   }
 }
 
+/**
+ * Convert a plain absolute path to the `file://` URI expo-file-system expects.
+ *
+ * Android needs `file:///path` — three slashes, i.e. an **empty authority**. Splitting
+ * on "/" already yields a leading empty segment, so joining the encoded parts and
+ * prefixing `file://` produces exactly that; the empty segment becomes the empty
+ * authority rather than an encoded `%2F`.
+ *
+ * (An earlier commit claimed this function was mis-encoding the leading slash and
+ * produced `file://%2Fstorage/...`. That was wrong — `encodeURIComponent("")` is `""`,
+ * not `%2F` — and the claim sent one round of investigation in the wrong direction. The
+ * shared-storage write failure is NOT caused by this function. Left documented so the
+ * incorrect diagnosis is not repeated.)
+ */
 export function pathToUri(path: string): string {
   if (path.startsWith("file://")) return path;
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const encoded = path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
   return `file://${encoded}`;
 }
 

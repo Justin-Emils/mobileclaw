@@ -25,8 +25,10 @@ import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore } from "./services/secrets";
 import {
+  describeWriteVariants,
   probeAllFilesAccess,
   type AllFilesAccessReport,
+  type FileCtor,
 } from "./services/permissions";
 import { openAllFilesSettings } from "./services/settings-launcher";
 import {
@@ -59,6 +61,13 @@ export interface RuntimeDeps {
    * somewhere unintended. The bootstrap passes the platform's documents directory.
    */
   workspaceBaseDir: string;
+  /**
+   * The expo-file-system `File` constructor, for diagnostics only.
+   *
+   * Injected rather than imported so `runtime.ts` keeps no direct dependency on the
+   * native module; the probe uses it to compare how a path must be expressed.
+   */
+  fileCtorForDiagnostics?: FileCtor;
   /** Extra lines appended to the system prompt (device facts, roots, date). */
   environment?: () => string | Promise<string>;
   /** Persist config changes made through the UI. */
@@ -252,13 +261,27 @@ export class MobileClawRuntime {
   async checkStorageAccess(): Promise<AllFilesAccessReport> {
     // Roots are passed in because the probe must stay inside them: the path guard
     // rejects anything else, which previously made the verdict permanent `unknown`.
-    const report = await probeAllFilesAccess(this.deps.fs, [...this.config.roots]);
+    const report = await probeAllFilesAccess(this.deps.fs, [...this.config.roots], this.writeVariantReport);
     // Logged because the verdict is a heuristic over several probe directories, and a
     // wrong one is indistinguishable from a real permission problem without the raw
     // per-probe evidence. `adb logcat -s ReactNativeJS` shows it on a device.
     console.log(`[mobileclaw] storage access=${report.status} ${report.detail}`);
     return report;
   }
+
+  /**
+   * Compare the ways a path can be handed to expo-file-system.
+   *
+   * Only used to explain a failed shared-storage write: the guarded path failed with a
+   * native "create has been rejected" while app-private writes succeeded, so the
+   * question is which form of the path the file API actually accepts.
+   */
+  private writeVariantReport = async (dir: string, name: string): Promise<string> => {
+    if (!dir) return "无可探测目录";
+    const fileCtor = this.deps.fileCtorForDiagnostics;
+    if (!fileCtor) return "无文件构造器";
+    return describeWriteVariants(fileCtor, dir, name);
+  };
 
   /** Open the system screen where all-files access is toggled for this app. */
   async openStorageSettings(): Promise<{ opened: boolean; detail: string }> {
