@@ -3,8 +3,25 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { TranscriptEntry } from "@mobileclaw/core";
 import { safeStringify } from "@mobileclaw/core";
 import { statusColor, theme } from "@/ui/theme";
+import { strings } from "@/ui/strings";
 
 type ToolEntry = Extract<TranscriptEntry, { kind: "tool" }>;
+
+/** 工具状态的显示名：内核用小写英文，界面用中文。 */
+function statusLabel(status: ToolEntry["status"]): string {
+  switch (status) {
+    case "running":
+      return strings.tool.statusRunning;
+    case "ok":
+      return strings.tool.statusOk;
+    case "error":
+      return strings.tool.statusError;
+    case "denied":
+      return strings.tool.statusDenied;
+    default:
+      return status;
+  }
+}
 
 /**
  * One tool call in the transcript.
@@ -28,7 +45,7 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
         <Text style={styles.summary} numberOfLines={1}>
           {title === entry.name ? "" : title}
         </Text>
-        <Text style={[styles.status, { color }]}>{entry.status}</Text>
+        <Text style={[styles.status, { color }]}>{statusLabel(entry.status)}</Text>
         {entry.durationMs !== undefined ? (
           <Text style={styles.duration}>{Math.round(entry.durationMs)}ms</Text>
         ) : null}
@@ -36,17 +53,17 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
 
       {open ? (
         <View style={styles.body}>
-          <Text style={styles.label}>input</Text>
+          <Text style={styles.label}>{strings.tool.input}</Text>
           <Text style={styles.code}>{safeStringify(entry.input, 2)}</Text>
           {entry.output !== undefined ? (
             <>
-              <Text style={styles.label}>output</Text>
+              <Text style={styles.label}>{strings.tool.output}</Text>
               <Text style={styles.code}>{entry.output}</Text>
             </>
           ) : null}
           {entry.error !== undefined ? (
             <>
-              <Text style={styles.label}>error</Text>
+              <Text style={styles.label}>{strings.tool.error}</Text>
               <Text style={[styles.code, { color: theme.colors.danger }]}>{entry.error}</Text>
             </>
           ) : null}

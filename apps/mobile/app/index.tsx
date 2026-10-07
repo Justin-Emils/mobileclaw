@@ -15,6 +15,7 @@ import type { AgentEvent, TranscriptEntry } from "@mobileclaw/core";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { ApprovalSheet } from "@/ui/approval-sheet";
 import { ToolCard } from "@/ui/tool-card";
+import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
 interface Bubble {
@@ -95,9 +96,9 @@ export default function ChatScreen() {
             // Turn the two failures a new user actually hits into instructions
             // rather than a dead end. A missing key is a setup step, not a bug.
             const text = raw.includes("no API key configured")
-              ? "No API key yet. Open Settings → API key, paste a key and tap Save key (typing alone does not store it). Settings → Self-check confirms it landed."
+              ? strings.errors.missingApiKey
               : raw.includes("HTTP 401") || raw.includes("HTTP 403")
-                ? `${raw} — the key was rejected. Check it against your provider's dashboard.`
+                ? strings.errors.unauthorized(raw)
                 : raw;
             setBubbles((current) => [
               ...current,
@@ -112,7 +113,7 @@ export default function ChatScreen() {
           if (result.stopReason === "step_limit") {
             setBubbles((current) => [
               ...current,
-              { id: `n_${Date.now()}`, role: "notice", level: "warn", text: `Stopped after ${result.steps} steps.` },
+              { id: `n_${Date.now()}`, role: "notice", level: "warn", text: strings.chat.stoppedAfter(result.steps) },
             ]);
           }
           break;
@@ -159,7 +160,7 @@ export default function ChatScreen() {
     >
       <View style={styles.header}>
         <Text style={styles.headerModel} numberOfLines={1}>
-          {runtime ? `${runtime.providerInfo().label} · ${runtime.providerInfo().model}` : "starting…"}
+          {runtime ? `${runtime.providerInfo().label} · ${runtime.providerInfo().model}` : strings.chat.starting}
         </Text>
         <View style={styles.headerActions}>
           <Pressable onPress={newChat} style={styles.headerButton}>
@@ -180,7 +181,7 @@ export default function ChatScreen() {
           ) : (
             <>
               <ActivityIndicator color={theme.colors.accent} />
-              <Text style={styles.muted}>loading capabilities…</Text>
+              <Text style={styles.muted}>{strings.chat.loadingCapabilities}</Text>
             </>
           )}
         </View>
@@ -212,7 +213,7 @@ export default function ChatScreen() {
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Ask MobileClaw to do something on this phone…"
+          placeholder={strings.chat.placeholder}
           placeholderTextColor={theme.colors.textFaint}
           multiline
           editable={ready && !running}
@@ -242,7 +243,7 @@ export default function ChatScreen() {
 function ToolCardList({ tools }: { tools: TranscriptEntry[] }) {
   return (
     <View style={styles.toolList}>
-      <Text style={styles.sectionLabel}>Tool activity</Text>
+      <Text style={styles.sectionLabel}>{strings.chat.toolActivity}</Text>
       {tools.map((entry) =>
         entry.kind === "tool" ? <ToolCard key={entry.id} entry={entry} /> : null,
       )}
@@ -295,7 +296,7 @@ function applyEvent(
       );
       break;
     case "step":
-      setStatus(`step ${event.step}`);
+      setStatus(strings.chat.step(event.step));
       break;
     case "tool_start": {
       const entry: TranscriptEntry = {
@@ -328,7 +329,7 @@ function applyEvent(
       break;
     }
     case "denied":
-      setStatus(`denied: ${event.name}`);
+      setStatus(strings.chat.denied(event.name));
       break;
     case "done":
       setStatus("");

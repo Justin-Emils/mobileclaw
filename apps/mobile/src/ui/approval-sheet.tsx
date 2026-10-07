@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import type { ApprovalBroker, PendingApproval } from "@/runtime/approval";
+import { riskLabel, strings } from "@/ui/strings";
 import { riskColor, theme } from "@/ui/theme";
 
 /**
@@ -32,17 +33,17 @@ export function ApprovalSheet({ approvals }: { approvals?: ApprovalBroker }) {
     <Modal transparent animationType="fade" visible onRequestClose={() => answer(false, false)}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
-          <Text style={styles.kicker}>Permission required</Text>
+          <Text style={styles.kicker}>{strings.approval.kicker}</Text>
           <View style={styles.titleRow}>
             <Text style={styles.title}>{current.request.tool}</Text>
             <View style={[styles.risk, { borderColor: riskColor(current.request.risk) }]}>
               <Text style={[styles.riskText, { color: riskColor(current.request.risk) }]}>
-                {current.request.risk}
+                {riskLabel(current.request.risk)}
               </Text>
             </View>
           </View>
 
-          <Text style={styles.reason}>{current.request.reason ?? "this action needs your approval"}</Text>
+          <Text style={styles.reason}>{current.request.reason ?? strings.approval.defaultReason}</Text>
 
           <ScrollView style={styles.detailBox} contentContainerStyle={styles.detailContent}>
             <Text style={styles.detailText}>{current.detail}</Text>
@@ -52,18 +53,18 @@ export function ApprovalSheet({ approvals }: { approvals?: ApprovalBroker }) {
           </ScrollView>
 
           {pending.length > 1 ? (
-            <Text style={styles.queue}>{pending.length - 1} more request(s) waiting</Text>
+            <Text style={styles.queue}>{strings.approval.moreWaiting(pending.length - 1)}</Text>
           ) : null}
 
           <View style={styles.actions}>
             <Pressable style={[styles.button, styles.deny]} onPress={() => answer(false, false)}>
-              <Text style={styles.denyText}>Deny</Text>
+              <Text style={styles.denyText}>{strings.approval.deny}</Text>
             </Pressable>
             <Pressable style={[styles.button, styles.once]} onPress={() => answer(true, false)}>
-              <Text style={styles.onceText}>Allow once</Text>
+              <Text style={styles.onceText}>{strings.approval.allowOnce}</Text>
             </Pressable>
             <Pressable style={[styles.button, styles.always]} onPress={() => answer(true, true)}>
-              <Text style={styles.alwaysText}>Always (session)</Text>
+              <Text style={styles.alwaysText}>{strings.approval.allowAlways}</Text>
             </Pressable>
           </View>
         </View>

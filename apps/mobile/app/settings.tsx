@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { Link } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
+import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
 type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics"]>>;
@@ -40,7 +41,7 @@ export default function SettingsScreen() {
 
   const saveKey = useCallback(async () => {
     if (apiKey.trim() === "") {
-      Alert.alert("Nothing to save", "Paste an API key first.");
+      Alert.alert(strings.settings.nothingToSaveTitle, strings.settings.nothingToSaveBody);
       return;
     }
     setBusy(true);
@@ -54,13 +55,16 @@ export default function SettingsScreen() {
       const diag = await runtime.diagnostics();
       setDiag(diag);
       Alert.alert(
-        outcome.stored ? "Key saved" : "Key NOT saved",
+        outcome.stored ? strings.settings.savedTitle : strings.settings.notSavedTitle,
         outcome.stored
-          ? `${outcome.detail}. You can send a message now.`
-          : `${outcome.detail}. See the self-check below.`,
+          ? strings.settings.savedBody(outcome.detail)
+          : strings.settings.notSavedBody(outcome.detail),
       );
     } catch (error) {
-      Alert.alert("Could not save the key", error instanceof Error ? error.message : String(error));
+      Alert.alert(
+        strings.settings.saveFailedTitle,
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setBusy(false);
     }
@@ -68,12 +72,12 @@ export default function SettingsScreen() {
 
   const test = useCallback(async () => {
     setBusy(true);
-    setProbe("testing…");
+    setProbe(strings.settings.testing);
     try {
       const result = await runtime.checkProvider();
-      setProbe(result.ok ? `OK — ${result.message}` : `Failed — ${result.message}`);
+      setProbe(result.ok ? strings.settings.testOk(result.message) : strings.settings.testFailed(result.message));
     } catch (error) {
-      setProbe(`Failed — ${error instanceof Error ? error.message : String(error)}`);
+      setProbe(strings.settings.testFailed(error instanceof Error ? error.message : String(error)));
     } finally {
       setBusy(false);
     }
@@ -84,7 +88,7 @@ export default function SettingsScreen() {
     try {
       setDiag(await runtime.diagnostics());
     } catch (error) {
-      setProbe(`Self-check failed — ${error instanceof Error ? error.message : String(error)}`);
+      setProbe(strings.settings.selfCheckFailed(error instanceof Error ? error.message : String(error)));
     } finally {
       setDiagBusy(false);
     }
@@ -97,12 +101,12 @@ export default function SettingsScreen() {
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
       {state.degraded ? (
         <View style={styles.warnBox}>
-          <Text style={styles.warnTitle}>Offline demo mode</Text>
+          <Text style={styles.warnTitle}>{strings.settings.offlineWarningTitle}</Text>
           <Text style={styles.warnText}>{state.error}</Text>
         </View>
       ) : null}
 
-      <Section title="Model provider">
+      <Section title={strings.settings.modelProvider}>
         <View style={styles.chips}>
           {DEFAULT_PRESETS.map((preset) => (
             <Pressable
@@ -124,7 +128,7 @@ export default function SettingsScreen() {
           ))}
         </View>
 
-        <Field label="Base URL (OpenAI-compatible)">
+        <Field label={strings.settings.baseUrl}>
           <TextInput
             style={styles.input}
             value={config.provider.baseUrl}
@@ -133,7 +137,7 @@ export default function SettingsScreen() {
             onChangeText={(value) => void patch({ provider: { ...config.provider, baseUrl: value } })}
           />
         </Field>
-        <Field label="Model">
+        <Field label={strings.settings.model}>
           <TextInput
             style={styles.input}
             value={config.provider.model}
@@ -142,7 +146,7 @@ export default function SettingsScreen() {
             onChangeText={(value) => void patch({ provider: { ...config.provider, model: value } })}
           />
         </Field>
-        <Field label="Max agent steps per turn">
+        <Field label={strings.settings.maxSteps}>
           <TextInput
             style={styles.input}
             value={String(config.provider.maxSteps)}
@@ -155,7 +159,7 @@ export default function SettingsScreen() {
             }}
           />
         </Field>
-        <Field label="Temperature">
+        <Field label={strings.settings.temperature}>
           <TextInput
             style={styles.input}
             value={String(config.provider.temperature)}
@@ -170,22 +174,18 @@ export default function SettingsScreen() {
         </Field>
       </Section>
 
-      <Section title="API key">
+      <Section title={strings.settings.apiKeySection}>
         <View style={[styles.statusBox, keyLoaded ? styles.statusOk : styles.statusBad]}>
           <Text style={[styles.statusText, keyLoaded ? styles.statusTextOk : styles.statusTextBad]}>
-            {keyLoaded ? "✓ API key loaded" : "✗ No API key — the agent cannot call the model"}
+            {keyLoaded ? strings.settings.apiKeyLoaded : strings.settings.apiKeyMissing}
           </Text>
         </View>
-        <Text style={styles.hint}>
-          Paste the key, then tap <Text style={styles.strong}>Save key</Text>. Typing alone changes
-          nothing: the key is only stored when you save it. It goes to SecureStore (Android
-          Keystore), never into the config file.
-        </Text>
+        <Text style={styles.hint}>{strings.settings.apiKeyHint}</Text>
         <TextInput
           style={styles.input}
           value={apiKey}
           onChangeText={setApiKey}
-          placeholder="sk-…"
+          placeholder={strings.settings.apiKeyPlaceholder}
           placeholderTextColor={theme.colors.textFaint}
           autoCapitalize="none"
           autoCorrect={false}
@@ -193,40 +193,55 @@ export default function SettingsScreen() {
         />
         <View style={styles.row}>
           <Pressable style={[styles.button, busy ? styles.buttonDisabled : null]} onPress={() => void saveKey()} disabled={busy}>
-            <Text style={styles.buttonText}>Save key</Text>
+            <Text style={styles.buttonText}>{strings.settings.saveKey}</Text>
           </Pressable>
           <Pressable style={[styles.buttonGhost, busy ? styles.buttonDisabled : null]} onPress={() => void test()} disabled={busy}>
-            <Text style={styles.buttonGhostText}>Test connection</Text>
+            <Text style={styles.buttonGhostText}>{strings.settings.testConnection}</Text>
           </Pressable>
         </View>
         {probe !== "" ? <Text style={styles.hint}>{probe}</Text> : null}
       </Section>
 
-      <Section title="Self-check">
-        <Text style={styles.hint}>
-          Confirms that the secret store really works on this device and shows what the agent loaded.
-        </Text>
+      <Section title={strings.settings.selfCheck}>
+        <Text style={styles.hint}>{strings.settings.selfCheckHint}</Text>
         <Pressable
           style={[styles.buttonGhost, diagBusy ? styles.buttonDisabled : null]}
           onPress={() => void runDiagnostics()}
           disabled={diagBusy}
         >
-          <Text style={styles.buttonGhostText}>{diagBusy ? "Checking…" : "Run self-check"}</Text>
+          <Text style={styles.buttonGhostText}>
+            {diagBusy ? strings.settings.checking : strings.settings.runSelfCheck}
+          </Text>
         </Pressable>
         {diagBusy && diag === undefined ? <ActivityIndicator color={theme.colors.accent} /> : null}
         {diag ? (
           <View style={styles.diagBox}>
-            <DiagRow label="API key" value={diag.apiKeyPresent ? `present (${diag.apiKeyLength} chars)` : "MISSING"} ok={diag.apiKeyPresent} />
-            <DiagRow label="Secret store" value={diag.secretStore.detail} ok={diag.secretStore.ok} />
-            <DiagRow label="Provider" value={`${diag.provider.label} · ${diag.provider.model}`} ok />
-            <DiagRow label="Base URL" value={diag.provider.baseUrl} ok />
-            <DiagRow label="Tools" value={`${diag.tools} registered`} ok={diag.tools > 0} />
             <DiagRow
-              label="Plugins"
-              value={`${diag.plugins.filter((plugin) => plugin.status === "loaded").length}/${diag.plugins.length} loaded`}
+              label={strings.settings.diagApiKey}
+              value={
+                diag.apiKeyPresent
+                  ? strings.settings.diagApiKeyPresent(diag.apiKeyLength)
+                  : strings.settings.diagApiKeyMissing
+              }
+              ok={diag.apiKeyPresent}
+            />
+            <DiagRow label={strings.settings.diagSecretStore} value={diag.secretStore.detail} ok={diag.secretStore.ok} />
+            <DiagRow label={strings.settings.diagProvider} value={`${diag.provider.label} · ${diag.provider.model}`} ok />
+            <DiagRow label={strings.settings.diagBaseUrl} value={diag.provider.baseUrl} ok />
+            <DiagRow label={strings.settings.diagTools} value={strings.settings.diagToolsValue(diag.tools)} ok={diag.tools > 0} />
+            <DiagRow
+              label={strings.settings.diagPlugins}
+              value={strings.settings.diagPluginsValue(
+                diag.plugins.filter((plugin) => plugin.status === "loaded").length,
+                diag.plugins.length,
+              )}
               ok={diag.plugins.every((plugin) => plugin.status === "loaded")}
             />
-            <DiagRow label="Storage roots" value={diag.roots.join("\n") || "(none)"} ok={diag.roots.length > 0} />
+            <DiagRow
+              label={strings.settings.diagRoots}
+              value={diag.roots.join("\n") || strings.settings.diagNone}
+              ok={diag.roots.length > 0}
+            />
             {diag.plugins
               .filter((plugin) => plugin.status !== "loaded")
               .map((plugin) => (
@@ -236,33 +251,35 @@ export default function SettingsScreen() {
         ) : null}
       </Section>
 
-      <Section title="Capabilities">
+      <Section title={strings.settings.capabilities}>
         <Link href="/permissions" asChild>
           <Pressable style={styles.buttonGhost}>
-            <Text style={styles.buttonGhostText}>Permissions & storage roots</Text>
+            <Text style={styles.buttonGhostText}>{strings.settings.openPermissions}</Text>
           </Pressable>
         </Link>
         <Text style={styles.hint}>
-          {tools.length} tools registered across {plugins.filter((plugin) => plugin.status === "loaded").length}{" "}
-          plugins.
+          {strings.settings.capabilitySummary(
+            tools.length,
+            plugins.filter((plugin) => plugin.status === "loaded").length,
+          )}
         </Text>
         {plugins.map((plugin) => (
           <View key={plugin.name} style={styles.pluginRow}>
             <View style={[styles.dot, { backgroundColor: plugin.status === "loaded" ? theme.colors.success : theme.colors.danger }]} />
             <Text style={styles.pluginName}>{plugin.name}</Text>
-            <Text style={styles.pluginMeta}>{plugin.status === "loaded" ? `${plugin.tools} tools` : (plugin.error ?? plugin.status)}</Text>
+            <Text style={styles.pluginMeta}>{plugin.status === "loaded" ? strings.settings.pluginToolCount(plugin.tools) : (plugin.error ?? plugin.status)}</Text>
           </View>
         ))}
       </Section>
 
-      <Section title="Agent behaviour">
-        <Field label="System prompt override (empty = built-in)">
+      <Section title={strings.settings.agentBehaviour}>
+        <Field label={strings.settings.systemPrompt}>
           <TextInput
             style={[styles.input, styles.multiline]}
             value={config.systemPrompt ?? ""}
             multiline
             onChangeText={(value) => void patch({ systemPrompt: value === "" ? undefined : value })}
-            placeholder="You are MobileClaw…"
+            placeholder={strings.settings.systemPromptPlaceholder}
             placeholderTextColor={theme.colors.textFaint}
           />
         </Field>

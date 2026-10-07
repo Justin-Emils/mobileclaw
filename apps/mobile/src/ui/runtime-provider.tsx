@@ -167,7 +167,7 @@ const demoFetch = (async () => {
         {
           delta: {
             content:
-              "No model provider is reachable, so I am in offline demo mode.\n\nI can still browse the sample files, e.g. ask \"what is in my Download folder?\".",
+              "连不上模型服务商，现在处于离线演示模式。\n\n我仍能浏览内置的示例文件，比如问「我的下载目录里有什么？」。",
           },
         },
       ],

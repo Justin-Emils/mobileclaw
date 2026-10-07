@@ -2,6 +2,7 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { RuntimeProvider } from "@/ui/runtime-provider";
+import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
 export default function RootLayout() {
@@ -17,9 +18,9 @@ export default function RootLayout() {
             contentStyle: { backgroundColor: theme.colors.background },
           }}
         >
-          <Stack.Screen name="index" options={{ title: "MobileClaw" }} />
-          <Stack.Screen name="settings" options={{ title: "Settings" }} />
-          <Stack.Screen name="permissions" options={{ title: "Permissions" }} />
+          <Stack.Screen name="index" options={{ title: strings.app.name }} />
+          <Stack.Screen name="settings" options={{ title: strings.settings.title }} />
+          <Stack.Screen name="permissions" options={{ title: strings.permissions.title }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>

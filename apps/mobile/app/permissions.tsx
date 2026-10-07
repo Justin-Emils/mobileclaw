@@ -3,10 +3,18 @@ import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-
 import { RISK_LEVELS, type RiskLevel } from "@mobileclaw/core";
 import { useRuntime } from "@/ui/runtime-provider";
 import { DEFAULT_PERMISSIONS, type AppConfig } from "@/runtime/config";
+import { riskLabel, strings } from "@/ui/strings";
 import { riskColor, theme } from "@/ui/theme";
 
 type Mode = "allow" | "ask" | "deny";
 const MODES: Mode[] = ["allow", "ask", "deny"];
+
+/** 三态按钮的中文标签。 */
+const MODE_LABELS: Record<Mode, string> = {
+  allow: strings.permissions.modeAllow,
+  ask: strings.permissions.modeAsk,
+  deny: strings.permissions.modeDeny,
+};
 
 /**
  * Permission matrix.
@@ -63,17 +71,14 @@ export default function PermissionsScreen() {
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={styles.content}>
-      <Section
-        title="Risk policy"
-        hint="Read and network are safe defaults. Anything that writes, executes or touches another app prompts first."
-      >
+      <Section title={strings.permissions.riskPolicy} hint={strings.permissions.riskPolicyHint}>
         {RISK_LEVELS.map((risk) => {
           const mode = config.permissions.riskModes?.[risk] ?? config.permissions.defaultMode;
           return (
             <View key={risk} style={styles.riskRow}>
               <View style={styles.riskLabel}>
                 <View style={[styles.dot, { backgroundColor: riskColor(risk) }]} />
-                <Text style={styles.riskText}>{risk}</Text>
+                <Text style={styles.riskText}>{riskLabel(risk)}</Text>
               </View>
               <View style={styles.segment}>
                 {MODES.map((candidate) => (
@@ -83,7 +88,7 @@ export default function PermissionsScreen() {
                     onPress={() => void setMode(risk, candidate)}
                   >
                     <Text style={[styles.segmentText, mode === candidate ? styles.segmentTextActive : null]}>
-                      {candidate}
+                      {MODE_LABELS[candidate]}
                     </Text>
                   </Pressable>
                 ))}
@@ -92,21 +97,18 @@ export default function PermissionsScreen() {
           );
         })}
         <Pressable style={styles.ghost} onPress={() => void resetDefaults()}>
-          <Text style={styles.ghostText}>Reset to recommended defaults</Text>
+          <Text style={styles.ghostText}>{strings.permissions.resetDefaults}</Text>
         </Pressable>
       </Section>
 
-      <Section
-        title="Storage roots"
-        hint="The path guard refuses anything outside these directories, whatever the model asks for. On Android, shared storage requires all-files access from system settings."
-      >
+      <Section title={strings.permissions.roots} hint={strings.permissions.rootsHint}>
         {config.roots.map((root) => (
           <View key={root} style={styles.rootRow}>
             <Text style={styles.rootText} numberOfLines={1}>
               {root}
             </Text>
             <Pressable onPress={() => void removeRoot(root)}>
-              <Text style={styles.remove}>remove</Text>
+              <Text style={styles.remove}>{strings.common.remove}</Text>
             </Pressable>
           </View>
         ))}
@@ -115,21 +117,18 @@ export default function PermissionsScreen() {
             style={[styles.input, styles.rootInput]}
             value={rootDraft}
             onChangeText={setRootDraft}
-            placeholder="/storage/emulated/0/Documents"
+            placeholder={strings.permissions.rootsPlaceholder}
             placeholderTextColor={theme.colors.textFaint}
             autoCapitalize="none"
             autoCorrect={false}
           />
           <Pressable style={styles.button} onPress={() => void addRoot()}>
-            <Text style={styles.buttonText}>Add</Text>
+            <Text style={styles.buttonText}>{strings.common.add}</Text>
           </Pressable>
         </View>
       </Section>
 
-      <Section
-        title="Registered tools"
-        hint="Tools come from plugins; disabling a plugin removes its tools from the model's schema entirely."
-      >
+      <Section title={strings.permissions.registeredTools} hint={strings.permissions.registeredToolsHint}>
         <View style={styles.toolWrap}>
           {runtime.toolNames().map((name) => (
             <View key={name} style={styles.toolChip}>
@@ -139,25 +138,11 @@ export default function PermissionsScreen() {
         </View>
       </Section>
 
-      <Section
-        title="Hard limits worth knowing"
-        hint="These are OS-level constraints, not settings."
-      >
-        <Text style={styles.note}>
-          • All-files access has no permission dialog: the user must enable it in system settings, and Google
-          Play does not accept an agent app for it — side-load, F-Droid or GitHub builds are the intended channels.
-        </Text>
-        <Text style={styles.note}>
-          • Android 10+ forbids executing files from app storage, so bundled tools must ship as native libraries
-          inside the APK. Shell access goes through Termux or Shizuku instead.
-        </Text>
-        <Text style={styles.note}>
-          • Shizuku runs with shell identity (uid 2000), not root, and must be restarted after every reboot.
-        </Text>
-        <Text style={styles.note}>
-          • Accessibility-based UI automation is disallowed for automation tools by Play policy, and Android 17's
-          Advanced Protection Mode blocks it for non-accessibility apps.
-        </Text>
+      <Section title={strings.permissions.limits} hint={strings.permissions.limitsHint}>
+        <Text style={styles.note}>{strings.permissions.limitAllFiles}</Text>
+        <Text style={styles.note}>{strings.permissions.limitExec}</Text>
+        <Text style={styles.note}>{strings.permissions.limitShizuku}</Text>
+        <Text style={styles.note}>{strings.permissions.limitAccessibility}</Text>
       </Section>
     </ScrollView>
   );
