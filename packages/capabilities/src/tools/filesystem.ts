@@ -227,6 +227,8 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
         throw new CoreError("E_TOOL_INPUT", "provide `glob`, `content` or both");
       }
       const result: Record<string, unknown> = {};
+      // Counters describe this search, not earlier ones.
+      fs.resetWalkStats?.();
       let globbed: string[] | undefined;
       if (input.glob) {
         globbed = await fs.glob(input.glob, {
@@ -261,9 +263,30 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
           lines.push(`  ${match.path}:${match.line}: ${match.text}`);
         }
       }
+      // What the walk could not read. Stated before the "no results" hint because it
+      // changes what the zero means: "nothing matched" versus "nothing was readable".
+      const walk = fs.walkStats?.() ?? { unreadableDirectories: 0, unreadableEntries: 0, truncated: false };
+      const blocked = walk.unreadableDirectories + walk.unreadableEntries;
+      if (blocked > 0) {
+        result["unreadable"] = walk;
+        lines.push(
+          `COULD NOT READ part of this search: ${walk.unreadableDirectories} director(ies) could not be listed, ${walk.unreadableEntries} entr(ies) could not be examined.` +
+            (found === 0
+              ? " The zero result above therefore means \"not readable\", NOT \"not present\"."
+              : " Some matches may be missing from the result above.") +
+            " This usually means the app lacks Android's all-files access. Do NOT conclude the directory is empty: tell the user to enable \"All files access\" for this app in system settings.",
+        );
+      }
       if (found === 0) {
         lines.push(
-          "No results. Note: a glob matches FILES, not directories — reaching files inside deep app folders often needs an explicit path (e.g. path=…/Telegram) or `**/*` with a smaller base directory.",
+          blocked > 0
+            ? "No results — see the access warning above; this is probably a permission problem rather than a genuinely empty location."
+            : "No results. Note: a glob matches FILES, not directories — reaching files inside deep app folders often needs an explicit path (e.g. path=…/Telegram) or `**/*` with a smaller base directory.",
+        );
+      }
+      if (walk.truncated) {
+        lines.push(
+          `Stopped early after the visit limit; results are incomplete. Narrow the path to search a smaller tree.`,
         );
       }
 

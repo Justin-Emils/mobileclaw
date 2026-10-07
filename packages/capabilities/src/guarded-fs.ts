@@ -37,7 +37,13 @@ export interface NodeFsServiceOptions {
   ignoreDirs?: string[];
 }
 
-import type { FileStat, GrepMatch, DirEntry, FileSystemService } from "@mobileclaw/core";
+import type { FileStat, GrepMatch, DirEntry, FileSystemService, WalkStats } from "@mobileclaw/core";
+
+const EMPTY_WALK_STATS: WalkStats = {
+  unreadableDirectories: 0,
+  unreadableEntries: 0,
+  truncated: false,
+};
 
 const DEFAULT_IGNORES = [
   "node_modules",
@@ -58,6 +64,8 @@ export class GuardedFileSystem implements FileSystemService {
   readonly kind = "guarded-fs";
   private readonly maxReadBytes: number;
   private readonly maxWriteBytes: number;
+  /** Counters for the walk in progress; read by callers via `walkStats()`. */
+  private lastWalk: WalkStats = { ...EMPTY_WALK_STATS };
   private readonly walkLimit: number;
   private readonly ignoreDirs: Set<string>;
 
@@ -276,15 +284,24 @@ export class GuardedFileSystem implements FileSystemService {
       try {
         names = await this.options.driver.readdir(current);
       } catch {
+        // Could not descend at all. Counted rather than dropped: on Android this is
+        // what a missing all-files permission looks like, and a search that silently
+        // skips whole subtrees reports "0 files" for a directory full of them.
+        this.lastWalk.unreadableDirectories += 1;
         continue;
       }
       for (const name of names) {
-        if (++visited > this.walkLimit) return;
+        if (++visited > this.walkLimit) {
+          this.lastWalk.truncated = true;
+          return;
+        }
         const child = joinPath(current, name);
         let info: Awaited<ReturnType<FsDriver["stat"]>>;
         try {
           info = await this.options.driver.stat(child);
         } catch {
+          // Same reasoning as `list`: the name exists but its metadata is unreadable.
+          this.lastWalk.unreadableEntries += 1;
           continue;
         }
         if (info.isDirectory()) {
@@ -296,6 +313,22 @@ export class GuardedFileSystem implements FileSystemService {
         }
       }
     }
+  }
+
+  /**
+   * What the most recent walk could not read.
+   *
+   * Callers surface it, because "0 results" and "0 results because nothing was
+   * readable" are different findings and the wrong one sends the user looking for
+   * files that are right there.
+   */
+  walkStats(): WalkStats {
+    return { ...this.lastWalk };
+  }
+
+  /** Clear the counters before a new search, so they describe that search. */
+  resetWalkStats(): void {
+    this.lastWalk = { unreadableDirectories: 0, unreadableEntries: 0, truncated: false };
   }
 
   private async ensureParent(path: string): Promise<void> {

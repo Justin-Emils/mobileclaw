@@ -101,6 +101,23 @@ export interface DirEntry extends FileStat {
   unreadable?: boolean;
 }
 
+/**
+ * What a recursive walk could not read.
+ *
+ * Reported because "0 results" and "0 results because nothing was readable" are
+ * different findings: without all-files access the second is what a search returns
+ * for a directory full of files, and a silent zero sends the user looking for files
+ * that are right there.
+ */
+export interface WalkStats {
+  /** Directories that could not be listed at all (their subtrees were skipped). */
+  unreadableDirectories: number;
+  /** Entries whose name resolved but whose metadata could not be read. */
+  unreadableEntries: number;
+  /** The walk hit its visit limit and stopped early. */
+  truncated: boolean;
+}
+
 export interface GrepMatch {
   path: string;
   line: number;
@@ -111,6 +128,17 @@ export interface FileSystemService {
   readonly kind: string;
   /** Directory listings returned when no explicit path is given. */
   roots(): Promise<string[]>;
+  /**
+   * What the most recent glob/grep walk could not read.
+   *
+   * Optional so lightweight implementations (tests, the demo driver) need not track
+   * it. Callers that show search results should surface it: a search that returns
+   * nothing because nothing was readable is a permission problem, not an empty
+   * directory, and reporting it as the latter is actively misleading.
+   */
+  walkStats?(): WalkStats;
+  /** Clear the counters before a new search so they describe that search. */
+  resetWalkStats?(): void;
   read(path: string): Promise<string>;
   readBytes(path: string): Promise<Uint8Array>;
   write(path: string, data: string | Uint8Array): Promise<FileStat>;

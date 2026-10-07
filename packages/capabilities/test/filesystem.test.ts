@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { PathGuard, type FileSystemService } from "@mobileclaw/core";
-import { createFilesystemTools } from "@mobileclaw/capabilities";
+import { createFilesystemTools, GuardedFileSystem } from "@mobileclaw/capabilities";
 import { createNodeFileSystem, NodeFsDriver } from "@mobileclaw/capabilities/node";
 
 let root: string;
@@ -40,6 +40,89 @@ describe("GuardedFileSystem", () => {
     const { fs } = buildTools();
     await fs.write(join(root, "a", "b", "c.txt"), "deep");
     expect(await fs.read(join(root, "a", "b", "c.txt"))).toBe("deep");
+  });
+
+  it("counts what a search could not read instead of reporting a clean zero", async () => {
+    // This is the second half of the reported bug: `walk` skipped every entry whose
+    // stat failed, so a search over shared storage returned "0 files" for a directory
+    // full of them. Driven through the real walk, not a mocked counter.
+    const blocked = new GuardedFileSystem({
+      driver: {
+        async readFile() {
+          throw new Error("EACCES");
+        },
+        async readFileBytes() {
+          throw new Error("EACCES");
+        },
+        async writeFile() {},
+        async stat() {
+          throw new Error("EACCES");
+        },
+        async readdir() {
+          // Names are visible even without all-files access; metadata is not.
+          return ["a.txt", "b.txt", "c.txt"];
+        },
+        async mkdir() {},
+        async rm() {},
+        async rename() {},
+        async copy() {},
+      },
+      roots: [root],
+      guard: new PathGuard({ roots: [root] }, "android"),
+    });
+
+    blocked.resetWalkStats();
+    const found = await blocked.glob("**/*.txt", { cwd: root });
+    expect(found).toEqual([]);
+
+    const stats = blocked.walkStats();
+    // Each name was seen and each one failed, so the caller can tell the user why the
+    // answer is empty rather than letting the model assert the folder is empty.
+    expect(stats.unreadableEntries).toBeGreaterThan(0);
+  });
+
+  it("counts a directory it could not descend into", async () => {
+    const blocked = new GuardedFileSystem({
+      driver: {
+        async readFile() {
+          throw new Error("EACCES");
+        },
+        async readFileBytes() {
+          throw new Error("EACCES");
+        },
+        async writeFile() {},
+        async stat() {
+          throw new Error("EACCES");
+        },
+        async readdir() {
+          throw new Error("EACCES");
+        },
+        async mkdir() {},
+        async rm() {},
+        async rename() {},
+        async copy() {},
+      },
+      roots: [root],
+      guard: new PathGuard({ roots: [root] }, "android"),
+    });
+
+    blocked.resetWalkStats();
+    await blocked.glob("**/*", { cwd: root });
+    // The whole subtree was skipped, which must be visible rather than silently absent.
+    expect(blocked.walkStats().unreadableDirectories).toBeGreaterThan(0);
+  });
+
+  it("reports no access problem when a search simply matches nothing", async () => {
+    // The counterpart to the warning: a genuinely absent match must stay quiet, or the
+    // permission message becomes noise the model learns to ignore.
+    const { fs } = buildTools();
+    await fs.write(join(root, "present.txt"), "x");
+    const search = createFilesystemTools({ fs }).find((candidate) => candidate.name === "fs_search");
+    const result = (await search!.execute!({ glob: "*.nope" } as never, call as never)) as {
+      display: string;
+    };
+    expect(result.display).toContain("No results");
+    expect(result.display).not.toContain("COULD NOT READ");
   });
 
   it("refuses paths outside the roots", async () => {
