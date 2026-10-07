@@ -22,3 +22,6 @@ coverage/
 
 # Local Metro bundle used by `pnpm bundle` to verify the app compiles
 apps/mobile/.expo-export-check/
+
+# Downloaded build artifacts (APKs are large and reproducible from EAS)
+artifacts/
