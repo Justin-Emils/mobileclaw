@@ -1,9 +1,10 @@
 /**
- * Drive one real agent turn on the emulator: return to the chat, type a message, send.
+ * Send one message on the emulator's chat screen.
  *
- * Used to exercise the end-to-end flow that unit tests cannot reach: the app talks to
- * the mock OpenAI server (eng/mock-openai-server.cjs), calls a tool, streams an answer,
- * and persists the conversation.
+ * The lesson this encodes: `uiautomator` reports a node that is **outside the viewport**
+ * with `bounds=[0,0]`, so tapping "the field's centre" taps the top-left corner instead.
+ * Every earlier attempt failed this way. So: scroll the composer into view, re-locate it,
+ * and verify the text actually landed before pressing send.
  *
  * Usage: node eng/emulator-send-message.cjs "<message>"
  */
@@ -11,7 +12,7 @@ const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 
 const ADB = "E:\\code\\Eng\\.android-sdk\\platform-tools\\adb.exe";
-const message = process.argv[2] ?? "list the download folder";
+const message = process.argv[2] ?? "list the folder";
 
 const adb = (...args) => execFileSync(ADB, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -22,8 +23,26 @@ function dump(name = "drive") {
   return fs.readFileSync(`.logs/${name}.xml`, "utf8");
 }
 
-function texts(xml) {
-  return [...xml.matchAll(/text="([^"]*)"/g)].map((m) => m[1]).filter((t) => t.trim() !== "");
+const texts = (xml) => [...xml.matchAll(/text="([^"]*)"/g)].map((m) => m[1]).filter((t) => t.trim() !== "");
+
+/** Every editable node with usable (on-screen) bounds. */
+function editables(xml) {
+  return [...xml.matchAll(/<node[^>]*class="android\.widget\.EditText"[^>]*>/g)]
+    .map((match) => {
+      const bounds = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(match[0]);
+      const x1 = Number(bounds[1]);
+      const y1 = Number(bounds[2]);
+      const x2 = Number(bounds[3]);
+      const y2 = Number(bounds[4]);
+      return {
+        text: /text="([^"]*)"/.exec(match[0])?.[1] ?? "",
+        x: Math.round((x1 + x2) / 2),
+        y: Math.round((y1 + y2) / 2),
+        // [0,0][0,0] means off-screen: tapping it would hit the wrong place entirely.
+        offscreen: x2 === 0 && y2 === 0,
+      };
+    })
+    .filter((field) => !field.offscreen);
 }
 
 function tapText(xml, label) {
@@ -34,43 +53,45 @@ function tapText(xml, label) {
   return true;
 }
 
-/** The composer is the only editable field on the chat screen. */
-function composer(xml) {
-  const nodes = [...xml.matchAll(/<node[^>]*class="android\.widget\.EditText"[^>]*>/g)];
-  if (nodes.length === 0) return null;
-  const bounds = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(nodes[0][0]);
-  return {
-    x: Math.round((Number(bounds[1]) + Number(bounds[3])) / 2),
-    y: Math.round((Number(bounds[2]) + Number(bounds[4])) / 2),
-  };
+/** Scroll a little and report whether the composer became reachable. */
+async function revealComposer() {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const xml = dump();
+    const field = editables(xml)[0];
+    if (field && texts(xml).includes("发送")) return { xml, field };
+    // Upward swipe brings lower content into view (send is below the list).
+    adb("shell", "input", "swipe", "540", "1600", "540", "1100", "300");
+    await sleep(1200);
+  }
+  return null;
 }
 
 (async () => {
-  // Back out of whatever screen is open until the composer is visible.
+  // Reach the chat screen first.
   for (let attempt = 0; attempt < 4; attempt += 1) {
     const xml = dump();
-    const field = composer(xml);
-    if (field && texts(xml).some((t) => t === "发送")) {
-      console.log("chat screen reached");
-      break;
-    }
-    console.log(`  not on the chat screen (attempt ${attempt + 1}), pressing back`);
+    if (texts(xml).includes("发送") && editables(xml).length > 0) break;
     adb("shell", "input", "keyevent", "KEYCODE_BACK");
     await sleep(2500);
   }
 
-  let xml = dump();
-  const field = composer(xml);
-  if (!field) throw new Error("no composer field on screen");
-  adb("shell", "input", "tap", String(field.x), String(field.y));
-  await sleep(800);
-  // Spaces would be lost by `input text`; use underscores and let the model cope.
-  adb("shell", "input", "text", message.replace(/ /g, "_"));
-  await sleep(800);
-  const typed = texts(dump());
-  console.log(`  typed: ${typed.find((t) => t.includes("_")) ?? "(not visible)"}`);
+  const revealed = await revealComposer();
+  if (!revealed) throw new Error("composer never became visible");
+  const { field } = revealed;
+  console.log(`composer at (${field.x}, ${field.y}), existing text "${field.text}"`);
 
-  xml = dump();
-  if (!tapText(xml, "发送")) throw new Error('could not find "发送"');
-  console.log("  tapped 发送");
+  adb("shell", "input", "tap", String(field.x), String(field.y));
+  await sleep(900);
+  // Spaces are unreliable through `input text`; underscores are close enough for a mock.
+  adb("shell", "input", "text", message.replace(/ /g, "_"));
+  await sleep(900);
+
+  const afterTyping = editables(dump())[0];
+  console.log(`after typing, field reads "${afterTyping?.text ?? "(gone)"}"`);
+  if (!afterTyping || afterTyping.text === "") {
+    throw new Error("typing did not reach the field");
+  }
+
+  if (!tapText(dump(), "发送")) throw new Error('could not find "发送"');
+  console.log("tapped 发送");
 })();

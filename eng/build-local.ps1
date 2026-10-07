@@ -89,10 +89,10 @@ Write-Host "variant     = $Variant"
 # Only meaningful for a throwaway test build: `__DEV__` gates the code, so a release
 # bundling removes it — but the values are still visible in the bundle when set, so do
 # not point this at a real account. Usage:
-#   $env:MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
-#   $env:MOBILECLAW_TEST_MODEL='mock-model'
-#   $env:MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
-$overrideNames = @("MOBILECLAW_TEST_BASE_URL", "MOBILECLAW_TEST_MODEL", "MOBILECLAW_TEST_API_KEY")
+#   $env:EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
+#   $env:EXPO_PUBLIC_MOBILECLAW_TEST_MODEL='mock-model'
+#   $env:EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
+$overrideNames = @("EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL", "EXPO_PUBLIC_MOBILECLAW_TEST_MODEL", "EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY")
 $activeOverrides = $overrideNames | Where-Object { (Get-Item "env:$_" -ErrorAction SilentlyContinue).Value }
 if ($activeOverrides.Count -gt 0) {
     Write-Host "test override = $($activeOverrides -join ', ') (baked into the JS bundle)" -ForegroundColor Yellow
@@ -293,6 +293,11 @@ Write-Host "`n=== gradle $task ===" -ForegroundColor Cyan
 #
 # Rather than always re-bundling (slow), compare newest source mtime against the
 # existing bundle and invalidate the bundling outputs only when sources are newer.
+#
+# Build *configuration* counts as a source too. A change to babel.config.js or
+# metro.config.js alters the bundle without touching any .ts file, so a check that only
+# looked at sources left the task UP-TO-DATE and produced a stale APK -- caught by the
+# artifact-freshness guard below, which then refused to hand it over.
 $bundlePath = Join-Path $androidDir "app\build\generated\assets\react\$Variant\index.android.bundle"
 $sourceRoots = @(
     (Join-Path $repoRoot "apps\mobile\app"),
@@ -300,12 +305,26 @@ $sourceRoots = @(
     (Join-Path $repoRoot "packages\core\src"),
     (Join-Path $repoRoot "packages\capabilities\src")
 )
+$configFiles = @(
+    (Join-Path $repoRoot "apps\mobile\babel.config.js"),
+    (Join-Path $repoRoot "apps\mobile\metro.config.js"),
+    (Join-Path $repoRoot "apps\mobile\app.config.ts"),
+    (Join-Path $repoRoot "apps\mobile\app.json"),
+    (Join-Path $repoRoot "pnpm-workspace.yaml")
+)
 $newestSource = $null
 foreach ($sourceRoot in $sourceRoots) {
     if (-not (Test-Path $sourceRoot)) { continue }
     $candidate = Get-ChildItem $sourceRoot -Recurse -File -Include "*.ts", "*.tsx", "*.js", "*.json" -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
     if ($candidate -and (-not $newestSource -or $candidate.LastWriteTime -gt $newestSource.LastWriteTime)) {
+        $newestSource = $candidate
+    }
+}
+foreach ($configFile in $configFiles) {
+    if (-not (Test-Path $configFile)) { continue }
+    $candidate = Get-Item $configFile
+    if (-not $newestSource -or $candidate.LastWriteTime -gt $newestSource.LastWriteTime) {
         $newestSource = $candidate
     }
 }

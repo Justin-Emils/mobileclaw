@@ -30,28 +30,29 @@ const CONFIG_KEY = "mobileclaw.config";
 /**
  * Environment overrides for automated device testing.
  *
- * Why this exists: driving the settings screen with `adb shell input text` proved
- * unreliable (it drops characters, and react-native puts the *placeholder* in the
- * accessibility `text` attribute, so a read-back check compares against the placeholder
- * forever). Baking the endpoint in at build time is the reliable alternative, and it is
- * what makes an end-to-end run possible on an emulator with no cloud key.
+ * Why this exists: driving the settings screen from adb failed in six different ways
+ * (dropped characters, react-native putting the *placeholder* in the accessibility `text`
+ * attribute so a read-back check compares against the placeholder forever, a layout that
+ * shifts as fields fill in, tapping a non-clickable text node, a tap the Pressable never
+ * receives, and finally a field that sits *outside the viewport* so uiautomator reports
+ * its bounds as [0,0]). Baking the endpoint in at build time avoids all of it.
  *
  * Safety:
- *  - gated on `__DEV__`, so a production/release bundling with `--dev false` removes it;
+ *  - gated on `__DEV__`, so a production bundling removes it;
  *  - each variable is optional and independent;
  *  - the API key is read here but never written to the config object, so it cannot end
  *    up in the persisted config JSON.
  *
- * Usage (a throwaway test build only):
- *   $env:MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
- *   $env:MOBILECLAW_TEST_MODEL='mock-model'
- *   $env:MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
- *   .\eng\build-local.ps1 -Variant release -Clean
- */
-/**
- * Read test overrides from an environment map. Pure, so it can be unit-tested: the
- * `__DEV__` gate and the emptiness rules decide whether a throwaway endpoint can leak
- * into a build, which is worth asserting rather than eyeballing.
+ * Names must carry Expo's `EXPO_PUBLIC_` prefix: that is the only form Metro substitutes.
+ * A plain `process.env.X` survives as a runtime lookup, and `process` does not exist in
+ * React Native, so the read silently yields nothing. Verified by searching a built bundle
+ * for the value.
+ *
+ * Usage (a throwaway test build only, with a development bundle so `__DEV__` is true):
+ *   $env:EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
+ *   $env:EXPO_PUBLIC_MOBILECLAW_TEST_MODEL='mock-model'
+ *   $env:EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
+ *   .\eng\build-local.ps1 -Variant release
  */
 export function readTestOverrides(
   env: Record<string, string | undefined> | undefined,
@@ -62,9 +63,9 @@ export function readTestOverrides(
     const raw = env[name];
     return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
   };
-  const baseUrl = read("MOBILECLAW_TEST_BASE_URL");
-  const model = read("MOBILECLAW_TEST_MODEL");
-  const apiKey = read("MOBILECLAW_TEST_API_KEY");
+  const baseUrl = read("EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL");
+  const model = read("EXPO_PUBLIC_MOBILECLAW_TEST_MODEL");
+  const apiKey = read("EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY");
   return {
     ...(baseUrl ? { baseUrl } : {}),
     ...(model ? { model } : {}),

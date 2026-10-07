@@ -12,9 +12,9 @@ import { readTestOverrides } from "@/runtime/bootstrap";
  */
 
 const ALL = {
-  MOBILECLAW_TEST_BASE_URL: "http://10.0.2.2:8787/v1",
-  MOBILECLAW_TEST_MODEL: "mock-model",
-  MOBILECLAW_TEST_API_KEY: "sk-mock",
+  EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL: "http://10.0.2.2:8787/v1",
+  EXPO_PUBLIC_MOBILECLAW_TEST_MODEL: "mock-model",
+  EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY: "sk-mock",
 };
 
 describe("readTestOverrides", () => {
@@ -37,20 +37,20 @@ describe("readTestOverrides", () => {
 
   it("treats blank and whitespace-only values as unset", () => {
     // An env var set to "" is common in scripts and must not override a real preset.
-    expect(readTestOverrides({ ...ALL, MOBILECLAW_TEST_MODEL: "" }, true)).not.toHaveProperty("model");
-    expect(readTestOverrides({ ...ALL, MOBILECLAW_TEST_MODEL: "   " }, true)).not.toHaveProperty("model");
-    expect(readTestOverrides({ MOBILECLAW_TEST_MODEL: "" }, true)).toEqual({});
+    expect(readTestOverrides({ ...ALL, EXPO_PUBLIC_MOBILECLAW_TEST_MODEL: "" }, true)).not.toHaveProperty("model");
+    expect(readTestOverrides({ ...ALL, EXPO_PUBLIC_MOBILECLAW_TEST_MODEL: "   " }, true)).not.toHaveProperty("model");
+    expect(readTestOverrides({ EXPO_PUBLIC_MOBILECLAW_TEST_MODEL: "" }, true)).toEqual({});
   });
 
   it("trims surrounding whitespace", () => {
-    expect(readTestOverrides({ MOBILECLAW_TEST_BASE_URL: "  http://x/v1  " }, true)).toEqual({
+    expect(readTestOverrides({ EXPO_PUBLIC_MOBILECLAW_TEST_BASE_URL: "  http://x/v1  " }, true)).toEqual({
       baseUrl: "http://x/v1",
     });
   });
 
   it("allows setting only one of the three", () => {
-    expect(readTestOverrides({ MOBILECLAW_TEST_MODEL: "m" }, true)).toEqual({ model: "m" });
-    expect(readTestOverrides({ MOBILECLAW_TEST_API_KEY: "k" }, true)).toEqual({ apiKey: "k" });
+    expect(readTestOverrides({ EXPO_PUBLIC_MOBILECLAW_TEST_MODEL: "m" }, true)).toEqual({ model: "m" });
+    expect(readTestOverrides({ EXPO_PUBLIC_MOBILECLAW_TEST_API_KEY: "k" }, true)).toEqual({ apiKey: "k" });
   });
 
   it("ignores unrelated variables", () => {
