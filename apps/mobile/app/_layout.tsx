@@ -21,6 +21,9 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ title: strings.app.name }} />
           <Stack.Screen name="settings" options={{ title: strings.settings.title }} />
           <Stack.Screen name="permissions" options={{ title: strings.permissions.title }} />
+          {/* A screen with no entry here falls back to its file name, so this route's
+              header read "conversations" on a device until it was registered. */}
+          <Stack.Screen name="conversations" options={{ title: strings.conversations.title }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>
