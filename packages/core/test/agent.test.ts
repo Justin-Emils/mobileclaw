@@ -113,6 +113,8 @@ function buildAgent(options: {
     registry,
     permissions: gate,
     store,
+    // Mirrors the app, which supplies this so the workspace reaches the prompt.
+    describeWorkspace: (workspace) => `Conversation workspace: ${workspace}`,
     ...(options.maxSteps !== undefined ? { maxSteps: options.maxSteps } : {}),
   });
   return { agent, provider, store };
@@ -255,6 +257,33 @@ describe("Agent", () => {
 
     await run(agent, "probe");
     expect(seen).toEqual([undefined]);
+  });
+
+  it("tells the model about the conversation workspace in the system prompt", async () => {
+    // The workspace only changes behaviour if the model is told about it; passing it to
+    // tools is not enough, because the model chooses the paths it writes to.
+    const { agent } = buildAgent({ turns: ["ok"], permissions: { defaultMode: "allow" } });
+    const prompt = await agent.buildSystemPrompt(3, 12, "/workspaces/conv1");
+    expect(prompt).toContain("## Your workspace");
+    expect(prompt).toContain("/workspaces/conv1");
+  });
+
+  it("omits the workspace section when there is none to describe", async () => {
+    // Two independent reasons to stay silent: no workspace, or a workspace with no
+    // wording from the app. Both must avoid printing an empty heading.
+    const { agent } = buildAgent({ turns: ["ok"], permissions: { defaultMode: "allow" } });
+    const noWorkspace = await agent.buildSystemPrompt(3, 12);
+    expect(noWorkspace).not.toContain("## Your workspace");
+
+    const bare = new Agent({
+      provider: new MockProvider({ turns: ["ok"] }),
+      registry: new ToolRegistry().registerAll([readTool, writeTool, failingTool]),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+    });
+    // A workspace is present but the app supplied no renderer, so there is nothing to say.
+    expect(await bare.buildSystemPrompt(3, 12, "/workspaces/conv1")).not.toContain("## Your workspace");
+    expect(await bare.buildSystemPrompt(3, 12)).not.toContain("## Your workspace");
   });
 
   it("re-uses a stored approval on a later run without asking again", async () => {

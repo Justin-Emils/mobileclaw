@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
-import { PathGuard } from "@mobileclaw/core";
+import { PathGuard, type FileSystemService } from "@mobileclaw/core";
 import { createFilesystemTools } from "@mobileclaw/capabilities";
 import { createNodeFileSystem, NodeFsDriver } from "@mobileclaw/capabilities/node";
 
@@ -213,6 +213,58 @@ describe("filesystem tools", () => {
     expect(result.data.count).toBe(2);
     expect(result.data.directories).toEqual(["logs"]);
     expect(result.data.files.map((file) => file.name)).toEqual(["report.pdf"]);
+  });
+
+  it("reports entries it cannot read instead of dropping them", async () => {
+    // The bug this guards: on Android without all-files access, `stat` fails for every
+    // file in shared storage, the entries were skipped silently, and the agent concluded
+    // a full folder was empty -- it even said so in the transcript.
+    const stub: FileSystemService = {
+      kind: "stub",
+      async roots() {
+        return [root];
+      },
+      async list() {
+        return [
+          {
+            path: join(root, "real.txt"),
+            name: "real.txt",
+            relative: "real.txt",
+            size: 10,
+            isDirectory: false,
+            isFile: true,
+            unreadable: true,
+          },
+        ];
+      },
+    } as unknown as FileSystemService;
+
+    const list = createFilesystemTools({ fs: stub }).find((candidate) => candidate.name === "fs_list");
+    const result = (await list!.execute!({ path: root, limit: 200 } as never, call as never)) as {
+      display: string;
+      data: { count: number; unreadable: string[] };
+    };
+
+    // The model must be told to ask for access, not to report an empty directory.
+    expect(result.display).toContain("CANNOT READ");
+    expect(result.display).toContain("real.txt");
+    expect(result.display).toContain("all-files access");
+    expect(result.display).not.toContain("(empty)");
+    expect(result.data.unreadable).toEqual(["real.txt"]);
+  });
+
+  it("still says a genuinely empty directory is empty", async () => {
+    // The counterpart: a real empty directory must not be dressed up as a permission
+    // problem, or the message becomes noise the model learns to ignore.
+    const { fs } = buildTools();
+    const empty = join(root, "nothing-here");
+    await mkdir(empty);
+    const list = tool("fs_list");
+    const result = (await list.execute!({ path: empty, limit: 200 } as never, call as never)) as {
+      display: string;
+    };
+    expect(result.display).toContain("(empty)");
+    expect(result.display).not.toContain("CANNOT READ");
   });
 
   it("says how many entries it withheld instead of silently truncating", async () => {

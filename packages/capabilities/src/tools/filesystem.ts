@@ -58,6 +58,10 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       const regular = capped.shown.filter((entry) => !isSpecialEntry(entry));
       const directories = regular.filter((entry) => entry.isDirectory);
       const files = regular.filter((entry) => entry.isFile);
+      // Names that resolved but whose metadata could not be read. On Android this is
+      // the fingerprint of missing all-files access, and reporting the directory as
+      // empty instead is what made the agent conclude a full folder was empty.
+      const unreadable = capped.shown.filter((entry) => entry.unreadable === true);
 
       const lines = [
         `${input.path} — ${entries.length} entries (${entries.filter((e) => e.isDirectory).length} folders, ${entries.filter((e) => e.isFile).length} files)`,
@@ -67,6 +71,14 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       }
       if (files.length > 0) {
         lines.push(`files:\n${files.map((entry) => `  ${formatEntry(entry)}`).join("\n")}`);
+      }
+      if (unreadable.length > 0) {
+        lines.push(
+          `CANNOT READ ${unreadable.length} of these entries — the names are visible but their details are not:\n${unreadable
+            .map((entry) => `  ${entry.name}`)
+            .join("\n")}\n` +
+            "This usually means the app lacks Android's all-files access. Do NOT report this folder as empty or as containing only empty folders: say that access is missing and that the user must enable \"All files access\" for this app in system settings.",
+        );
       }
       if (special.length > 0) {
         // Named and separated on purpose: these are app-owned or hidden and must
@@ -91,6 +103,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
           files: entries
             .filter((entry) => entry.isFile)
             .map((entry) => ({ name: entry.name, size: entry.size, mtimeMs: entry.mtimeMs })),
+          unreadable: entries.filter((entry) => entry.unreadable === true).map((entry) => entry.name),
           special: special.map((entry) => ({
             name: entry.name,
             isDirectory: entry.isDirectory,

@@ -440,6 +440,10 @@ export class MobileClawRuntime {
       maxSteps: this.config.provider.maxSteps,
       temperature: this.config.provider.temperature,
       ...(this.deps.environment ? { environment: this.deps.environment } : {}),
+      // The workspace differs per conversation, so its wording is supplied here rather
+      // than folded into `environment` (which is evaluated before any conversation
+      // exists). Without this the agent never learns where to put what it produces.
+      describeWorkspace,
     });
   }
 

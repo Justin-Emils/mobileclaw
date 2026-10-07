@@ -89,6 +89,16 @@ export interface FileStat {
 export interface DirEntry extends FileStat {
   /** Path relative to the directory that was listed. */
   relative: string;
+  /**
+   * The name was listed but its metadata could not be read.
+   *
+   * This happens when the app is missing Android's all-files access. Dropping such
+   * entries made a full directory look empty, which is how the agent came to report
+   * "these folders are empty" for folders that were full. Kept as a visible entry
+   * with `isDirectory`/`isFile` both false so callers must decide what to say about
+   * it rather than silently omitting it.
+   */
+  unreadable?: boolean;
 }
 
 export interface GrepMatch {

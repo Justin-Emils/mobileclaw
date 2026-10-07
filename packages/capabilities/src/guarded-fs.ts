@@ -155,7 +155,19 @@ export class GuardedFileSystem implements FileSystemService {
           mtimeMs: info.mtimeMs,
         });
       } catch {
-        // Broken symlinks and permission errors are skipped, not fatal.
+        // Broken symlinks, and — on Android without all-files access — every file in
+        // shared storage. Skipping these made a full directory indistinguishable from
+        // an empty one, so the model reported folders as empty. Keep the name visible
+        // and flag it instead; callers decide how to explain it.
+        entries.push({
+          path: child,
+          name,
+          relative: name,
+          size: 0,
+          isDirectory: false,
+          isFile: false,
+          unreadable: true,
+        });
       }
     }
     return entries.sort((a, b) => {

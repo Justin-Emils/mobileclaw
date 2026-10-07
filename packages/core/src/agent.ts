@@ -27,6 +27,13 @@ export interface AgentOptions {
   onEvent?: (event: AgentEvent) => void;
   /** Extra context appended to the system prompt (device facts, roots, ...). */
   environment?: () => string | Promise<string>;
+  /**
+   * Render the per-conversation workspace line for the system prompt.
+   *
+   * A callback so the app owns the wording and the storage layout; core only knows
+   * that a workspace exists and needs explaining.
+   */
+  describeWorkspace?: (workspace: string) => string;
 }
 
 export type AgentEvent =
@@ -165,7 +172,7 @@ export class Agent {
         }
         emit({ type: "step", step });
 
-        const system = await this.buildSystemPrompt(maxSteps - step + 1, maxSteps);
+        const system = await this.buildSystemPrompt(maxSteps - step + 1, maxSteps, conversation.workspace);
         const request = {
           model: this.options.provider.model,
           messages: [{ role: "system" as const, content: system }, ...conversation.messages],
@@ -507,7 +514,11 @@ export class Agent {
    * prompt without a budget; the loop always passes them so the model knows how
    * much room it has left.
    */
-  async buildSystemPrompt(remaining?: number, maxSteps?: number): Promise<string> {
+  async buildSystemPrompt(
+    remaining?: number,
+    maxSteps?: number,
+    workspace?: string,
+  ): Promise<string> {
     const base =
       this.options.systemPrompt ??
       DEFAULT_SYSTEM_PROMPT;
@@ -525,6 +536,15 @@ export class Agent {
       remaining !== undefined && maxSteps !== undefined
         ? renderStepBudget(remaining, maxSteps)
         : "";
+    // The workspace is per conversation, so it cannot live in `environment` (which is
+    // evaluated once, before any conversation exists). Saying it out loud is what
+    // stops the model from inventing an output folder inside the directory it was
+    // asked to tidy -- which is how a download folder accumulates `output/`,
+    // `organized/`, `out2/`.
+    const workspaceLine =
+      workspace && this.options.describeWorkspace
+        ? `\n## Your workspace\n${this.options.describeWorkspace(workspace)}`
+        : "";
     return [
       base,
       "",
@@ -532,6 +552,7 @@ export class Agent {
       inventory,
       budget ? `\n## Budget\n${budget}` : "",
       environment ? `\n## Environment\n${environment}` : "",
+      workspaceLine,
     ]
       .join("\n")
       .trim();
