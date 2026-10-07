@@ -1,0 +1,24 @@
+{
+  "name": "mobileclaw",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MobileClaw — a plugin-based local AI agent for Android (and iOS later on), with real hands: files, shell, scripts and system automation.",
+  "license": "MIT",
+  "packageManager": "pnpm@11.22.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" run typecheck",
+    "test": "pnpm -r --filter \"./packages/**\" --filter \"./apps/**\" run test",
+    "check": "pnpm run typecheck && pnpm run test",
+    "mobile": "pnpm --filter @mobileclaw/mobile run start",
+    "android": "pnpm --filter @mobileclaw/mobile run prebuild && pnpm --filter @mobileclaw/mobile run android",
+    "doctor": "pnpm --filter @mobileclaw/mobile run doctor",
+    "apk": "pnpm --filter @mobileclaw/mobile run build:apk",
+    "apk:dev": "pnpm --filter @mobileclaw/mobile run build:dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

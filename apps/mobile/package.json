@@ -1,0 +1,46 @@
+{
+  "name": "@mobileclaw/mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "start:go": "expo start",
+    "android": "expo run:android",
+    "prebuild": "expo prebuild --clean",
+    "doctor": "expo-doctor",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "build:apk": "eas build -p android --profile preview",
+    "build:dev": "eas build -p android --profile development"
+  },
+  "dependencies": {
+    "@mobileclaw/capabilities": "workspace:*",
+    "@mobileclaw/core": "workspace:*",
+    "@react-native-async-storage/async-storage": "^2.2.0",
+    "expo": "^57.0.17",
+    "expo-calendar": "^57.0.5",
+    "expo-clipboard": "~8.0.0",
+    "expo-constants": "~18.0.0",
+    "expo-file-system": "^57.0.7",
+    "expo-intent-launcher": "^57.0.1",
+    "expo-linking": "~8.0.0",
+    "expo-notifications": "~0.32.0",
+    "expo-router": "~6.0.0",
+    "expo-secure-store": "^57.0.4",
+    "expo-sqlite": "~16.0.0",
+    "expo-status-bar": "~3.0.0",
+    "react": "19.2.0",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.6.0",
+    "react-native-screens": "~4.16.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@expo/config-plugins": "~11.0.7",
+    "@types/node": "22.10.5",
+    "@types/react": "~19.2.0",
+    "typescript": "^5.7.3",
+    "vitest": "2.1.8"
+  }
+}

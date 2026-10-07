@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+# esbuild (used by vitest) needs its install script to place its native binary.
+onlyBuiltDependencies:
+  - esbuild
