@@ -1,8 +1,7 @@
-import * as IntentLauncher from "expo-intent-launcher";
 import type { DirEntry, FileSystemService } from "@mobileclaw/core";
 
 /**
- * Android "all files access" (MANAGE_EXTERNAL_STORAGE) handling.
+ * Android "all files access" (MANAGE_EXTERNAL_STORAGE) detection.
  *
  * There is no runtime dialog for this permission: `requestPermissions` cannot grant
  * it, and without it a scoped-storage app can still **see directory names** in shared
@@ -14,6 +13,10 @@ import type { DirEntry, FileSystemService } from "@mobileclaw/core";
  * on a real device. `Directory.list()` and `File.exists` simply report nothing when
  * access is denied, so an empty result is ambiguous; a directory that always has
  * entries is not.
+ *
+ * Deliberately free of Expo/React Native imports so it stays unit-testable on Node
+ * (see vitest.config.ts). The part that must run on a device -- opening the system
+ * settings screen -- lives in `settings-launcher.ts`.
  */
 
 /** Directories that virtually always contain something on a real phone. */
@@ -45,7 +48,6 @@ export interface AllFilesAccessReport {
  * has files is the denial signature.
  */
 export async function probeAllFilesAccess(fs: FileSystemService): Promise<AllFilesAccessReport> {
-  let listedSomething = false;
   let anyReachable = false;
   const failures: string[] = [];
 
@@ -59,7 +61,6 @@ export async function probeAllFilesAccess(fs: FileSystemService): Promise<AllFil
     }
     anyReachable = true;
     if (entries.length > 0) {
-      listedSomething = true;
       return {
         status: "granted",
         detail: `${path} 可读（${entries.length} 项）`,
@@ -69,9 +70,6 @@ export async function probeAllFilesAccess(fs: FileSystemService): Promise<AllFil
     }
   }
 
-  if (listedSomething) {
-    return { status: "granted", detail: "共享存储可读" };
-  }
   if (anyReachable) {
     return {
       status: "denied",
@@ -85,35 +83,6 @@ export async function probeAllFilesAccess(fs: FileSystemService): Promise<AllFil
     status: "unknown",
     detail: `无法探测共享存储：${failures.slice(0, 2).join("; ") || "全部探针都失败"}`,
   };
-}
-
-/**
- * Open the system screen that toggles all-files access for this app.
- *
- * `MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` with `package:` data is the documented
- * per-app entry point. Some OEM builds only honour the generic
- * `MANAGE_ALL_FILES_ACCESS_PERMISSION`, so fall back to that, then to the app's own
- * details page.
- */
-export async function openAllFilesSettings(packageName: string): Promise<{ opened: boolean; detail: string }> {
-  const attempts: { action: string; data?: string }[] = [
-    { action: IntentLauncher.ActivityAction.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, data: `package:${packageName}` },
-    { action: IntentLauncher.ActivityAction.MANAGE_ALL_FILES_ACCESS_PERMISSION },
-    { action: IntentLauncher.ActivityAction.APPLICATION_DETAILS_SETTINGS, data: `package:${packageName}` },
-  ];
-
-  const errors: string[] = [];
-  for (const attempt of attempts) {
-    try {
-      await IntentLauncher.startActivityAsync(attempt.action, {
-        ...(attempt.data ? { data: attempt.data } : {}),
-      });
-      return { opened: true, detail: attempt.action };
-    } catch (error) {
-      errors.push(`${attempt.action}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-  return { opened: false, detail: errors.join("; ") };
 }
 
 /**

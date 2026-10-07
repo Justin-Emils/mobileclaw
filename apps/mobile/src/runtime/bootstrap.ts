@@ -19,8 +19,10 @@ import {
   defaultAppRoots,
   type ExpoFsLike,
 } from "./services/expo-file-system";
+import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
 import { MobileClawRuntime } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
+import type { FileSystemService } from "@mobileclaw/core";
 
 const CONFIG_KEY = "mobileclaw.config";
 
@@ -77,7 +79,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     shell,
     http,
     system,
-    environment: () => describeEnvironment(roots),
+    environment: () => describeEnvironment(roots, fs),
     onConfigChange: async (next) => {
       await kv.set(CONFIG_KEY, JSON.stringify(next));
     },
@@ -301,13 +303,36 @@ function createSystemPorts(): ExpoSystemPorts {
 }
 
 /** Environment block appended to the system prompt. */
-function describeEnvironment(roots: string[]): string {
+async function describeEnvironment(roots: string[], fs: FileSystemService): Promise<string> {
   const lines = [
     `Platform: ${Platform.OS} (${String(Platform.Version)})`,
     `Date: ${new Date().toISOString()}`,
     `Writable roots: ${roots.join(", ")}`,
-    "Sandbox: the app can read its own directories always; shared storage needs all-files access, which the user grants in system settings.",
   ];
+
+  // Probe access on every run (this function is called per agent turn, not cached).
+  //
+  // This line is load-bearing: on Android without all-files access, shared-storage
+  // directories still enumerate by name while every file inside reads as
+  // non-existent. Left unsaid, the model concludes the folders are empty and stops;
+  // said out loud, it tells the user to grant access instead of inventing a finding.
+  if (Platform.OS === "android") {
+    const access = await probeAllFilesAccess(fs);
+    lines.push(describeStorageAccess(access));
+    if (access.status === "denied") {
+      lines.push(
+        "You can open that settings page for the user with the system_open tool, or tell them to use 设置 → 存储权限.",
+      );
+    }
+    lines.push(
+      "When a listing returns only directories that are all empty, treat it as a possible permission problem rather than proof of emptiness, and say which it is.",
+    );
+  } else {
+    lines.push(
+      "Sandbox: the app can read its own directories always; shared storage needs the platform's file permission.",
+    );
+  }
+
   if (Platform.OS === "android") {
     lines.push(
       "Shell: only available when the user enabled Termux or Shizuku. If shell_run reports unavailability, use the filesystem tools instead.",

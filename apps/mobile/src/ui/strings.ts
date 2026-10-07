@@ -31,6 +31,9 @@ export const strings = {
     emptyTitle: "你的手机，装上手脚。",
     emptyHint:
       "试试：“整理我的下载目录并按类型归档”、“找出所有大于 10MB 的日志”、“把下载里的 notes.md 总结成一条待办”。",
+    /** 空状态正文；与 emptyHint 分开是因为两者会分别调整排版。 */
+    emptyBody:
+      "试试：“整理我的下载目录并按类型归档”、“找出所有大于 10MB 的日志”、“把下载里的 notes.md 总结成一条待办”。",
     placeholder: "让 MobileClaw 在这台手机上做点什么…",
     toolActivity: "工具调用",
     step: (n: number) => `第 ${n} 步`,
@@ -110,6 +113,20 @@ export const strings = {
     diagNone: "（无）",
     /** 插件列表右侧显示的工具数量。 */
     pluginToolCount: (n: number) => `${n} 个工具`,
+
+    // --- 所有文件访问权限 ---
+    // Android 11+ 没有运行时弹窗，只能跳系统设置手动开启；没有它，共享存储里的
+    // 目录能列名但文件读不到，看起来像"文件夹都是空的"。
+    diagStorageAccess: "所有文件访问权限",
+    storageGranted: "已开启",
+    storageDenied: "未开启 —— 共享存储只在系统设置里授权",
+    storageUnknown: "无法探测",
+    storageHint:
+      "Android 11 起「所有文件访问」没有弹窗，必须去系统设置手动开启。未开启时目录能列出名字，但里面的文件全部读不到，智能体会误以为文件夹是空的。",
+    openStorageSettings: "打开系统设置授权",
+    storageSettingsOpened: "已打开系统设置，开启后返回即可自动生效。",
+    storageSettingsFailed: (detail: string) => `无法打开系统设置 —— ${detail}`,
+    recheckStorage: "重新检测",
 
     capabilities: "能力",
     openPermissions: "权限与可访问目录",

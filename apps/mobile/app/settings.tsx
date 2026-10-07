@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
-import { Link } from "expo-router";
+import { Link, useFocusEffect } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
 import { strings } from "@/ui/strings";
@@ -93,6 +93,28 @@ export default function SettingsScreen() {
       setDiagBusy(false);
     }
   }, [runtime]);
+
+  /**
+   * Android gives no dialog for all-files access, so this is the only route: jump to
+   * the system screen, let the user flip the switch, then re-probe on return. The
+   * re-probe happens when the screen regains focus, not on a timer.
+   */
+  const openStorageSettings = useCallback(async () => {
+    const result = await runtime.openStorageSettings();
+    if (result.opened) {
+      setProbe(strings.settings.storageSettingsOpened);
+    } else {
+      setProbe(strings.settings.storageSettingsFailed(result.detail));
+    }
+  }, [runtime]);
+
+  // Returning from the system settings page is the moment the answer changes, and
+  // there is no callback for it, so re-probe whenever this screen regains focus.
+  useFocusEffect(
+    useCallback(() => {
+      void runDiagnostics();
+    }, [runDiagnostics]),
+  );
 
   const plugins = runtime.pluginStatus();
   const tools = runtime.toolNames();
@@ -242,6 +264,38 @@ export default function SettingsScreen() {
               value={diag.roots.join("\n") || strings.settings.diagNone}
               ok={diag.roots.length > 0}
             />
+            <DiagRow
+              label={strings.settings.diagStorageAccess}
+              value={
+                diag.storageAccess.status === "granted"
+                  ? strings.settings.storageGranted
+                  : diag.storageAccess.status === "denied"
+                    ? strings.settings.storageDenied
+                    : strings.settings.storageUnknown
+              }
+              ok={diag.storageAccess.status === "granted"}
+            />
+            {diag.storageAccess.status !== "granted" ? (
+              <>
+                <Text style={styles.hint}>{diag.storageAccess.detail}</Text>
+                <Text style={styles.hint}>{strings.settings.storageHint}</Text>
+                <View style={styles.buttonRow}>
+                  <Pressable
+                    style={[styles.buttonGhost, styles.buttonFlex]}
+                    onPress={() => void openStorageSettings()}
+                  >
+                    <Text style={styles.buttonGhostText}>{strings.settings.openStorageSettings}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.buttonGhost, styles.buttonFlex, diagBusy ? styles.buttonDisabled : null]}
+                    onPress={() => void runDiagnostics()}
+                    disabled={diagBusy}
+                  >
+                    <Text style={styles.buttonGhostText}>{strings.settings.recheckStorage}</Text>
+                  </Pressable>
+                </View>
+              </>
+            ) : null}
             {diag.plugins
               .filter((plugin) => plugin.status !== "loaded")
               .map((plugin) => (
@@ -357,6 +411,8 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space(2.5),
   },
   buttonDisabled: { opacity: 0.5 },
+  buttonRow: { flexDirection: "row", gap: theme.space(2), marginTop: theme.space(2) },
+  buttonFlex: { flex: 1 },
   buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
   buttonGhost: {
     backgroundColor: theme.colors.surfaceAlt,

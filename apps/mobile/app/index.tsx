@@ -10,12 +10,13 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { Link } from "expo-router";
+import { Link, useFocusEffect } from "expo-router";
 import type { AgentEvent, TranscriptEntry } from "@mobileclaw/core";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { ApprovalSheet } from "@/ui/approval-sheet";
 import { ToolCard } from "@/ui/tool-card";
 import { renderContent } from "@/ui/render";
+import type { AllFilesAccessReport } from "@/runtime/services/permissions";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
@@ -45,11 +46,33 @@ export default function ChatScreen() {
   const [status, setStatus] = useState<string>("");
   /** Set when a run stopped at the step limit, so the UI can offer to resume. */
   const [canContinue, setCanContinue] = useState(false);
+  /**
+   * Whether shared storage is actually readable.
+   *
+   * Surfaced as a banner because the failure is otherwise invisible and actively
+   * misleading: without all-files access every shared-storage folder lists as empty,
+   * so the agent reports "no files" and the user blames the agent.
+   */
+  const [storageAccess, setStorageAccess] = useState<AllFilesAccessReport | undefined>();
   const abortRef = useRef<AbortController | undefined>(undefined);
   const listRef = useRef<FlatList<Bubble>>(null);
 
   const runtime = state.runtime;
   const ready = state.status === "ready" && runtime !== undefined;
+
+  // Re-probe on focus: the user grants access in system settings and comes back.
+  useFocusEffect(
+    useCallback(() => {
+      if (!ready || !runtime) return;
+      let cancelled = false;
+      void runtime.checkStorageAccess().then((report) => {
+        if (!cancelled) setStorageAccess(report);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [ready, runtime]),
+  );
 
   useEffect(() => {
     if (!ready || !state.error) return;
@@ -186,6 +209,19 @@ export default function ChatScreen() {
         </View>
       </View>
 
+      {/* Android grants all-files access only via system settings, and without it
+          every shared-storage folder lists as empty -- so the agent looks broken
+          when it is merely unauthorised. Say so before the user blames the agent. */}
+      {storageAccess && storageAccess.status !== "granted" ? (
+        <View style={styles.storageBanner}>
+          <Text style={styles.storageBannerTitle}>{strings.settings.diagStorageAccess}</Text>
+          <Text style={styles.storageBannerBody}>{strings.settings.storageDenied}</Text>
+          <Pressable style={styles.storageBannerButton} onPress={() => void runtime?.openStorageSettings()}>
+            <Text style={styles.storageBannerButtonText}>{strings.settings.openStorageSettings}</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       {!ready ? (
         <View style={styles.center}>
           {state.status === "error" ? (
@@ -208,11 +244,8 @@ export default function ChatScreen() {
           renderItem={({ item }) => <BubbleView bubble={item} />}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>Your phone, with hands.</Text>
-              <Text style={styles.muted}>
-                Try: “整理我的下载目录并按类型归档”, “找出所有大于 10MB 的日志”, “把下载里的
-                notes.md 内容总结成一条待办”.
-              </Text>
+              <Text style={styles.emptyTitle}>{strings.chat.emptyTitle}</Text>
+              <Text style={styles.muted}>{strings.chat.emptyBody}</Text>
             </View>
           }
         />
@@ -401,6 +434,27 @@ const styles = StyleSheet.create({
     paddingVertical: theme.space(1),
   },
   noticeText: { fontSize: 12, lineHeight: 18 },
+  storageBanner: {
+    backgroundColor: theme.colors.warningSoft,
+    borderColor: theme.colors.warning,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: theme.radius.md,
+    marginHorizontal: theme.space(4),
+    marginBottom: theme.space(2),
+    padding: theme.space(3),
+    gap: theme.space(1),
+  },
+  storageBannerTitle: { color: theme.colors.warning, fontSize: 13, fontWeight: "700" },
+  storageBannerBody: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
+  storageBannerButton: {
+    alignSelf: "flex-start",
+    marginTop: theme.space(2),
+    paddingHorizontal: theme.space(3),
+    paddingVertical: theme.space(2),
+    borderRadius: theme.radius.sm,
+    backgroundColor: theme.colors.accentSoft,
+  },
+  storageBannerButtonText: { color: theme.colors.text, fontSize: 12, fontWeight: "600" },
   toolList: { gap: theme.space(2), marginBottom: theme.space(2) },
   sectionLabel: {
     color: theme.colors.textFaint,

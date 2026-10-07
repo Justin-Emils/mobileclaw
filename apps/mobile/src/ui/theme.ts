@@ -19,6 +19,7 @@ export const theme = {
     danger: "#ef5d6b",
     dangerSoft: "#3a1c22",
     warning: "#f0b429",
+    warningSoft: "#3a2f14",
     success: "#3fc78a",
     tool: "#1b2735",
   },

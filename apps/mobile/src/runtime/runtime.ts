@@ -25,10 +25,10 @@ import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore } from "./services/secrets";
 import {
-  openAllFilesSettings,
   probeAllFilesAccess,
   type AllFilesAccessReport,
 } from "./services/permissions";
+import { openAllFilesSettings } from "./services/settings-launcher";
 import { APP_PACKAGE } from "./services/app-info";
 
 export interface RuntimeDeps {
