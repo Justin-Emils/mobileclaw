@@ -132,6 +132,45 @@ The earlier "even a drive root leaves 262, so this is impossible" note was based
 isolated layout plus the old ninja; it is wrong. Details, measurements and the revert
 commands are in [`docs/dev-environment.md`](../docs/dev-environment.md).
 
+## Trap: a "successful" build that ships a stale JS bundle
+
+**Read this before trusting any release APK.**
+
+`createBundleReleaseJsAndAssets` does not treat the workspace packages
+(`packages/core`, `packages/capabilities`) as its inputs — they arrive through
+tsconfig paths and pnpm links, which Gradle does not follow. Editing core code
+therefore leaves that task `UP-TO-DATE`:
+
+```
+> Task :app:createBundleReleaseJsAndAssets UP-TO-DATE
+```
+
+Gradle then repackages an APK containing the *previous* bundle and exits 0. The result
+installs, runs, and silently behaves like the code from an earlier commit. This
+actually happened: a release APK was handed over missing changes committed minutes
+before it, and it was only caught by searching the packaged bundle for the new
+strings.
+
+Two guards now live in `eng/build-local.ps1`, so a plain run is safe:
+
+1. Before Gradle runs, the newest `*.ts`/`*.tsx` mtime under `apps/mobile/app`,
+   `apps/mobile/src`, `packages/core/src` and `packages/capabilities/src` is compared
+   against the existing bundle. If sources are newer, the bundle and its merged copies
+   are deleted so Gradle must re-run the task. (`--rerun-tasks` would work too but
+   rebuilds every native module as well.)
+2. After Gradle finishes, the APK must be newer than the moment the script started, or
+   it throws instead of copying a stale artifact. The script prints `apk built = …` so
+   the timestamp is visible without digging.
+
+If you build by invoking Gradle directly, neither guard applies — add `-Clean`, or
+delete `apps/mobile/android/app/build/generated/assets/react/<variant>/index.android.bundle`
+first. To confirm a package really contains your change:
+
+```powershell
+node eng\axml-manifest.cjs <apk>            # permissions/queries
+# and for JS: search the packaged bundle for a string you just added.
+```
+
 Cloud builds still work and remain a useful fallback — see below.
 
 ## Cloud build (no Android SDK needed)

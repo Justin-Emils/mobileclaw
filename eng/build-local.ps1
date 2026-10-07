@@ -50,6 +50,11 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $appDir = Join-Path $repoRoot "apps\mobile"
 $androidDir = Join-Path $appDir "android"
 
+# Recorded before any work: the artifact check at the end refuses to hand over an APK
+# that predates this run, which is how a "successful" build was found shipping an
+# older bundle.
+$script:BuildStartedAt = Get-Date
+
 # --- toolchain -------------------------------------------------------------
 $jdk = "E:\code\Eng\.jdk21"
 $sdk = "E:\code\Eng\.android-sdk"
@@ -253,6 +258,48 @@ if (-not (Test-Path $gradleCmd)) { throw "no usable gradle found" }
 $task = if ($Variant -eq "release") { "assembleRelease" } else { "assembleDebug" }
 Write-Host "`n=== gradle $task ===" -ForegroundColor Cyan
 
+# --- force a fresh JS bundle when the JS/TS sources changed ----------------
+#
+# Gradle does not treat the workspace packages (`packages/*`, imported through
+# tsconfig paths and pnpm links) as inputs of `createBundleReleaseJsAndAssets`, so
+# editing core code leaves that task UP-TO-DATE and the APK is packaged with the
+# *previous* bundle. The build then reports success while shipping stale code — which
+# is how a release APK came out missing changes that were committed minutes earlier.
+#
+# Rather than always re-bundling (slow), compare newest source mtime against the
+# existing bundle and invalidate the bundling outputs only when sources are newer.
+$bundlePath = Join-Path $androidDir "app\build\generated\assets\react\$Variant\index.android.bundle"
+$sourceRoots = @(
+    (Join-Path $repoRoot "apps\mobile\app"),
+    (Join-Path $repoRoot "apps\mobile\src"),
+    (Join-Path $repoRoot "packages\core\src"),
+    (Join-Path $repoRoot "packages\capabilities\src")
+)
+$newestSource = $null
+foreach ($sourceRoot in $sourceRoots) {
+    if (-not (Test-Path $sourceRoot)) { continue }
+    $candidate = Get-ChildItem $sourceRoot -Recurse -File -Include "*.ts", "*.tsx", "*.js", "*.json" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($candidate -and (-not $newestSource -or $candidate.LastWriteTime -gt $newestSource.LastWriteTime)) {
+        $newestSource = $candidate
+    }
+}
+if (Test-Path $bundlePath) {
+    $bundleTime = (Get-Item $bundlePath).LastWriteTime
+    if ($newestSource -and $newestSource.LastWriteTime -gt $bundleTime) {
+        Write-Host "bundle      = stale (source $($newestSource.Name) newer than bundle); forcing re-bundle" -ForegroundColor Yellow
+        # Deleting the bundle and its merged copy is what actually makes Gradle re-run
+        # the task; --rerun-tasks would rebuild every native module too.
+        Remove-Item $bundlePath -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $androidDir "app\build\intermediates\assets\$Variant\mergeReleaseAssets\index.android.bundle") -Force -ErrorAction SilentlyContinue
+        Remove-Item (Join-Path $androidDir "app\build\intermediates\assets\$Variant\mergeDebugAssets\index.android.bundle") -Force -ErrorAction SilentlyContinue
+    } else {
+        Write-Host "bundle      = up to date" -ForegroundColor Gray
+    }
+} else {
+    Write-Host "bundle      = not built yet" -ForegroundColor Gray
+}
+
 # Pin CMake 3.30.5: the SDK's default 3.22.1 emits a self-regeneration rule with no
 # declared inputs and `restat = 1`, so ninja re-runs CMake until it aborts with
 # "build.ninja still dirty after 100 tries". See eng/pin-cmake-version.init.gradle.
@@ -291,6 +338,15 @@ $apkDir = Join-Path $androidDir "app\build\outputs\apk\$Variant"
 $apk = Get-ChildItem $apkDir -Filter "*.apk" -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (-not $apk) { throw "no APK produced under $apkDir" }
+
+# Refuse to hand over an APK that predates this build. A stale artifact plus a
+# successful-looking log is the worst outcome: it installs and behaves like the code
+# from an earlier run.
+$buildStart = $script:BuildStartedAt
+if ($buildStart -and $apk.LastWriteTime -lt $buildStart) {
+    throw "APK at $($apk.FullName) is older than this build (started $buildStart). Gradle reported success without repackaging; re-run with -Clean."
+}
+Write-Host "apk built   = $($apk.LastWriteTime)" -ForegroundColor Gray
 
 $outDir = Join-Path $repoRoot "artifacts"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
