@@ -387,16 +387,15 @@ describe("MobileClawRuntime", () => {
     expect(runtime.pluginStatus().every((plugin) => plugin.status === "loaded")).toBe(true);
   });
 
-  it("reports storage access as unknown when no probe path is allowed at all", async () => {
-    // buildRuntime roots the fake fs at /demo, so every shared-storage probe is
-    // rejected by the path guard. That is a third state on purpose: "cannot even
-    // look" is not the same as "allowed to look and it is empty", and only the latter
-    // means the user must grant all-files access.
+  it("concludes nothing about storage access when no shared root is configured", async () => {
+    // buildRuntime roots its fake fs at /demo, which is not shared storage. The probe
+    // deliberately refuses to infer a permission verdict from a private directory --
+    // those are always writable, so doing so reported success with access revoked.
     const harness = buildRuntime();
     await harness.runtime.start();
     const report = await harness.runtime.checkStorageAccess();
     expect(report.status).toBe("unknown");
-    expect(report.detail).toContain("无法探测");
+    expect(report.detail).toContain("没有配置共享存储目录");
   });
 
   it("gives each conversation its own workspace and keeps approvals apart", async () => {

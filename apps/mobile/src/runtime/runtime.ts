@@ -250,7 +250,14 @@ export class MobileClawRuntime {
    * folders were empty. This distinguishes "empty" from "not allowed to look".
    */
   async checkStorageAccess(): Promise<AllFilesAccessReport> {
-    return probeAllFilesAccess(this.deps.fs);
+    // Roots are passed in because the probe must stay inside them: the path guard
+    // rejects anything else, which previously made the verdict permanent `unknown`.
+    const report = await probeAllFilesAccess(this.deps.fs, [...this.config.roots]);
+    // Logged because the verdict is a heuristic over several probe directories, and a
+    // wrong one is indistinguishable from a real permission problem without the raw
+    // per-probe evidence. `adb logcat -s ReactNativeJS` shows it on a device.
+    console.log(`[mobileclaw] storage access=${report.status} ${report.detail}`);
+    return report;
   }
 
   /** Open the system screen where all-files access is toggled for this app. */

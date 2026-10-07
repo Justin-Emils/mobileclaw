@@ -76,10 +76,28 @@ export class ExpoFsDriver implements FsDriver {
 
   async writeFile(path: string, data: string | Uint8Array): Promise<void> {
     const file = new this.fs.File(pathToUri(path));
-    // `overwrite` keeps repeated tool calls idempotent, which matters because the
-    // model may retry a write after an unrelated failure.
-    if (!file.exists) file.create({ intermediates: true, overwrite: true });
+    // Minimal `create()`: no options. Passing `{ intermediates: true, overwrite: true }`
+    // produced "Call to function 'FileSystemFile.create' has been rejected" from the
+    // native codegen argument check on a device, so the options object is the suspect.
+    // Directories are still created first, which is what `intermediates` was for.
+    if (!file.exists) {
+      await this.ensureParentDirectory(path);
+      file.create();
+    }
     file.write(data);
+  }
+
+  /** Create the parent directory when the driver exposes enough to do it. */
+  private async ensureParentDirectory(path: string): Promise<void> {
+    const slash = path.replace(/\/+$/, "").lastIndexOf("/");
+    if (slash <= 0) return;
+    const parent = path.slice(0, slash);
+    try {
+      const directory = new this.fs.Directory(pathToUri(parent));
+      if (!directory.exists) directory.create({ intermediates: true });
+    } catch {
+      // Best effort: a failing create() above still reports the real problem.
+    }
   }
 
   async stat(path: string): Promise<{

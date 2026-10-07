@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { DirEntry, FileSystemService } from "@mobileclaw/core";
+import type { FileSystemService } from "@mobileclaw/core";
 import {
   describeStorageAccess,
   legacyStoragePermissionsFor,
@@ -12,84 +12,140 @@ import {
  * "this directory is empty" versus "I am not allowed to look inside".
  * On Android both surface as an empty listing, and getting it wrong made the agent
  * report full folders as empty.
+ *
+ * The probe settles it with a write/read round-trip rather than by counting entries,
+ * because a fresh phone's Download folder is genuinely empty -- an earlier
+ * entry-counting version told correctly-authorised users they had no access. It also
+ * has to stay inside the configured roots, since the path guard rejects anything else;
+ * probing `/storage/emulated/0` directly made the verdict permanently "unknown" on a
+ * device.
  */
 
-function entry(path: string, isDirectory: boolean): DirEntry {
-  return {
-    path,
-    name: path.split("/").pop() ?? path,
-    relative: path,
-    size: 0,
-    isDirectory,
-    isFile: !isDirectory,
-    mtimeMs: 0,
+interface FakeFs {
+  fs: FileSystemService;
+  files: Map<string, string>;
+  /** Paths the guard refuses, i.e. outside the roots. */
+  restricted: (path: string) => boolean;
+}
+
+function fakeFs(options: { roots: string[]; restrictAll?: boolean; failWrite?: boolean }): FakeFs {
+  const files = new Map<string, string>();
+  const restricted = (path: string): boolean => {
+    if (options.restrictAll) return true;
+    return !options.roots.some((root) => path === root || path.startsWith(`${root.replace(/\/+$/, "")}/`));
   };
+  const guard = (path: string): void => {
+    if (restricted(path)) {
+      throw new Error(`read is restricted to: ${options.roots.join(", ")}`);
+    }
+  };
+  const fs = {
+    async read(path: string) {
+      guard(path);
+      const value = files.get(path);
+      if (value === undefined) throw new Error(`ENOENT: ${path}`);
+      return value;
+    },
+    async write(path: string, data: string | Uint8Array) {
+      guard(path);
+      // A directory that exists but refuses writes is the denial signature.
+      if (options.failWrite) throw new Error("EACCES: permission denied");
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      files.set(path, text);
+      return { path, name: path.split("/").pop() ?? path, size: text.length, isDirectory: false, isFile: true };
+    },
+    async remove(path: string) {
+      guard(path);
+      files.delete(path);
+    },
+    async list() {
+      return [];
+    },
+  } as unknown as FileSystemService;
+  return { fs, files, restricted };
 }
 
-/**
- * Only `list` is exercised; the probe never touches the rest of the interface.
- * A plain wrapper keeps the cast in one place instead of a double assertion per
- * factory, which the bundler's parser rejects.
- */
-function asFs(list: (path: string) => Promise<DirEntry[]>): FileSystemService {
-  return { list } as FileSystemService;
-}
-
-/** A filesystem whose shared-storage listings are empty, as when access is denied. */
-function emptyListings(): FileSystemService {
-  return asFs(vi.fn(async () => [] as DirEntry[]));
-}
-
-function readableListings(): FileSystemService {
-  return asFs(
-    vi.fn(async (path: string) => {
-      if (path === "/storage/emulated/0/Android/data") {
-        return [entry("/storage/emulated/0/Android/data/com.example", true)];
-      }
-      return [] as DirEntry[];
-    }),
-  );
-}
-
-function unreachable(): FileSystemService {
-  return asFs(
-    vi.fn(async () => {
-      throw new Error("E_ACCES");
-    }),
-  );
-}
+const SHARED_ROOT = "/storage/emulated/0";
+const PRIVATE_ROOT = "/data/user/0/dev.mobileclaw.app/files";
+const ROOTS = [PRIVATE_ROOT, `${SHARED_ROOT}/Download`];
+const SHARED_ONLY_ROOTS = [`${SHARED_ROOT}/Download`, `${SHARED_ROOT}/Documents`];
 
 describe("probeAllFilesAccess", () => {
-  it("reports granted when a probe directory is non-empty", async () => {
-    const report = await probeAllFilesAccess(readableListings());
+  it("reports granted when a probe file round-trips inside a shared root", async () => {
+    const { fs, files } = fakeFs({ roots: ROOTS });
+    const report = await probeAllFilesAccess(fs, ROOTS);
     expect(report.status).toBe("granted");
-    expect(report.probe).toBe("/storage/emulated/0/Android/data");
-    expect(report.entries).toBe(1);
+    expect(report.probe?.startsWith(SHARED_ROOT)).toBe(true);
+    // The probe must not leave litter behind in the user's storage.
+    expect(files.size).toBe(0);
   });
 
-  it("reports denied when directories are listable but always empty", async () => {
-    // This is the scoped-storage signature: names resolve, contents do not.
-    const report = await probeAllFilesAccess(emptyListings());
+  it("reports denied when writes inside a shared root are refused", async () => {
+    // Scoped storage without all-files access: the path exists, the write does not.
+    const { fs } = fakeFs({ roots: SHARED_ONLY_ROOTS, failWrite: true });
+    const report = await probeAllFilesAccess(fs, SHARED_ONLY_ROOTS);
     expect(report.status).toBe("denied");
     expect(report.detail).toContain("所有文件访问");
   });
 
-  it("reports unknown when every probe throws", async () => {
-    const report = await probeAllFilesAccess(unreachable());
+  it("reports unknown when every candidate is outside the roots", async () => {
+    // The bug caught on a device: the guard refuses the probe, which says nothing about
+    // the permission. Reporting "denied" here told an authorised user to go and grant.
+    const { fs } = fakeFs({ roots: SHARED_ONLY_ROOTS, restrictAll: true });
+    const report = await probeAllFilesAccess(fs, SHARED_ONLY_ROOTS);
     expect(report.status).toBe("unknown");
-    expect(report.detail).toContain("无法探测");
+    expect(report.detail).toContain("共享存储目录都不在可访问范围内");
   });
 
-  it("accepts a later probe directory when earlier ones are empty", async () => {
-    const fs = asFs(
-      vi.fn(async (path: string) => {
-        if (path === "/storage/emulated/0") return [entry("/storage/emulated/0/Download", true)];
-        return [] as DirEntry[];
-      }),
-    );
-    const report = await probeAllFilesAccess(fs);
+  it("never concludes 'granted' from an app-private root", async () => {
+    // The second device-caught bug: private directories are always writable with no
+    // permission, so probing one reported success with all-files access revoked and the
+    // warning banner stayed hidden.
+    const { fs } = fakeFs({ roots: [PRIVATE_ROOT] });
+    const report = await probeAllFilesAccess(fs, [PRIVATE_ROOT]);
+    expect(report.status).toBe("unknown");
+    expect(report.detail).toContain("没有配置共享存储目录");
+  });
+
+  it("reports unknown rather than denied when no shared root is configured at all", async () => {
+    // Nothing to conclude is the honest answer; "denied" would send the user to settings
+    // for a permission that is not the problem.
+    const { fs } = fakeFs({ roots: [PRIVATE_ROOT] });
+    expect((await probeAllFilesAccess(fs, [])).status).toBe("unknown");
+    expect((await probeAllFilesAccess(fs, [PRIVATE_ROOT])).status).toBe("unknown");
+  });
+
+  it("stays inside the roots it was given", async () => {
+    // Guards the regression directly: no candidate may be a path the guard would reject.
+    const { fs } = fakeFs({ roots: SHARED_ONLY_ROOTS });
+    const tried: string[] = [];
+    const spy = {
+      ...fs,
+      write: async (path: string, data: string | Uint8Array) => {
+        tried.push(path);
+        return fs.write(path, data);
+      },
+    } as unknown as FileSystemService;
+    await probeAllFilesAccess(spy, SHARED_ONLY_ROOTS);
+    expect(tried.length).toBeGreaterThan(0);
+    for (const path of tried) {
+      expect(SHARED_ONLY_ROOTS.some((root) => path.startsWith(root))).toBe(true);
+    }
+  });
+
+  it("accepts a bare shared root, where subdirectories may not exist", async () => {
+    const roots = ["/sdcard"];
+    const { fs, files } = fakeFs({ roots });
+    const report = await probeAllFilesAccess(fs, roots);
     expect(report.status).toBe("granted");
-    expect(report.probe).toBe("/storage/emulated/0");
+    expect(files.size).toBe(0);
+  });
+
+  it("does not treat an empty but writable shared directory as a permission problem", async () => {
+    // A brand new phone has an empty Download folder; that is not a denial.
+    const { fs } = fakeFs({ roots: ["/storage/emulated/0/Download"] });
+    const report = await probeAllFilesAccess(fs, ["/storage/emulated/0/Download"]);
+    expect(report.status).toBe("granted");
   });
 });
 
