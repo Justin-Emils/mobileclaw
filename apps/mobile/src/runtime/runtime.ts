@@ -24,7 +24,7 @@ import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
 import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./services/secrets";
-import { createSelfTestProvider } from "./services/self-test";
+import { createSelfTestProvider, selfTestPath } from "./services/self-test";
 
 /**
  * Prompt for the in-app self-test. Phrased as a real request so the scripted transport's
@@ -423,7 +423,7 @@ export class MobileClawRuntime {
   }> {
     const savedProvider = this.provider;
     const savedKey = this.apiKey;
-    const scripted = createSelfTestProvider();
+    const scripted = createSelfTestProvider(selfTestPath(this.config.roots));
     const conversation = await this.store.create({ title: SELF_TEST_TITLE });
     const conversationId = conversation.id;
     const workspace = this.workspaceFor(conversationId);

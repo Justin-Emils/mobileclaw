@@ -69,7 +69,7 @@ export interface SelfTestProvider extends LlmProvider {
  * stalls exactly as it would with a real model, and the self-test reports that rather than
  * papering over it.
  */
-export function createSelfTestProvider(path = "/demo/Download"): SelfTestProvider {
+export function createSelfTestProvider(path: string): SelfTestProvider {
   let toolResultSeen = false;
   return {
     id: "selftest",
@@ -95,4 +95,20 @@ export function createSelfTestProvider(path = "/demo/Download"): SelfTestProvide
       return { ok: true, message: "自检提供方（脚本，不联网）" };
     },
   };
+}
+
+/**
+ * Pick a path the configured roots actually allow.
+ *
+ * Hardcoding one sent the self-test at `/demo/Download`, which the `PathGuard` refuses on a
+ * device (`read is restricted to: ...`) -- so the check failed for a reason unrelated to
+ * what it was testing. Reading a real root means the turn exercises permission handling and
+ * the filesystem instead of the guard's rejection path.
+ *
+ * Falls back to `/` only when no root is configured, which the self-test then reports as a
+ * tool error rather than hiding.
+ */
+export function selfTestPath(roots: readonly string[]): string {
+  const first = roots.find((root) => typeof root === "string" && root.trim() !== "");
+  return first ?? "/";
 }

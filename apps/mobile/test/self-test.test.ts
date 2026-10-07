@@ -101,6 +101,19 @@ describe("runSelfTest", () => {
     expect(result.detail).not.toContain("工具错误:");
   });
 
+  it("reads a configured root rather than a hardcoded path", async () => {
+    // A hardcoded `/demo/Download` was refused by the PathGuard on a device
+    // (`read is restricted to: ...`), so the check failed for a reason unrelated to what it
+    // was testing. The path now comes from the configured roots.
+    const { runtime } = buildRuntime();
+    await runtime.start();
+    const result = await runtime.runSelfTest();
+    expect(result.ok).toBe(true);
+    expect(result.detail).not.toContain("read is restricted to");
+    const stored = await runtime.loadConversation(result.conversationId);
+    expect(stored?.messages.some((message) => message.role === "tool")).toBe(true);
+  });
+
   it("persists the turn, which is the thing worth proving", async () => {
     const { runtime } = buildRuntime();
     await runtime.start();
