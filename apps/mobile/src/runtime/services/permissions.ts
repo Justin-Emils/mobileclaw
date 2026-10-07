@@ -99,48 +99,6 @@ function isTopLevelSharedRoot(path: string): boolean {
 }
 
 /**
- * Diagnostic: try writing the same shared-storage path three ways.
- *
- * The guarded path failed with "Call to function 'FileSystemFile.create' has been
- * rejected" even with all-files access granted and a working write to app-private
- * storage, so the question is what the driver hands to expo-file-system. Reported
- * through the probe detail, which is logged on every check.
- */
-export interface FileCtor {
-  // Deliberately loose: expo's `File` has a richer surface (size, text(), ...) and its
-  // `create` takes an options object. This only needs to construct, create and write.
-  new (path: string): any;
-}
-
-export async function describeWriteVariants(
-  fileCtor: FileCtor,
-  dir: string,
-  name: string,
-): Promise<string> {
-  const plain = `${dir}/${name}`;
-  const withScheme = `file://${plain}`;
-  const encoded = `file://${plain.split("/").map(encodeURIComponent).join("/")}`;
-  const out: string[] = [];
-  for (const [label, target] of [
-    ["inherit-path", plain],
-    ["file-scheme", withScheme],
-    ["encoded-uri", encoded],
-  ] as const) {
-    try {
-      const file = new fileCtor(target);
-      if (!file.exists) file.create();
-      file.write("ok");
-      file.delete();
-      out.push(`${label}=OK`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      out.push(`${label}=${message.slice(0, 70)}`);
-    }
-  }
-  return out.join(" | ");
-}
-
-/**
  * Decide whether all-files access is in effect, by writing then reading a file.
  *
  * Three earlier attempts were wrong, and each looked fine in unit tests:
@@ -160,7 +118,6 @@ export async function describeWriteVariants(
 export async function probeAllFilesAccess(
   fs: FileSystemService,
   roots: string[] = [],
-  writeVariants?: (dir: string, name: string) => Promise<string>,
 ): Promise<AllFilesAccessReport> {
   const sharedRoots = roots.filter((root) => isSharedStorageRoot(root));
   if (sharedRoots.length === 0) {
