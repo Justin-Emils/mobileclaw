@@ -117,6 +117,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...config,
     name: "MobileClaw",
     slug: "mobileclaw",
+    // The EAS account that owns the project; required so builds resolve the
+    // correct project when an account belongs to several organizations.
+    owner: "justin_emils",
     version: "0.1.0",
     orientation: "portrait",
     scheme: "mobileclaw",
@@ -176,8 +179,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     extra: {
       eas: {
-        // Replaced by `eas init`; kept explicit so the config is self-documenting.
-        projectId: process.env["EAS_PROJECT_ID"] ?? undefined,
+        // Written by hand because `eas init` cannot patch a dynamic config
+        // (app.config.ts) automatically. Overridable for forks via EAS_PROJECT_ID.
+        projectId: process.env["EAS_PROJECT_ID"] ?? "2f118dc0-9900-4be8-8a68-6babf1c5be75",
       },
     },
   };
