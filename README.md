@@ -49,7 +49,7 @@ reported precisely instead of failing mid-conversation.
 | `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
 | `docs/dev-environment.md` | **Read this before building anything.** Toolchain paths (`E:\code\Eng`), the Windows 260-character path constraint, and seven environment-specific traps with symptoms and fixes. Shared across projects. |
 
-> **Repository location:** `E:\mc\mobileclaw` (moved from `E:\code\mobileclaw` on
+> **Repository location:** `E:\code\mobileclaw` (moved from `E:\code\mobileclaw` on
 > 2026-10-07). See `docs/dev-environment.md`.
 
 ## Quick start

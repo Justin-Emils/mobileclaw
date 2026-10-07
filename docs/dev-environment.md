@@ -6,12 +6,18 @@
 ## 一、当前项目位置
 
 ```
-E:\mc\mobileclaw\        ← 本项目（2026-10-07 从 E:\code\mobileclaw 迁移至此）
-E:\code\Eng\             ← Android 构建工具链，多项目共用，不要移动或改名
+E:\code\mobileclaw\       ← 本项目
+E:\code\Eng\              ← Android 构建工具链，多项目共用，不要移动或改名
 ```
 
-遗留物：`E:\code\mobileclaw` 是一个**空目录**，删除时提示被占用，那是迁移时旧会话的句柄未释放。
-重启后手动删掉即可，不影响任何东西。
+> **位置变更历史（重要）**：2026-10-07 曾把仓库临时迁到 `E:\mc\mobileclaw`、`E:\m\mc`，
+> 目的是绕过第三节的 260 字符路径限制。**结论证明那没用**（即使放在盘符根目录也超限），
+> 所以**已迁回 `E:\code\mobileclaw`**。如果你在别处看到 `E:\mc` 或 `E:\m` 的路径，那是过期信息。
+>
+> 顺带提醒：**如果将来又移动这个目录，务必注意两点** ——
+> (1) 移动前先停掉 Gradle daemon，否则 `node_modules` 会被占用导致复制不完整；
+> (2) `Move-Item` 在目标目录已存在时会把源目录**嵌套进去**（我就这样造出过
+> `E:\code\mobileclaw\mobileclaw\`），因此移动前要确保目标不存在或用 `robocopy /E`。
 
 ## 二、Android 构建工具链
 
@@ -45,15 +51,15 @@ ninja: error: rebuilding 'build.ninja':
   aarch64-linux-android/cmake/react-native-worklets/react-native-workletsConfigVersion.cmake
 ```
 
-**去掉仓库根之后，这段固定路径本身就有 258 字符。** 所以：
+**去掉仓库根之后，这段固定路径本身就有 258 字符。** 实测不同仓库位置下的总长：
 
 | 仓库根 | 该路径总长 | 结果 |
 | --- | --- | --- |
-| `E:\code\mobileclaw` | 275 | ✗ |
-| `E:\mc\mobileclaw` | 265 | ✗ |
-| `E:\m\mc` | 265 | ✗ |
-| `E:\x`（盘符根下 1 字符） | 262 | ✗ |
-| `E:\`（盘符根） | 262 | ✗ |
+| `E:\code\mobileclaw` | 275 | ✗ 超 15 |
+| `E:\mc\mobileclaw` | 265 | ✗ 超 5 |
+| `E:\m\mc` | 265 | ✗ 超 5 |
+| `E:\x`（盘符根下 1 字符） | 262 | ✗ 超 2 |
+| `E:\`（盘符根，仓库根长度为 0） | 262 | ✗ 超 2 |
 
 **即使把仓库直接放在盘符根目录也超过 260。** 也就是说：在保留 pnpm 隔离目录结构
 （`.pnpm/<包名>@<版本>_<哈希>/node_modules/<包名>`，固定开销约 120 字符）的前提下，
@@ -107,7 +113,7 @@ allprojects { project ->
 **验收（无需设备，秒级，改代码后必跑）：**
 
 ```powershell
-cd E:\mc\mobileclaw
+cd E:\code\mobileclaw
 pnpm check        # 类型检查 + 130 个单测 + 真实 Metro 打包
 ```
 
@@ -126,7 +132,7 @@ npx eas-cli@latest build -p android --profile preview --non-interactive
 
 ## 六、其他会话必读的三条
 
-1. **仓库位置已变更为 `E:\mc\mobileclaw`**。看到旧路径 `E:\code\mobileclaw` 即为过期信息
+1. **仓库位置已变更为 `E:\code\mobileclaw`**。看到旧路径 `E:\code\mobileclaw` 即为过期信息
    （现在只剩空目录残留）。
 2. **`E:\code\Eng` 不要移动或改名**，工具链路径是绝对引用。
 3. **写含中文的文件务必用 UTF-8 无 BOM**，见上表第 7 条——本项目因此损坏过两次文件、被迫两次

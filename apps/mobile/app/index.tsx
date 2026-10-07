@@ -15,6 +15,7 @@ import type { AgentEvent, TranscriptEntry } from "@mobileclaw/core";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { ApprovalSheet } from "@/ui/approval-sheet";
 import { ToolCard } from "@/ui/tool-card";
+import { renderContent } from "@/ui/render";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
 
@@ -284,13 +285,17 @@ function BubbleView({ bubble }: { bubble: Bubble }) {
     );
   }
   const mine = bubble.role === "user";
+  const textColor = mine ? theme.colors.text : theme.colors.text;
   return (
     <View style={[styles.bubbleRow, mine ? styles.bubbleRowMine : null]}>
       <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubbleTheirs]}>
-        <Text style={styles.bubbleText}>
-          {bubble.text}
-          {bubble.streaming && bubble.text === "" ? "…" : ""}
-        </Text>
+        {renderContent(mine ? "plain" : "markdown", bubble.text, {
+          streaming: bubble.streaming,
+          color: textColor,
+        })}
+        {bubble.streaming && bubble.text === "" ? (
+          <Text style={[styles.bubbleText, { color: theme.colors.textMuted }]}>…</Text>
+        ) : null}
       </View>
     </View>
   );

@@ -12,7 +12,7 @@ pnpm check      # typecheck + 130 tests + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
 
-> **The repository was moved to `E:\mc\mobileclaw` on 2026-10-07** (from
+> **The repository was moved to `E:\code\mobileclaw` on 2026-10-07** (from
 > `E:\code\mobileclaw`). Commands below assume that path.
 
 ## Local Android build (`eng/build-local.ps1`)
