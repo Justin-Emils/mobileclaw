@@ -24,6 +24,15 @@ export default defineConfig({
       // react-native entry point is Flow-typed and unparseable here, and the dialog it
       // drives is a device concern anyway.
       "react-native": fileURLToPath(new URL("./test/stubs/react-native.ts", import.meta.url)),
+      // `bootstrap.ts` imports several Expo native modules. Importing one pure helper
+      // from it (readTestOverrides) should not require a device, so they are stubbed.
+      "expo-file-system": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-secure-store": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-sqlite": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-linking": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-clipboard": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-calendar": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
+      "expo-notifications": fileURLToPath(new URL("./test/stubs/expo-modules.ts", import.meta.url)),
     },
   },
   test: {

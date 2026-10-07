@@ -10,7 +10,7 @@ import * as Notifications from "expo-notifications";
 import { Share } from "react-native";
 import { AdapterKeyValueStore } from "./services/storage";
 import { SqliteKvAdapter } from "./services/sqlite-kv";
-import { ExpoSecretStore } from "./services/secrets";
+import { ExpoSecretStore, API_KEY_SECRET } from "./services/secrets";
 import { ExpoHttpService } from "./services/expo-http";
 import { ExpoSystemService, type ExpoSystemPorts } from "./services/expo-system";
 import { MemoryShellService } from "./services/memory-shell";
@@ -26,6 +26,55 @@ import { DEFAULT_CONFIG, mergeConfig } from "./config";
 import type { FileSystemService } from "@mobileclaw/core";
 
 const CONFIG_KEY = "mobileclaw.config";
+
+/**
+ * Environment overrides for automated device testing.
+ *
+ * Why this exists: driving the settings screen with `adb shell input text` proved
+ * unreliable (it drops characters, and react-native puts the *placeholder* in the
+ * accessibility `text` attribute, so a read-back check compares against the placeholder
+ * forever). Baking the endpoint in at build time is the reliable alternative, and it is
+ * what makes an end-to-end run possible on an emulator with no cloud key.
+ *
+ * Safety:
+ *  - gated on `__DEV__`, so a production/release bundling with `--dev false` removes it;
+ *  - each variable is optional and independent;
+ *  - the API key is read here but never written to the config object, so it cannot end
+ *    up in the persisted config JSON.
+ *
+ * Usage (a throwaway test build only):
+ *   $env:MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
+ *   $env:MOBILECLAW_TEST_MODEL='mock-model'
+ *   $env:MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
+ *   .\eng\build-local.ps1 -Variant release -Clean
+ */
+/**
+ * Read test overrides from an environment map. Pure, so it can be unit-tested: the
+ * `__DEV__` gate and the emptiness rules decide whether a throwaway endpoint can leak
+ * into a build, which is worth asserting rather than eyeballing.
+ */
+export function readTestOverrides(
+  env: Record<string, string | undefined> | undefined,
+  isDev: boolean,
+): { baseUrl?: string; model?: string; apiKey?: string } {
+  if (!isDev || !env) return {};
+  const read = (name: string): string | undefined => {
+    const raw = env[name];
+    return typeof raw === "string" && raw.trim() !== "" ? raw.trim() : undefined;
+  };
+  const baseUrl = read("MOBILECLAW_TEST_BASE_URL");
+  const model = read("MOBILECLAW_TEST_MODEL");
+  const apiKey = read("MOBILECLAW_TEST_API_KEY");
+  return {
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(model ? { model } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
+}
+
+function testOverrides(): { baseUrl?: string; model?: string; apiKey?: string } {
+  return readTestOverrides(typeof process !== "undefined" ? process.env : undefined, __DEV__);
+}
 
 /**
  * Compose the runtime from real platform modules.
@@ -51,6 +100,22 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     }
   }
   const config = mergeConfig(parsedConfig);
+
+  // Test-only endpoint override; see `testOverrides` for why and for the safety gates.
+  const overrides = testOverrides();
+  if (overrides.baseUrl || overrides.model) {
+    config.provider = {
+      ...config.provider,
+      ...(overrides.baseUrl ? { baseUrl: overrides.baseUrl } : {}),
+      ...(overrides.model ? { model: overrides.model } : {}),
+    };
+    console.log(`[mobileclaw] test override: baseUrl=${config.provider.baseUrl} model=${config.provider.model}`);
+  }
+  if (overrides.apiKey) {
+    // Written to the secret store, not to the config, so it stays out of persisted JSON.
+    await secrets.set(API_KEY_SECRET, overrides.apiKey);
+    console.log("[mobileclaw] test override: API key seeded into the secret store");
+  }
 
   // --- filesystem ----------------------------------------------------------
   const appRoots = defaultAppRoots(expoFsModule());

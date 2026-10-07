@@ -80,6 +80,31 @@ Write-Host "ANDROID_HOME= $env:ANDROID_HOME"
 Write-Host "GRADLE_HOME = $env:GRADLE_USER_HOME"
 Write-Host "variant     = $Variant"
 
+# --- test overrides --------------------------------------------------------
+#
+# Passing these bakes an endpoint into the bundle so the app can run a real agent turn
+# on an emulator without a cloud key. See `testOverrides` in
+# apps/mobile/src/runtime/bootstrap.ts for the safety gates.
+#
+# Only meaningful for a throwaway test build: `__DEV__` gates the code, so a release
+# bundling removes it — but the values are still visible in the bundle when set, so do
+# not point this at a real account. Usage:
+#   $env:MOBILECLAW_TEST_BASE_URL='http://10.0.2.2:8787/v1'
+#   $env:MOBILECLAW_TEST_MODEL='mock-model'
+#   $env:MOBILECLAW_TEST_API_KEY='sk-mock-local-key'
+$overrideNames = @("MOBILECLAW_TEST_BASE_URL", "MOBILECLAW_TEST_MODEL", "MOBILECLAW_TEST_API_KEY")
+$activeOverrides = $overrideNames | Where-Object { (Get-Item "env:$_" -ErrorAction SilentlyContinue).Value }
+if ($activeOverrides.Count -gt 0) {
+    Write-Host "test override = $($activeOverrides -join ', ') (baked into the JS bundle)" -ForegroundColor Yellow
+    # Metro substitutes process.env.* at bundle time, so these must be set for the
+    # Gradle call below, which is a child process.
+    foreach ($name in $activeOverrides) {
+        Set-Item "env:$name" (Get-Item "env:$name").Value
+    }
+} else {
+    Write-Host "test override = none" -ForegroundColor Gray
+}
+
 # --- preflight: config integrity ------------------------------------------
 #
 # A stray `app.json` next to app.config.ts is dangerous, not cosmetic: Expo merges
