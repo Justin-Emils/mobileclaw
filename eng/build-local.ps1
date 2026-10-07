@@ -75,6 +75,54 @@ Write-Host "ANDROID_HOME= $env:ANDROID_HOME"
 Write-Host "GRADLE_HOME = $env:GRADLE_USER_HOME"
 Write-Host "variant     = $Variant"
 
+# --- preflight: config integrity ------------------------------------------
+#
+# A stray `app.json` next to app.config.ts is dangerous, not cosmetic: Expo merges
+# the static file with the dynamic config and static values win, so a 16-byte
+# `{"expo": {}}` silently drops `android.permissions`, the `<queries>` block,
+# `extra.eas.projectId` and `owner`. The APK then builds fine and is missing the
+# all-files permission. One appeared in this repo (committed by a concurrent
+# session) and was only caught by reading the generated manifest.
+$strayAppJson = Join-Path $appDir "app.json"
+if (Test-Path $strayAppJson) {
+    $content = (Get-Content $strayAppJson -Raw -ErrorAction SilentlyContinue).Trim()
+    Write-Host "`n!! app.json exists next to app.config.ts and overrides parts of it:" -ForegroundColor Red
+    Write-Host "   $strayAppJson" -ForegroundColor Red
+    Write-Host "   content: $content" -ForegroundColor Red
+    Write-Host "   Expo merges static app.json over app.config.ts. Delete it unless intentional:" -ForegroundColor Yellow
+    Write-Host "   Remove-Item '$strayAppJson'" -ForegroundColor Yellow
+    throw "refusing to build while app.json shadows app.config.ts"
+}
+Write-Host "app.json    = absent (app.config.ts is the single config source)" -ForegroundColor Gray
+
+# --- preflight: ninja version ---------------------------------------------
+#
+# ninja 1.10.2 (bundled with the SDK's CMake packages) lacks the
+# RtlAreLongPathsEnabled check, so it rejects any path over 260 characters even
+# though Windows long paths are enabled -- which is what made this project look
+# unbuildable. 1.12.1 has the check and builds fine. The replacement is manual, so
+# a `sdkmanager` reinstall of any cmake package silently reverts it and every
+# build breaks again with "Filename longer than 260 characters".
+$ninjaCandidates = @(
+    (Join-Path $sdk "cmake\3.30.5\bin\ninja.exe"),
+    (Join-Path $sdk "cmake\3.22.1\bin\ninja.exe")
+)
+$ninjaOk = $true
+foreach ($ninja in $ninjaCandidates) {
+    if (-not (Test-Path $ninja)) { continue }
+    $ninjaVersion = (& $ninja --version 2>&1 | Select-Object -First 1).ToString().Trim()
+    $needsLongPathSupport = $ninjaVersion -match '^1\.(10|11)\.'
+    if ($needsLongPathSupport) {
+        $ninjaOk = $false
+        Write-Host "`n!! ninja $ninjaVersion at $ninja lacks long-path support" -ForegroundColor Red
+        Write-Host "   It will fail with 'Filename longer than 260 characters'." -ForegroundColor Red
+        Write-Host "   Fix: replace it with 1.12.1, keeping a backup (see docs/dev-environment.md)." -ForegroundColor Yellow
+    } else {
+        Write-Host "ninja       = $ninjaVersion  ($ninja)" -ForegroundColor Gray
+    }
+}
+if (-not $ninjaOk) { throw "ninja is too old for this project's path lengths" }
+
 # Fail loudly rather than letting Gradle pick up Java 8 from PATH.
 #
 # `java -version` writes its banner to stderr and exits 0. Merge the streams so the
