@@ -47,12 +47,16 @@ reported precisely instead of failing mid-conversation.
 | `apps/mobile` | Expo app (SDK 57): runtime wiring, chat UI, approval sheet, settings, permission matrix, EAS config. |
 | `docs/android-capabilities.md` | Hard-won detail on what Android actually allows, and the native-module plan. |
 | `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
+| `docs/dev-environment.md` | **Read this before building anything.** Toolchain paths (`E:\code\Eng`), the Windows 260-character path constraint, and seven environment-specific traps with symptoms and fixes. Shared across projects. |
+
+> **Repository location:** `E:\mc\mobileclaw` (moved from `E:\code\mobileclaw` on
+> 2026-10-07). See `docs/dev-environment.md`.
 
 ## Quick start
 
 ```bash
 pnpm install
-pnpm check            # typecheck + 114 tests + a real Metro bundle, no device needed
+pnpm check            # typecheck + 130 tests + a real Metro bundle, no device needed
 pnpm doctor           # expo-doctor: dependency/SDK consistency (21 checks)
 pnpm mobile           # Metro for a dev build (needs a dev client installed)
 ```

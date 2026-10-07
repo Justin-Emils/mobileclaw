@@ -167,14 +167,36 @@ if (-not (Test-Path $gradleCmd)) { throw "no usable gradle found" }
 $task = if ($Variant -eq "release") { "assembleRelease" } else { "assembleDebug" }
 Write-Host "`n=== gradle $task ===" -ForegroundColor Cyan
 
+# Pin CMake 3.30.5: the SDK's default 3.22.1 emits a self-regeneration rule with no
+# declared inputs and `restat = 1`, so ninja re-runs CMake until it aborts with
+# "build.ninja still dirty after 100 tries". See eng/pin-cmake-version.init.gradle.
+$initScript = Join-Path $PSScriptRoot "pin-cmake-version.init.gradle"
+$initArgs = @()
+if (Test-Path $initScript) {
+    $initArgs = @("-I", $initScript)
+    Write-Host "cmake pin   = via $([System.IO.Path]::GetFileName($initScript))" -ForegroundColor Gray
+} else {
+    Write-Host "cmake pin   = MISSING (build will likely fail on CMake 3.22)" -ForegroundColor Yellow
+}
+
 Push-Location $androidDir
 try {
     # No --no-daemon: on Windows it makes Gradle's file handling interact badly with
-    # ninja, which then sees build.ninja as permanently dirty ("still dirty after 100
-    # tries") and fails the C++ targets for react-native-screens / worklets. The warm
-    # daemon is also substantially faster.
-    & $gradleCmd $task --console=plain
-    if ($LASTEXITCODE -ne 0) { throw "gradle $task failed ($LASTEXITCODE)" }
+    # ninja, and the warm daemon is substantially faster.
+    #
+    # $ErrorActionPreference must be relaxed for the call: Gradle and javac write
+    # ordinary progress and deprecation warnings to stderr, and with 'Stop' the first
+    # one aborts the build as a NativeCommandError — which silently truncated this
+    # build midway through Java compilation.
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $gradleCmd $task --console=plain @initArgs
+        $gradleExit = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prevEap
+    }
+    if ($gradleExit -ne 0) { throw "gradle $task failed ($gradleExit)" }
 }
 finally { Pop-Location }
 

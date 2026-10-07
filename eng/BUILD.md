@@ -1,11 +1,19 @@
 # Building the APK
 
+> **Environment facts, toolchain versions and the Windows path analysis now live in
+> [`docs/dev-environment.md`](../docs/dev-environment.md)** — that document is shared
+> across projects, so it is the primary reference. This file keeps the build commands
+> and the build-specific history.
+
 Verification that runs without a device or an Expo account (all local):
 
 ```bash
-pnpm check      # typecheck + 114 tests + a real Metro bundle
+pnpm check      # typecheck + 130 tests + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
+
+> **The repository was moved to `E:\mc\mobileclaw` on 2026-10-07** (from
+> `E:\code\mobileclaw`). Commands below assume that path.
 
 ## Local Android build (`eng/build-local.ps1`)
 
@@ -46,16 +54,15 @@ build needs no EAS quota:
 4. **`expo prebuild` must be invoked as `node_modules\.bin\expo.cmd`**; `npx
    --no-install expo` fails to resolve the binary in this workspace layout.
 
-### Remaining blocker: CMake 3.22's self-regeneration loop
+### Blocker 1: CMake 3.22's self-regeneration loop — SOLVED
 
-Every local build still fails the two C++ targets with:
+`react-native-screens` / `react-native-worklets` failed with:
 
 ```
-> Task :react-native-screens:buildCMakeDebug[arm64-v8a] FAILED
 C/C++: ninja: error: manifest 'build.ninja' still dirty after 100 tries
 ```
 
-Root cause, confirmed by reading the generated file:
+Root cause, read out of the generated file:
 
 ```ninja
 build CMakeFiles/rebuild_cache.util: CUSTOM_COMMAND
@@ -63,31 +70,46 @@ build CMakeFiles/rebuild_cache.util: CUSTOM_COMMAND
   restat = 1
 ```
 
-The rule declares **no inputs**, so ninja considers `build.ninja` permanently stale;
-it re-runs CMake, CMake rewrites `build.ninja` (verified: the timestamp does advance),
-ninja restarts, and gives up after 100 attempts. It is not a stale file, a stale
-timestamp or a future-dated source — the rule itself can never converge.
+The rule declares **no inputs**, so ninja considers `build.ninja` permanently stale: it
+re-runs CMake, CMake rewrites the file (verified — the timestamp does advance), ninja
+restarts, and it gives up after 100 attempts. Not a stale file, not clock skew, not a
+future-dated source: the rule can never converge.
 
-`CMAKE_SUPPRESS_REGENERATION=ON` is the documented switch, but it could not be
-injected: AGP 9 removed `arguments` from `CmakeOptions` (verified by dumping the
-object's members — only `path`, `version`, `buildStagingDirectory` remain), so the
-Gradle-property routes and a `subprojects {}` block both fail to reach CMake. Patching
-`build.ninja` to remove that one command was not enough either; a second regeneration
-hook remains.
-
-**The promising fix to try next: use an older CMake.** This `restat = 1`
-regeneration loop is a known CMake 3.22/Ninja interaction that 3.18 and 3.20 do not
-have, and the SDK ships only 3.22.1:
+`CMAKE_SUPPRESS_REGENERATION=ON` cannot be injected — AGP 9 removed `arguments` from
+`CmakeOptions` (verified by dumping the object: only `path`, `version`,
+`buildStagingDirectory` remain). **`version` is the one usable property**, so the fix is
+to use a CMake that does not emit that rule:
 
 ```powershell
-E:\code\Eng\.android-sdk\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.18.1"
+E:\code\Eng\.android-sdk\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.30.5"
 ```
 
-Then pin it for all native modules and rebuild. `sdkmanager` needs network, so the
-proxy problem applies (`NO_PROXY=*`).
+pinned by `eng/pin-cmake-version.init.gradle` (pass `-I` to Gradle). With this,
+`react-native-screens` and most of `expo-modules-core` compile successfully.
 
-Until that is resolved, **cloud builds remain the way to produce an APK** — see below.
-Local tooling is otherwise ready, and the JS/TS side of a local build is unaffected.
+### Blocker 2: ninja's 260-character path limit — NOT solvable here
+
+With the CMake fix in place, the failure moves to:
+
+```
+ninja: error: rebuilding 'build.ninja':
+  Stat(.../react-native-workletsConfigVersion.cmake): Filename longer than 260 characters
+```
+
+Measured, not guessed: the longest generated path is **265 characters**, and the portion
+that is *not* the repository root is **258 characters** on its own. Even with the repo at
+a drive root (`E:\`) the total is 262. pnpm's isolated store alone accounts for ~120 of
+those characters, and pnpm 11 ignores `node-linker=hoisted`, `shamefully-hoist` and
+`virtual-store-dir`.
+
+**So local APK builds are impossible on this machine for this project** until either
+ninja gains long-path support, or the dependency tree stops nesting under `.pnpm`.
+Everything short of native compilation does work locally. The full table of attempted
+workarounds and why each failed is in
+[`docs/dev-environment.md`](../docs/dev-environment.md#三路径长度这是硬约束不是洁癖) —
+check there before retrying any of them.
+
+**Therefore: cloud builds remain the way to produce an APK** — see below.
 
 ## Cloud build (no Android SDK needed)
 
