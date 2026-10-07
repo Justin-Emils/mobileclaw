@@ -193,18 +193,57 @@ const ListItem = memo(function ListItem({
  * unreadable, and phone widths make anything past two columns overflow. This is the
  * construct the app previously printed as raw `| Folder | State |` source.
  */
+/**
+ * Normalise a parsed table into fixed-width rows, one entry per rendered cell.
+ *
+ * Extracted from the component so it can be tested: this is what turns a model's pipe
+ * table into an actual grid, and the failures are invisible by eye -- a short row
+ * silently shifts every later row's columns, and a long row overflows the layout.
+ * Models routinely emit both (a `|` inside a cell, a row with a missing trailing cell).
+ *
+ * Returns `{ rows, align }` where every row has exactly `header.length` cells, padded
+ * with empty content or truncated as needed.
+ */
+export function buildTableGrid(block: {
+  header: InlineNode[][];
+  rows: InlineNode[][][];
+  align: (("left" | "center" | "right") | null)[];
+}): {
+  columns: number;
+  align: ("left" | "center" | "right" | null)[];
+  rows: InlineNode[][][];
+} {
+  const columns = block.header.length;
+  const align = Array.from({ length: columns }, (_, index) => block.align[index] ?? null);
+  return {
+    columns,
+    align,
+    rows: block.rows.map((row) =>
+      Array.from({ length: columns }, (_, index) => row[index] ?? []),
+    ),
+  };
+}
+
+/** CSS `textAlign` for a column, defaulting to left when unspecified. */
+export function columnTextAlign(
+  align: ("left" | "center" | "right" | null)[],
+  index: number,
+): "left" | "center" | "right" {
+  const value = align[index] ?? null;
+  return value === "right" ? "right" : value === "center" ? "center" : "left";
+}
+
 const TableView = memo(function TableView({
   block,
 }: {
   block: Extract<MarkdownBlock, { type: "table" }>;
 }) {
-  const columns = block.header.length;
+  const { columns, align, rows } = buildTableGrid(block);
   const cellStyle = (index: number) => {
-    const align = block.align[index] ?? null;
-    return align === "right" ? styles.cellRight : align === "center" ? styles.cellCenter : undefined;
+    const value = align[index] ?? null;
+    return value === "right" ? styles.cellRight : value === "center" ? styles.cellCenter : undefined;
   };
-  const textAlign = (index: number): "left" | "center" | "right" =>
-    block.align[index] === "right" ? "right" : block.align[index] === "center" ? "center" : "left";
+  const textAlign = (index: number) => columnTextAlign(align, index);
 
   return (
     <ScrollView
@@ -223,18 +262,15 @@ const TableView = memo(function TableView({
             </View>
           ))}
         </View>
-        {block.rows.map((row, rowIndex) => (
+        {rows.map((row, rowIndex) => (
           <View key={rowIndex} style={[styles.tableRow, rowIndex % 2 === 1 ? styles.tableRowAlt : null]}>
-            {Array.from({ length: columns }).map((_, cellIndex) => {
-              const cell = row[cellIndex] ?? [];
-              return (
-                <View key={cellIndex} style={[styles.cell, cellStyle(cellIndex)]}>
-                  <Text style={[styles.cellText, { textAlign: textAlign(cellIndex) }]}>
-                    <Inline nodes={cell} color={theme.colors.text} />
-                  </Text>
-                </View>
-              );
-            })}
+            {row.map((cell, cellIndex) => (
+              <View key={cellIndex} style={[styles.cell, cellStyle(cellIndex)]}>
+                <Text style={[styles.cellText, { textAlign: textAlign(cellIndex) }]}>
+                  <Inline nodes={cell} color={theme.colors.text} />
+                </Text>
+              </View>
+            ))}
           </View>
         ))}
       </View>

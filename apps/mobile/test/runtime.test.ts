@@ -5,7 +5,7 @@ import { MobileClawRuntime } from "@/runtime/runtime";
 import { ApprovalBroker } from "@/runtime/approval";
 import { DEFAULT_CONFIG, mergeConfig } from "@/runtime/config";
 import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage";
-import { MemorySecretStore } from "@/runtime/services/secrets";
+import { MemorySecretStore, createSecretStore, type SecretStore } from "@/runtime/services/secrets";
 import { MemoryShellService, RecordingShellService } from "@/runtime/services/memory-shell";
 import { ExpoHttpService } from "@/runtime/services/expo-http";
 import { ExpoSystemService } from "@/runtime/services/expo-system";
@@ -286,7 +286,9 @@ describe("system service", () => {
 
 describe("MobileClawRuntime", () => {
   /** A runtime over an in-memory filesystem with a scripted model transport. */
-  function buildRuntime(options: { scripts?: string[]; approve?: boolean } = {}) {
+  function buildRuntime(
+    options: { scripts?: string[]; approve?: boolean; secrets?: SecretStore } = {},
+  ) {
     return buildRuntimeOver(new AdapterKeyValueStore(new MemoryKvAdapter()), options);
   }
 
@@ -298,7 +300,7 @@ describe("MobileClawRuntime", () => {
    */
   function buildRuntimeOver(
     kv: AdapterKeyValueStore,
-    options: { scripts?: string[]; approve?: boolean } = {},
+    options: { scripts?: string[]; approve?: boolean; secrets?: SecretStore } = {},
   ) {
     const files = new Map<string, string>([["/demo/a.txt", "content"]]);
     const fs = new GuardedFileSystem({
@@ -342,8 +344,8 @@ describe("MobileClawRuntime", () => {
 
     // A key must exist, otherwise the provider refuses before any request is
     // made (which is itself covered as an error path below).
-    const secrets = new MemorySecretStore();
-    void secrets.set("provider.apiKey", "sk-test");
+    const secrets = options.secrets ?? new MemorySecretStore();
+    if (!options.secrets) void secrets.set("provider.apiKey", "sk-test");
 
     const runtime = new MobileClawRuntime({
       config: mergeConfig({
@@ -463,6 +465,65 @@ describe("MobileClawRuntime", () => {
     ).toBe(true);
     // The transcript cards need the tool entries too, not just the prose.
     expect(Array.isArray(restored?.entries)).toBe(true);
+  });
+
+  it("stays usable when the platform secret store silently loses writes", async () => {
+    // The device failure this guards: expo-secure-store resolves while persisting
+    // nothing. Before the fallback, the key could not be saved at all, nothing explained
+    // why, and the only symptom was "no API key configured" during a chat turn.
+    const lossy = {
+      async getItemAsync() {
+        return null;
+      },
+      async setItemAsync() {
+        // Accepts and discards.
+      },
+      async deleteItemAsync() {
+        return undefined;
+      },
+    };
+    const store = await createSecretStore(lossy, new MemorySecretStore());
+    const { runtime } = buildRuntime({ secrets: store });
+    await runtime.start();
+
+    expect(runtime.hasApiKey()).toBe(false);
+    const outcome = await runtime.setApiKey("sk-recovered");
+    // Reported honestly rather than assumed: the point is that it is usable AND the
+    // downgrade is visible.
+    expect(outcome.stored).toBe(true);
+    expect(runtime.hasApiKey()).toBe(true);
+
+    const status = store.status();
+    expect(status.backend).toBe("fallback");
+    expect(status.encrypted).toBe(false);
+
+    const diag = await runtime.diagnostics();
+    expect(diag.apiKeyPresent).toBe(true);
+    expect(diag.secretBackend.encrypted).toBe(false);
+  });
+
+  it("keeps the encrypted backend when the platform store works", async () => {
+    const data = new Map<string, string>();
+    const working = {
+      async getItemAsync(key: string) {
+        return data.get(key) ?? null;
+      },
+      async setItemAsync(key: string, value: string) {
+        data.set(key, value);
+      },
+      async deleteItemAsync(key: string) {
+        data.delete(key);
+      },
+    };
+    const store = await createSecretStore(working, new MemorySecretStore());
+    const { runtime } = buildRuntime({ secrets: store });
+    await runtime.start();
+
+    expect((await runtime.setApiKey("sk-encrypted")).stored).toBe(true);
+    expect(store.status().encrypted).toBe(true);
+    const diag = await runtime.diagnostics();
+    expect(diag.secretBackend.backend).toBe("keychain");
+    expect(diag.secretBackend.encrypted).toBe(true);
   });
 
   it("streams a full turn and records the transcript", async () => {
