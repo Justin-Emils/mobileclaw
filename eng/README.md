@@ -13,13 +13,25 @@ Two scripts, one shared implementation of "commit and push this repo".
 
 Registers a Windows scheduled task named **MobileClaw auto-commit** that runs
 `commit.ps1` headlessly every interval. It runs as the current user, so commits use
-this account's git identity and SSH key — a task running as SYSTEM would not.
+this account's git identity and stored credentials — a task running as SYSTEM would not.
 
 Commits only happen when the working tree is dirty, so an idle repository produces no
 empty commits. Output goes to `.logs/auto-commit.log` (git-ignored).
 
-**Credential requirement:** a scheduled task cannot answer a prompt. The push must work
-non-interactively, which here means an SSH key on the GitHub account with no passphrase.
+**Credential requirement:** a scheduled task cannot answer a prompt, so the push must work
+non-interactively. Here that is satisfied by HTTPS + Git Credential Manager, which already
+holds a credential for this account (`credential.helper = manager`, set system-wide).
+An SSH key would work too, provided it is registered on the GitHub account and has no
+passphrase — the key on this machine is *not* registered, which is why HTTPS is used.
+
+Verify the loop end to end without waiting for a tick:
+
+```powershell
+Start-ScheduledTask -TaskName 'MobileClaw auto-commit'
+Start-Sleep -Seconds 20
+Get-Content .logs\auto-commit.log -Tail 5     # expect 'pushed <sha> to <remote>'
+(Get-ScheduledTaskInfo -TaskName 'MobileClaw auto-commit').LastTaskResult   # expect 0
+```
 
 ## Manual checkpoints
 
@@ -31,6 +43,10 @@ non-interactively, which here means an SSH key on the GitHub account with no pas
 
 Exits non-zero on failure, so a caller (or an agent) notices instead of silently
 believing the push succeeded.
+
+Use `-Checkpoint` for anything a human will read later. The scheduled mode generates
+`chore: checkpoint <time>` messages, which are fine as a safety net but are not a
+substitute for a real commit message.
 
 ## Guard rails in `commit.ps1`
 
