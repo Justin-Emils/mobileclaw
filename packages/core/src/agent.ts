@@ -1,15 +1,15 @@
-import { createId } from "./store.js";
-import { describeInput, ToolRegistry } from "./tools-registry.js";
-import { CoreError, safeStringify, toCoreError } from "./errors.js";
-import { PermissionGate } from "./permission.js";
-import type { AnyToolDefinition } from "./tool.js";
+import { createId } from "./store";
+import { describeInput, ToolRegistry } from "./tools-registry";
+import { CoreError, safeStringify, toCoreError } from "./errors";
+import { PermissionGate } from "./permission";
+import type { AnyToolDefinition } from "./tool";
 import type {
   ChatMessage,
   Conversation,
   ConversationStore,
   LlmProvider,
   Usage,
-} from "./types.js";
+} from "./types";
 
 export interface AgentOptions {
   provider: LlmProvider;

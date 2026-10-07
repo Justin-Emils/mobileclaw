@@ -1,4 +1,4 @@
-import type { Conversation, ConversationStore, KeyValueStore } from "./types.js";
+import type { Conversation, ConversationStore, KeyValueStore } from "./types";
 
 /** In-memory key/value store; the reference implementation for tests. */
 export class MemoryKeyValueStore implements KeyValueStore {

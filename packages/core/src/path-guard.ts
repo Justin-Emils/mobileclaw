@@ -1,4 +1,4 @@
-import { CoreError } from "./errors.js";
+import { CoreError } from "./errors";
 
 export interface PathGuardOptions {
   /**

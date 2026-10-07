@@ -1,4 +1,4 @@
-import type { ChatMessage, CompletionResult, LlmProvider, StreamEvent } from "../types.js";
+import type { ChatMessage, CompletionResult, LlmProvider, StreamEvent } from "../types";
 
 /**
  * Shared plumbing for providers: turn a stream into a single message, and expose

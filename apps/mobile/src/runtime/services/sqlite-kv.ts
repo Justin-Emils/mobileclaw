@@ -1,4 +1,4 @@
-import type { AsyncKvAdapter } from "./storage.js";
+import type { AsyncKvAdapter } from "./storage";
 
 /**
  * `expo-sqlite` key/value adapter.

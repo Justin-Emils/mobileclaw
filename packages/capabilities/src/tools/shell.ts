@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CoreError, type AnyToolDefinition, type ShellService } from "@mobileclaw/core";
-import type { FsToolDeps } from "./filesystem.js";
-import { dirName } from "../guarded-fs.js";
+import type { FsToolDeps } from "./filesystem";
+import { dirName } from "../guarded-fs";
 
 /**
  * A tool needs both the service layer (for execution) and the path guard. Rather

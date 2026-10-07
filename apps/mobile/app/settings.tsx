@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { Link } from "expo-router";
-import { useRuntime, useRuntimeState } from "@/ui/runtime-provider.js";
-import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config.js";
-import { theme } from "@/ui/theme.js";
+import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
+import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
+import { theme } from "@/ui/theme";
 
 /**
  * Provider and capability settings.

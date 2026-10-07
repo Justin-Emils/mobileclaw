@@ -20,10 +20,10 @@ import {
   createId,
 } from "@mobileclaw/core";
 import { capabilityPlugins, type CapabilityDeps } from "@mobileclaw/capabilities";
-import { ApprovalBroker } from "./approval.js";
-import { AsyncEventQueue } from "./event-queue.js";
-import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config.js";
-import { API_KEY_SECRET, type SecretStore } from "./services/secrets.js";
+import { ApprovalBroker } from "./approval";
+import { AsyncEventQueue } from "./event-queue";
+import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
+import { API_KEY_SECRET, type SecretStore } from "./services/secrets";
 
 export interface RuntimeDeps {
   config: unknown;

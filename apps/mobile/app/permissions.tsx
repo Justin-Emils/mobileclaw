@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { RISK_LEVELS, type RiskLevel } from "@mobileclaw/core";
-import { useRuntime } from "@/ui/runtime-provider.js";
-import { DEFAULT_PERMISSIONS, type AppConfig } from "@/runtime/config.js";
-import { riskColor, theme } from "@/ui/theme.js";
+import { useRuntime } from "@/ui/runtime-provider";
+import { DEFAULT_PERMISSIONS, type AppConfig } from "@/runtime/config";
+import { riskColor, theme } from "@/ui/theme";
 
 type Mode = "allow" | "ask" | "deny";
 const MODES: Mode[] = ["allow", "ask", "deny"];

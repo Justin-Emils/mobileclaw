@@ -1,13 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { bootstrapRuntime } from "@/runtime/bootstrap.js";
-import { MobileClawRuntime } from "@/runtime/runtime.js";
-import { ApprovalBroker } from "@/runtime/approval.js";
-import { DEFAULT_CONFIG, type AppConfig } from "@/runtime/config.js";
-import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage.js";
-import { MemorySecretStore } from "@/runtime/services/secrets.js";
-import { ExpoHttpService } from "@/runtime/services/expo-http.js";
-import { ExpoSystemService } from "@/runtime/services/expo-system.js";
-import { MemoryShellService } from "@/runtime/services/memory-shell.js";
+import { bootstrapRuntime } from "@/runtime/bootstrap";
+import { MobileClawRuntime } from "@/runtime/runtime";
+import { ApprovalBroker } from "@/runtime/approval";
+import { DEFAULT_CONFIG, type AppConfig } from "@/runtime/config";
+import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage";
+import { MemorySecretStore } from "@/runtime/services/secrets";
+import { ExpoHttpService } from "@/runtime/services/expo-http";
+import { ExpoSystemService } from "@/runtime/services/expo-system";
+import { MemoryShellService } from "@/runtime/services/memory-shell";
 import { GuardedFileSystem } from "@mobileclaw/capabilities";
 import { PathGuard } from "@mobileclaw/core";
 

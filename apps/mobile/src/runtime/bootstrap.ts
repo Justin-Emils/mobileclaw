@@ -8,19 +8,19 @@ import * as IntentLauncher from "expo-intent-launcher";
 import * as Calendar from "expo-calendar";
 import * as Notifications from "expo-notifications";
 import { Share } from "react-native";
-import { AdapterKeyValueStore } from "./services/storage.js";
-import { SqliteKvAdapter } from "./services/sqlite-kv.js";
-import { ExpoSecretStore } from "./services/secrets.js";
-import { ExpoHttpService } from "./services/expo-http.js";
-import { ExpoSystemService, type ExpoSystemPorts } from "./services/expo-system.js";
-import { MemoryShellService } from "./services/memory-shell.js";
+import { AdapterKeyValueStore } from "./services/storage";
+import { SqliteKvAdapter } from "./services/sqlite-kv";
+import { ExpoSecretStore } from "./services/secrets";
+import { ExpoHttpService } from "./services/expo-http";
+import { ExpoSystemService, type ExpoSystemPorts } from "./services/expo-system";
+import { MemoryShellService } from "./services/memory-shell";
 import {
   createExpoFileSystem,
   defaultAppRoots,
   type ExpoFsLike,
-} from "./services/expo-file-system.js";
-import { MobileClawRuntime } from "./runtime.js";
-import { DEFAULT_CONFIG, mergeConfig } from "./config.js";
+} from "./services/expo-file-system";
+import { MobileClawRuntime } from "./runtime";
+import { DEFAULT_CONFIG, mergeConfig } from "./config";
 
 const CONFIG_KEY = "mobileclaw.config";
 

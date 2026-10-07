@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CoreError, type AnyToolDefinition, type SystemService } from "@mobileclaw/core";
-import { requireAvailable } from "../availability.js";
+import { requireAvailable } from "../availability";
 
 /**
  * Shizuku / ADB-backed privileged operations.

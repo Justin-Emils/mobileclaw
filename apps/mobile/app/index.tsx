@@ -12,10 +12,10 @@ import {
 } from "react-native";
 import { Link } from "expo-router";
 import type { AgentEvent, TranscriptEntry } from "@mobileclaw/core";
-import { useRuntime, useRuntimeState } from "@/ui/runtime-provider.js";
-import { ApprovalSheet } from "@/ui/approval-sheet.js";
-import { ToolCard } from "@/ui/tool-card.js";
-import { theme } from "@/ui/theme.js";
+import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
+import { ApprovalSheet } from "@/ui/approval-sheet";
+import { ToolCard } from "@/ui/tool-card";
+import { theme } from "@/ui/theme";
 
 interface Bubble {
   id: string;

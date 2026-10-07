@@ -1,6 +1,6 @@
-import { CoreError, safeStringify } from "../errors.js";
-import { BaseProvider, SseParser } from "./base.js";
-import type { ChatMessage, CompletionRequest, HttpService, StreamEvent } from "../types.js";
+import { CoreError, safeStringify } from "../errors";
+import { BaseProvider, SseParser } from "./base";
+import type { ChatMessage, CompletionRequest, HttpService, StreamEvent } from "../types";
 
 export interface OpenAiCompatibleOptions {
   /** e.g. https://api.deepseek.com/v1 or https://api.openai.com/v1 */

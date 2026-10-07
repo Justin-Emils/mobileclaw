@@ -1,6 +1,8 @@
 import type { ExpoConfig, ConfigContext } from "expo/config";
-import type { ConfigPlugin } from "@expo/config-plugins";
-import { withAndroidManifest } from "@expo/config-plugins";
+// `expo/config-plugins` (the sub-export) rather than the `@expo/config-plugins`
+// package: Expo requires the former, and installing the latter directly makes
+// expo-doctor fail and risks two copies of the plugin runtime.
+import { withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
 
 interface QueryEntry {
   package?: string;
@@ -144,6 +146,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ],
     experiments: {
       typedRoutes: true,
+      // Metro does not read tsconfig `paths` on its own (tsc and vitest do, which
+      // is why the `@/*` aliases type-checked but failed to bundle). This makes
+      // the alias resolve during bundling.
+      tsconfigPaths: true,
     },
     extra: {
       eas: {

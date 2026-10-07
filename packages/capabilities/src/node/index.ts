@@ -5,5 +5,5 @@
  * pulls `node:fs` / `node:child_process` through the main entry point. Used by
  * tests, by the desktop playground and by a future CLI host.
  */
-export * from "./fs.js";
-export * from "./shell.js";
+export * from "./fs";
+export * from "./shell";

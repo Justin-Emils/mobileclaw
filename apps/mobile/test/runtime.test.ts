@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AgentEvent } from "@mobileclaw/core";
-import { AsyncEventQueue } from "@/runtime/event-queue.js";
-import { MobileClawRuntime } from "@/runtime/runtime.js";
-import { ApprovalBroker } from "@/runtime/approval.js";
-import { DEFAULT_CONFIG, mergeConfig } from "@/runtime/config.js";
-import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage.js";
-import { MemorySecretStore } from "@/runtime/services/secrets.js";
-import { MemoryShellService, RecordingShellService } from "@/runtime/services/memory-shell.js";
-import { ExpoHttpService } from "@/runtime/services/expo-http.js";
-import { ExpoSystemService } from "@/runtime/services/expo-system.js";
+import { AsyncEventQueue } from "@/runtime/event-queue";
+import { MobileClawRuntime } from "@/runtime/runtime";
+import { ApprovalBroker } from "@/runtime/approval";
+import { DEFAULT_CONFIG, mergeConfig } from "@/runtime/config";
+import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage";
+import { MemorySecretStore } from "@/runtime/services/secrets";
+import { MemoryShellService, RecordingShellService } from "@/runtime/services/memory-shell";
+import { ExpoHttpService } from "@/runtime/services/expo-http";
+import { ExpoSystemService } from "@/runtime/services/expo-system";
 import { GuardedFileSystem } from "@mobileclaw/capabilities";
 import { PathGuard } from "@mobileclaw/core";
 

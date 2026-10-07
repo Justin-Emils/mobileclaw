@@ -1,6 +1,6 @@
-import { BaseProvider } from "./base.js";
-import { CoreError } from "../errors.js";
-import type { CompletionRequest, StreamEvent } from "../types.js";
+import { BaseProvider } from "./base";
+import { CoreError } from "../errors";
+import type { CompletionRequest, StreamEvent } from "../types";
 
 /** One scripted assistant turn. */
 export type ScriptedTurn =

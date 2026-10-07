@@ -1,8 +1,8 @@
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { RuntimeProvider } from "@/ui/runtime-provider.js";
-import { theme } from "@/ui/theme.js";
+import { RuntimeProvider } from "@/ui/runtime-provider";
+import { theme } from "@/ui/theme";
 
 export default function RootLayout() {
   return (

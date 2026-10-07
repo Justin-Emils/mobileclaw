@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { PathGuard } from "@mobileclaw/core";
-import { GuardedFileSystem, type FsDriver } from "../guarded-fs.js";
+import { GuardedFileSystem, type FsDriver } from "../guarded-fs";
 
 /** Resolved stat shape returned by an {@link FsDriver}. */
 export interface DriverStat {

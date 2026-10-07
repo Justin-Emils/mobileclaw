@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { CoreError, type AnyToolDefinition, type FileSystemService, type ShellService } from "@mobileclaw/core";
-import { probeCommand, requireAvailable } from "../availability.js";
+import { probeCommand, requireAvailable } from "../availability";
 
 export interface PythonToolDeps {
   shell: ShellService;

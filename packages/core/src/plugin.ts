@@ -1,7 +1,7 @@
-import type { Context } from "./context.js";
-import { CoreError, isCoreError, toCoreError } from "./errors.js";
-import type { ToolRegistry } from "./tools-registry.js";
-import type { AnyToolDefinition } from "./tool.js";
+import type { Context } from "./context";
+import { CoreError, isCoreError, toCoreError } from "./errors";
+import type { ToolRegistry } from "./tools-registry";
+import type { AnyToolDefinition } from "./tool";
 
 /**
  * A plugin is a plain function plus optional metadata. This mirrors the Cordis

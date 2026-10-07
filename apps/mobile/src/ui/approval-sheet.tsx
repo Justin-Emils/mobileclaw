@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import type { ApprovalBroker, PendingApproval } from "@/runtime/approval.js";
-import { riskColor, theme } from "@/ui/theme.js";
+import type { ApprovalBroker, PendingApproval } from "@/runtime/approval";
+import { riskColor, theme } from "@/ui/theme";
 
 /**
  * The permission prompt.

@@ -1,19 +1,19 @@
 import { definePlugin, type Plugin } from "@mobileclaw/core";
 import type { FileSystemService, HttpService, ShellService, SystemService } from "@mobileclaw/core";
-import { createFilesystemTools } from "./tools/filesystem.js";
-import { createShellTools } from "./tools/shell.js";
-import { createWebTools } from "./tools/web.js";
-import { createSystemTools } from "./tools/system.js";
-import { createPythonTools } from "./tools/python.js";
-import { createShizukuTools } from "./tools/shizuku.js";
+import { createFilesystemTools } from "./tools/filesystem";
+import { createShellTools } from "./tools/shell";
+import { createWebTools } from "./tools/web";
+import { createSystemTools } from "./tools/system";
+import { createPythonTools } from "./tools/python";
+import { createShizukuTools } from "./tools/shizuku";
 
-export * from "./availability.js";
-export * from "./tools/filesystem.js";
-export * from "./tools/shell.js";
-export * from "./tools/web.js";
-export * from "./tools/system.js";
-export * from "./tools/python.js";
-export * from "./tools/shizuku.js";
+export * from "./availability";
+export * from "./tools/filesystem";
+export * from "./tools/shell";
+export * from "./tools/web";
+export * from "./tools/system";
+export * from "./tools/python";
+export * from "./tools/shizuku";
 
 export interface CapabilityDeps {
   fs: FileSystemService;

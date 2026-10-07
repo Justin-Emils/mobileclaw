@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { CoreError, safeStringify, toCoreError } from "./errors.js";
-import type { AnyToolDefinition, ToolCallContext, ToolDefinition, ToolSchema } from "./tool.js";
+import { CoreError, safeStringify, toCoreError } from "./errors";
+import type { AnyToolDefinition, ToolCallContext, ToolDefinition, ToolSchema } from "./tool";
 
 /**
  * Holds the tools every plugin contributed and turns them into the JSON Schema

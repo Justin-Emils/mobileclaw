@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { TranscriptEntry } from "@mobileclaw/core";
 import { safeStringify } from "@mobileclaw/core";
-import { statusColor, theme } from "@/ui/theme.js";
+import { statusColor, theme } from "@/ui/theme";
 
 type ToolEntry = Extract<TranscriptEntry, { kind: "tool" }>;
 

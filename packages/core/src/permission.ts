@@ -1,5 +1,5 @@
-import { CoreError } from "./errors.js";
-import { RISK_LEVELS, riskLevelSchema, type RiskLevel, type ToolDefinition } from "./tool.js";
+import { CoreError } from "./errors";
+import { RISK_LEVELS, riskLevelSchema, type RiskLevel, type ToolDefinition } from "./tool";
 import { z } from "zod";
 
 export interface PermissionRule {

@@ -1,5 +1,5 @@
-import { CoreError } from "./errors.js";
-import { EventBus, type DefaultEvents, type Disposable, type EventMap } from "./events.js";
+import { CoreError } from "./errors";
+import { EventBus, type DefaultEvents, type Disposable, type EventMap } from "./events";
 
 /**
  * Service registry contract. Packages extend this interface through TypeScript
