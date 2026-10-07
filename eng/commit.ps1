@@ -83,8 +83,24 @@ function Fail {
 # .NET gives us both streams as plain text and the real exit code.
 function Invoke-Native {
     param([string]$File, [string[]]$Arguments)
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $File
+
+    # Bypass any HTTP proxy for git.
+    #
+    # On this machine git's http.proxy points at a local proxy app
+    # (127.0.0.1:7892, set globally) and tunnelling GitHub through it fails the
+    # TLS handshake, so every push dies with "schannel: failed to receive
+    # handshake". NO_PROXY=* makes git talk to GitHub directly. It is set on the
+    # child process only: the user's global git config is left untouched.
+    #
+    # Note an empty `http.proxy` does NOT work here: git reads an empty value as
+    # "unset" and falls back to the global proxy, and http.noProxy is ignored
+    # outright. The environment variable is the reliable switch.
+    $psi.EnvironmentVariables['NO_PROXY'] = '*'
+    $psi.EnvironmentVariables['no_proxy'] = '*'
+
     $psi.Arguments = ($Arguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
     $psi.WorkingDirectory = (Get-Location).Path
     $psi.RedirectStandardOutput = $true
