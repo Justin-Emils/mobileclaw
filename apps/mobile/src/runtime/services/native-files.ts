@@ -156,11 +156,29 @@ export function createNativeDriver(native: NativeFilesModule): FsDriver {
 }
 
 /**
- * The best driver available on this device.
+ * Best driver on this device.
  *
  * Prefers the native module; falls back to `expo-file-system` so app-private paths keep
  * working even if the native side is missing.
  */
 export function pickDriver(expoDriver: FsDriver, native = loadNativeFiles()): FsDriver {
   return native ? createNativeDriver(native) : expoDriver;
+}
+
+/**
+ * Installed apps, for `system_apps`.
+ *
+ * Implemented in the same native module as the file access, because both exist for the same
+ * reason: the JS-only path could not do the job. Here the blocker is Android 11+ package
+ * visibility -- `getInstalledPackages` from JS sees only the packages the manifest names.
+ *
+ * Returns undefined when the native module is absent, which lets the caller keep reporting
+ * "not supported on this platform" rather than pretending.
+ */
+export async function listInstalledApps(
+  native = loadNativeFiles(),
+): Promise<{ packageId: string; label: string }[] | undefined> {
+  const withApps = native as (NativeFilesModule & { listApps?: () => Promise<unknown> }) | undefined;
+  if (!withApps?.listApps) return undefined;
+  return (await withApps.listApps()) as { packageId: string; label: string }[];
 }

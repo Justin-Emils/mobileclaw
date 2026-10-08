@@ -4,6 +4,7 @@ import {
   base64ToBytes,
   bytesToBase64,
   createNativeDriver,
+  listInstalledApps,
   pickDriver,
   type NativeFilesModule,
 } from "@/runtime/services/native-files";
@@ -166,9 +167,39 @@ describe("createNativeDriver", () => {
   });
 });
 
+describe("listInstalledApps", () => {
+  it("returns undefined when the native module is absent", async () => {
+    // `system_apps` was declared but never wired, so it always failed with "not supported on
+    // this platform" -- shown to the user as a bare 失败 with no explanation. Returning
+    // undefined here is what lets the caller keep saying that honestly rather than pretending.
+    expect(await listInstalledApps(undefined)).toBeUndefined();
+  });
+
+  it("returns undefined when the module cannot list apps", async () => {
+    const partial = { ...fakeNative() } as unknown as NativeFilesModule;
+    expect(await listInstalledApps(partial)).toBeUndefined();
+  });
+
+  it("passes the app list through when the native module provides it", async () => {
+    const native = {
+      ...fakeNative(),
+      async listApps() {
+        return [
+          { packageId: "com.termux", label: "Termux" },
+          { packageId: "com.android.settings", label: "设置" },
+        ];
+      },
+    } as unknown as NativeFilesModule;
+    const apps = await listInstalledApps(native);
+    expect(apps).toEqual([
+      { packageId: "com.termux", label: "Termux" },
+      { packageId: "com.android.settings", label: "设置" },
+    ]);
+  });
+});
+
 describe("pickDriver", () => {
   const expoDriver = { marker: "expo" } as unknown as FsDriver;
-
   it("prefers the native driver when the module is present", () => {
     const chosen = pickDriver(expoDriver, fakeNative());
     expect(chosen).not.toBe(expoDriver);

@@ -21,7 +21,7 @@ import {
   type ExpoFsLike,
 } from "./services/expo-file-system";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
-import { createNativeDriver, loadNativeFiles } from "./services/native-files";
+import { createNativeDriver, listInstalledApps, loadNativeFiles } from "./services/native-files";
 import { MobileClawRuntime } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
 import type { FileSystemService } from "@mobileclaw/core";
@@ -362,6 +362,19 @@ function createSystemPorts(): ExpoSystemPorts {
         packageName: packageId,
         category: "android.intent.category.LAUNCHER",
       });
+    };
+
+    // `system_apps` was declared but never wired, so it always failed with "not supported on
+    // this platform" -- which surfaced to the user as a bare 失败 in the tool card, with no
+    // explanation of what went wrong or what to do. The native module answers it now.
+    ports.listApps = async () => {
+      const apps = await listInstalledApps();
+      if (!apps) {
+        throw new Error(
+          "读不到已安装应用列表：原生模块不可用（构建产物可能过期）。",
+        );
+      }
+      return apps;
     };
   }
 

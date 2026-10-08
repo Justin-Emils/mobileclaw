@@ -21,6 +21,8 @@ interface ManifestData {
 interface ManifestIntent {
   action?: ManifestName[];
   data?: ManifestData[];
+  /** Needed for a launcher-style query: MAIN alone matches too little. */
+  category?: ManifestName[];
 }
 interface ManifestQueries {
   package?: ManifestName[];
@@ -72,6 +74,22 @@ const withPackageQueries: ConfigPlugin = (config) =>
       }
     }
 
+    // Android 11+ hides other apps unless they are named here. `system_apps` exists to list
+    // installed apps so the agent can pick a package id for `system_open`, and with only the
+    // fixed `<package>` entries above it could see four apps and nothing else.
+    //
+    // A MAIN/LAUNCHER query is the way to fix that: it is the officially recommended
+    // mechanism, and it needs no permission. QUERY_ALL_PACKAGES would also work but is a
+    // Play-restricted permission requiring a declared use case, and it exposes the full
+    // package list including apps with no icon. This returns exactly the launchable apps,
+    // which is what a user means by "the apps on my phone".
+    const launcherIntent = {
+      action: [{ $: { "android:name": "android.intent.action.MAIN" } }],
+      category: [{ $: { "android:name": "android.intent.category.LAUNCHER" } }],
+    };
+    if (!intents.some((i) => i.action?.[0]?.$?.["android:name"] === "android.intent.action.MAIN")) {
+      intents.push(launcherIntent);
+    }
     manifest.queries = [{ package: packages, intent: intents }];
     return manifestConfig;
   });
@@ -310,7 +328,9 @@ class MobileClawFilesModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  /** What the filesystem says about a path, for diagnosing a refusal without guessing. */
+  /**
+   * What the filesystem says about a path, for diagnosing a refusal without guessing.
+   */
   @ReactMethod
   fun describe(path: String, promise: Promise) {
     run(promise) {
@@ -325,6 +345,48 @@ class MobileClawFilesModule(private val reactContext: ReactApplicationContext) :
         putString("parent", parent?.absolutePath ?: "")
         putBoolean("parentExists", parent?.exists() ?: false)
         putBoolean("parentCanWrite", parent?.canWrite() ?: false)
+      }
+    }
+  }
+
+  /**
+   * Installed apps that have a launcher entry, so the agent can pick a package id for
+   * system_open.
+   *
+   * Only packages with a launcher activity are returned: an unfiltered
+   * getInstalledPackages() is enormous and mostly unopenable, and this is exactly the set a
+   * user means by "the apps on my phone".
+   *
+   * Visibility is the catch on Android 11+. The manifest holds QUERY_ALL_PACKAGES (non-Play
+   * builds) plus a MAIN/LAUNCHER query, so this returns the real launcher set. On a
+   * play-safe build without the permission the query still resolves launcher apps that
+   * declare themselves visible, and if it comes back empty the tool reports that rather
+   * than looking successful.
+   */
+  @ReactMethod
+  fun listApps(promise: Promise) {
+    run(promise) {
+      val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+        addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+      }
+      val manager = reactContext.packageManager
+      @Suppress("DEPRECATION")
+      val resolved = manager.queryIntentActivities(intent, 0)
+      val seen = HashSet<String>()
+      Arguments.createArray().apply {
+        for (info in resolved) {
+          val packageId = info.activityInfo?.packageName ?: continue
+          if (!seen.add(packageId)) continue
+          val label = try {
+            info.loadLabel(manager).toString()
+          } catch (error: Throwable) {
+            packageId
+          }
+          pushMap(Arguments.createMap().apply {
+            putString("packageId", packageId)
+            putString("label", label)
+          })
+        }
       }
     }
   }
