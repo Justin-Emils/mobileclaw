@@ -80,19 +80,70 @@ Shared storage reads as **empty** while app-private storage lists fine -- the ex
 prevent, and it is why the warning forbids reporting such folders as empty.
 
 
+## Shared-storage writes: fixed, and why they were broken
+
+`expo-file-system` authorises an operation by asking the *filesystem* about the file
+(expo-modules-core, `FilePermissionService.kt`):
+
+```kotlin
+protected open fun getExternalPathPermissions(path: String): EnumSet<Permission> =
+  EnumSet.noneOf(Permission::class.java).apply {
+    if (file.canRead())  { add(Permission.READ) }
+    if (file.canWrite()) { add(Permission.WRITE) }
+  }
+```
+
+`File.canRead()` / `canWrite()` compare the file's owner, group and mode bits against the
+calling process. A file in `/storage/emulated/0/Download` belongs to another uid
+(`u0_a270 media_rw`, mode `rw-rw----`), so the app is neither owner nor group member and both
+calls return false -- and a file that does not exist yet can never pass either check.
+All-files access does not change those bits, so the gate refused whatever the user granted and
+reported it as `Missing 'READ' permission`, sending them to a switch that was already on.
+
+Confirmed on the user's Xiaomi 2509FPN0BC (Android 16 / API 36) with all-files access granted
+three independent ways: the Settings toggle reading `checked=true`,
+`appops get dev.mobileclaw.app MANAGE_EXTERNAL_STORAGE` returning `Uid mode: allow`, and
+`fs_list` on the same directory succeeding in 116 ms.
+
+Fixed by a `ReactPackage` whose Kotlin uses `java.io.File`, generated and registered by the
+`withMobileClawFiles` config plugin. `java.io.File` runs no pre-check: it attempts the
+operation and the kernel decides -- correct, because all-files access is exactly the grant that
+lets the kernel say yes. Device log after the fix:
+
+```
+[mobileclaw] native files: MobileClawFiles registered
+[mobileclaw] file driver = native (MobileClawFiles)
+[mobileclaw] storage access=granted /storage/emulated/0/Download 可写可读（探测文件已清理）
+```
+
+and the permission banner is gone.
+
+### A build trap that cost the most time
+
+The native module was correct several builds before it was *seen* to work. Raw
+`gradle assembleRelease` was being run directly for speed, which **bypasses the staleness guard
+in `eng/build-local.ps1`**. `createBundleReleaseJsAndAssets` stayed UP-TO-DATE, the APK shipped
+the previous JS bundle, and the logs being read came from code that was no longer executing --
+including a wrong diagnosis of the very bug under investigation.
+
+`eng/build-local.ps1` now verifies, after Gradle, that the packaged bundle is newer than every
+source, and fails with that explanation. Build through the script; a direct Gradle invocation is
+not equivalent.
+
 ## Not verified, and why
 
-**`fs_write` into shared storage.** With `MANAGE_EXTERNAL_STORAGE` granted via `appops`, the
-app still cannot create a file in `/storage/emulated/0/Download`:
+**`fs_write` into shared storage.** Resolved above, and left here only as the record of what was
+previously unknown. Earlier attempts to declare the legacy storage permissions and to replace
+`File.create()` with `File.write()` had no effect; the rejection simply moved from `create` to
+`write`, which is what showed the whole write path was gated rather than one call.
 
-```
-Call to function 'FileSystemFile.create' has been rejected.
-  → Caused by: Missing 'READ' permission for accessing the file.
-```
+**An Expo module instead of `ReactPackage`.** Tried first: its Kotlin compiled into the APK and
+Gradle included the project, but `requireNativeModule` never resolved it
+(`expo-modules-autolinking search` found the module while `resolve` did not), so the app
+silently fell back to expo-file-system. `ReactPackage` was chosen because it has no discovery
+step -- either the class compiles and is registered or the build fails loudly, which matters
+after a defect that hid behind silent fallbacks.
 
-App-private writes round-trip, so the file API works. Whether this is an emulator artefact
-or real scoped-storage behaviour is unresolved. The probe classifies it as `denied`, which
-is the safe direction: it tells the user access is missing rather than claiming success.
 
 ## A false alarm worth recording
 
