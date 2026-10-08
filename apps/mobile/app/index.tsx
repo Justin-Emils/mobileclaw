@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { Link, useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import type { AgentEvent, ChatMessage, TranscriptEntry } from "@mobileclaw/core";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
@@ -60,6 +61,8 @@ export default function ChatScreen() {
    * so the agent reports "no files" and the user blames the agent.
    */
   const [storageAccess, setStorageAccess] = useState<AllFilesAccessReport | undefined>();
+  /** Top inset, so the keyboard offset accounts for the status bar under edge-to-edge. */
+  const insets = useSafeAreaInsets();
   /** Guards the hydrate effect against a slower load overwriting a newer one. */
   const hydrateToken = useRef(0);
   /** The conversation id already loaded into `bubbles`, so it loads once. */
@@ -275,7 +278,15 @@ export default function ChatScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      // Android needs `padding` here, not `undefined`.
+      //
+      // With `behavior={undefined}` this view did nothing on Android, which used to be fine
+      // because the platform resized the window itself (`adjustResize`). At targetSdk 35+
+      // edge-to-edge is always on, and that resize no longer happens -- so the keyboard
+      // covered the composer with nothing compensating, and the user could not see what they
+      // were typing. Reproduced on Android 16 / API 36.
+      behavior="padding"
+      keyboardVerticalOffset={insets.top}
     >
       <View style={styles.header}>
         <Text style={styles.headerModel} numberOfLines={1}>
@@ -329,6 +340,10 @@ export default function ChatScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          // Without `handled`, a tap meant to dismiss the keyboard is swallowed instead of
+          // reaching the button under it -- which reads as "the app ignored my tap".
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           ListHeaderComponent={tools.length > 0 ? <ToolCardList tools={tools} /> : null}
           renderItem={({ item }) => <BubbleView bubble={item} />}
           ListEmptyComponent={

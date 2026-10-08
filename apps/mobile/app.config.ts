@@ -97,6 +97,48 @@ const withPlaySafeStorage: ConfigPlugin = (config) =>
   });
 
 /**
+ * Declare the legacy storage permissions alongside all-files access.
+ *
+ * They are `maxSdkVersion=32`, so on Android 13+ the platform grants nothing for them and
+ * the user is never prompted -- but `expo-file-system`'s native layer still *checks* them
+ * before `File.create()`, and a permission that is not declared at all can only check as
+ * denied. The symptom is specific and was observed on a Xiaomi running Android 16 / API 36
+ * with `MANAGE_EXTERNAL_STORAGE` already allowed via appops:
+ *
+ *   Call to function 'FileSystemFile.create' has been rejected.
+ *     → Caused by: Missing 'READ' permission for accessing the file.
+ *
+ * Reading a shared-storage directory worked (names are visible without any grant) while
+ * every write failed, and the probe -- which writes to decide -- reported the app as
+ * unauthorised. That sent the user to a setting that was already on, with no way out.
+ *
+ * Declaring them is the narrow change: it cannot widen what the app may access on a modern
+ * OS, because the platform ignores these on 33+.
+ */
+const withLegacyStoragePermissions: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (manifestConfig) => {
+    const manifest = manifestConfig.modResults.manifest as {
+      "uses-permission"?: { $?: Record<string, string> }[];
+    };
+    const list = manifest["uses-permission"];
+    if (!Array.isArray(list)) return manifestConfig;
+    const legacy = [
+      { name: "android.permission.READ_EXTERNAL_STORAGE", max: "32" },
+      { name: "android.permission.WRITE_EXTERNAL_STORAGE", max: "32" },
+    ];
+    for (const entry of legacy) {
+      const exists = list.some((item) => item?.$?.["android:name"] === entry.name);
+      if (!exists) {
+        list.push({
+          $: { "android:name": entry.name, "android:maxSdkVersion": entry.max },
+        });
+      }
+    }
+    manifest["uses-permission"] = list;
+    return manifestConfig;
+  });
+
+/**
  * Wire the local release keystore into `app/build.gradle`.
  *
  * `expo prebuild` generates a release buildType signed with the **debug** key. That
@@ -224,6 +266,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Expo runs function plugins at runtime, but its config *type* only models
       // the string/serializable forms, hence the casts.
       withPackageQueries as unknown as string,
+      withLegacyStoragePermissions as unknown as string,
       withLocalReleaseSigning as unknown as string,
       ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],
