@@ -152,8 +152,11 @@ export const strings = {
     // 目录能列名但文件读不到，看起来像"文件夹都是空的"。
     diagStorageAccess: "所有文件访问权限",
     storageGranted: "已开启",
-    storageDenied: "未开启 —— 共享存储只在系统设置里授权",
+    storageDenied: "读不到共享存储 —— 应用写入被系统拒绝",
     storageUnknown: "无法探测",
+    storageDeniedExplain:
+      "如果你已经在系统设置里打开了「所有文件访问」，那这一步不是权限问题：应用能列出目录，但创建和写入文件被系统拒绝。可以运行下面的自检把结果反馈。",
+    storageEvidenceLabel: "系统返回",
     storageHint:
       "Android 11 起「所有文件访问」没有弹窗，必须去系统设置手动开启。未开启时目录能列出名字，但里面的文件全部读不到，智能体会误以为文件夹是空的。",
     openStorageSettings: "打开系统设置授权",

@@ -66,6 +66,15 @@ export interface AllFilesAccessReport {
   probe?: string;
   /** How many entries the probe directory returned. */
   entries?: number;
+  /**
+   * The raw failure text behind a "denied" verdict.
+   *
+   * Kept so the UI can show what actually happened instead of only the conclusion. A
+   * refused write is *evidence* of a missing permission, not proof: the same rejection
+   * occurs when the permission is held and the write fails for another reason, which is
+   * exactly what was observed on Android 16.
+   */
+  evidence?: string;
 }
 
 /**
@@ -204,14 +213,26 @@ export async function probeAllFilesAccess(
   }
 
   if (sawRefusal && privateWritable) {
-    // The file API works (private writes round-trip) and shared storage refuses. On
-    // Android that is the all-files-access signature, so send the user there.
+    // Shared storage refused while private storage worked.
+    //
+    // This used to conclude "all-files access is missing" and send the user to Settings.
+    // That is wrong often enough to be harmful: on a Xiaomi 2509FPN0BC running Android 16,
+    // all-files access was confirmed granted three independent ways -- the Settings toggle
+    // read `checked=true`, `appops ... MANAGE_EXTERNAL_STORAGE: allow`, and `fs_list` on
+    // `/storage/emulated/0/Download` succeeded in 116 ms -- while both `File.create()`
+    // *and* `File.write()` were rejected. The user was sent to a switch that was already
+    // on, repeatedly, with no way out.
+    //
+    // There is no way to ask Android for this permission from here: it is a special access
+    // (not a runtime permission, so `PermissionsAndroid.check` cannot see it), and the
+    // legacy permissions that *could* stand in for it only exist up to API 32. So the
+    // honest report is the raw evidence plus the two readings, not a verdict.
     return {
       status: "denied",
       detail:
-        `共享存储可列名但写入被拒，而应用自身目录可写（${evidence.slice(0, 2).join("; ")}）。` +
-        "这通常是「无所有文件访问权限」的表现，请在系统设置里为本应用开启「所有文件访问」。",
+        `共享存储可列名但写入被拒，而应用自身目录可写（${evidence.slice(0, 2).join("; ")}）。`,
       entries: 0,
+      evidence: evidence.slice(0, 2).join("; "),
     };
   }
   if (sawRefusal) {

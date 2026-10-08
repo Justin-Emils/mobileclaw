@@ -97,7 +97,12 @@ describe("probeAllFilesAccess", () => {
     const { fs } = fakeFs({ roots: ROOTS, failWrite: SHARED_ROOT });
     const report = await probeAllFilesAccess(fs, ROOTS);
     expect(report.status).toBe("denied");
-    expect(report.detail).toContain("所有文件访问");
+    // The verdict is a refusal and the raw evidence travels with it, so the UI can show
+    // what the system actually said. It must NOT assert the permission is unset: on a
+    // Xiaomi running Android 16 the write was refused while all-files access was granted
+    // three independent ways, and the old wording sent the user to a switch already on.
+    expect(report.evidence).toBeDefined();
+    expect(report.detail).not.toContain("请在系统设置里");
   });
 
   it("concludes nothing when both shared and private writes fail", async () => {

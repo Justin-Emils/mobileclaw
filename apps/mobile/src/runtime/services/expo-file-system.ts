@@ -101,13 +101,21 @@ export class ExpoFsDriver implements FsDriver {
 
   async writeFile(path: string, data: string | Uint8Array): Promise<void> {
     const file = new this.fs.File(pathToUri(path));
-    // Minimal `create()`: no options. Passing `{ intermediates: true, overwrite: true }`
-    // produced "Call to function 'FileSystemFile.create' has been rejected" from the
-    // native codegen argument check on a device, so the options object is the suspect.
-    // Directories are still created first, which is what `intermediates` was for.
+    // Write directly; do not call `File.create()` first.
+    //
+    // `create()` was there to make the file exist, and on Android 16 it is the call that
+    // fails inside shared storage:
+    //
+    //   Call to function 'FileSystemFile.create' has been rejected.
+    //     → Caused by: Missing 'READ' permission for accessing the file.
+    //
+    // observed on a Xiaomi 2509FPN0BC with all-files access granted three ways at once
+    // (the Settings toggle reading `checked=true`, `appops ... MANAGE_EXTERNAL_STORAGE:
+    // allow`, and `fs_list` on `/storage/emulated/0/Download` succeeding in 116 ms). A
+    // permission that is demonstrably held cannot be the cause, so `create()` -- or the
+    // read-probe it performs internally -- is. `File.write()` creates the file itself.
     if (!file.exists) {
       await this.ensureParentDirectory(path);
-      file.create();
     }
     file.write(data);
   }

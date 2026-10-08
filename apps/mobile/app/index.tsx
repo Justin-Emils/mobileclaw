@@ -309,13 +309,20 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Android grants all-files access only via system settings, and without it
-          every shared-storage folder lists as empty -- so the agent looks broken
-          when it is merely unauthorised. Say so before the user blames the agent. */}
+      {/* A refused shared-storage write. This used to read "未开启" and send the user to
+          Settings, which was wrong whenever the permission was already held -- the write can
+          be rejected for other reasons (see probeAllFilesAccess). Show the system's own
+          words instead of a conclusion the probe cannot actually support. */}
       {storageAccess && storageAccess.status !== "granted" ? (
         <View style={styles.storageBanner}>
           <Text style={styles.storageBannerTitle}>{strings.settings.diagStorageAccess}</Text>
           <Text style={styles.storageBannerBody}>{strings.settings.storageDenied}</Text>
+          <Text style={styles.storageBannerBody}>{strings.settings.storageDeniedExplain}</Text>
+          {storageAccess.evidence ? (
+            <Text style={styles.storageBannerEvidence} selectable>
+              {strings.settings.storageEvidenceLabel}: {storageAccess.evidence}
+            </Text>
+          ) : null}
           <Pressable style={styles.storageBannerButton} onPress={() => void runtime?.openStorageSettings()}>
             <Text style={styles.storageBannerButtonText}>{strings.settings.openStorageSettings}</Text>
           </Pressable>
@@ -589,6 +596,13 @@ const styles = StyleSheet.create({
   },
   storageBannerTitle: { color: theme.colors.warning, fontSize: 13, fontWeight: "700" },
   storageBannerBody: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
+  /** The system's own error text: monospace-ish and muted so it reads as raw evidence. */
+  storageBannerEvidence: {
+    color: theme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+  },
   storageBannerButton: {
     alignSelf: "flex-start",
     marginTop: theme.space(2),
