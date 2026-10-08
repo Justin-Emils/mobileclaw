@@ -377,6 +377,27 @@ try {
 }
 finally { Pop-Location }
 
+# --- verify the bundle inside the APK is the one this build produced --------
+#
+# The staleness guard above only runs when *this script* is the entry point. During one
+# debugging session raw `gradle assembleRelease` was used several times for speed, which
+# skipped the guard entirely: `createBundleReleaseJsAndAssets` stayed UP-TO-DATE, the APK
+# shipped the previous bundle, and hours were spent reading logs from code that was no longer
+# being executed -- including a wrong diagnosis of the bug under investigation.
+#
+# Checking the packaged bundle directly makes the failure impossible to miss regardless of how
+# the build was invoked, and names the cause rather than leaving a mystery.
+$bundleInApk = Join-Path $androidDir "app\build\generated\assets\react\$Variant\index.android.bundle"
+if (Test-Path $bundleInApk) {
+    $bundleAge = (Get-Item $bundleInApk).LastWriteTime
+    if ($newestSource -and $newestSource.LastWriteTime -gt $bundleAge) {
+        Write-Host "bundle      = STALE (source $($newestSource.Name) is newer)" -ForegroundColor Red
+        throw ("the packaged JS bundle predates $($newestSource.Name). This build would ship stale " +
+            "code. Re-run; the guard above deletes the bundle and rebundles when sources are newer.")
+    }
+    Write-Host "bundle      = verified newer than all sources" -ForegroundColor Gray
+}
+
 # --- locate the artifact ---------------------------------------------------
 $apkDir = Join-Path $androidDir "app\build\outputs\apk\$Variant"
 $apk = Get-ChildItem $apkDir -Filter "*.apk" -ErrorAction SilentlyContinue |
