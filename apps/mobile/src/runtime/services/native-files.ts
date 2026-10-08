@@ -16,36 +16,48 @@ import type { FsDriver } from "@mobileclaw/capabilities";
  */
 
 export interface NativeFilesModule {
-  writeText(path: string, contents: string): number;
-  writeBase64(path: string, base64: string): number;
-  readText(path: string): string | null;
-  readBase64(path: string): string | null;
-  exists(path: string): boolean;
-  isDirectory(path: string): boolean;
-  size(path: string): number;
-  mtime(path: string): number;
-  mkdirs(path: string): boolean;
-  delete(path: string): boolean;
-  move(from: string, to: string): boolean;
-  list(path: string): string[];
-  describe(path: string): Record<string, string | number | boolean>;
+  writeText(path: string, contents: string): Promise<number>;
+  writeBase64(path: string, base64: string): Promise<number>;
+  readText(path: string): Promise<string | null>;
+  readBase64(path: string): Promise<string | null>;
+  exists(path: string): Promise<boolean>;
+  isDirectory(path: string): Promise<boolean>;
+  size(path: string): Promise<number>;
+  mtime(path: string): Promise<number>;
+  mkdirs(path: string): Promise<boolean>;
+  delete(path: string): Promise<boolean>;
+  move(from: string, to: string): Promise<boolean>;
+  list(path: string): Promise<string[]>;
+  describe(path: string): Promise<Record<string, string | number | boolean>>;
 }
 
 /**
  * Resolve the native module, or undefined.
  *
- * `requireNativeModule` throws when the module is absent, so this cannot be a top-level
- * import in a file that the test suite loads.
+ * `NativeModules` rather than `requireNativeModule`: the module is registered as a plain
+ * `ReactPackage` in `MainApplication`, not through the Expo module system, so Expo's registry
+ * would not see it. An earlier attempt used an Expo module and this lookup could not resolve
+ * it at all, which is why the mechanism was changed.
  */
 export function loadNativeFiles(): NativeFilesModule | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { requireNativeModule } = require("expo-modules-core") as {
-      requireNativeModule: (name: string) => unknown;
+    const { NativeModules } = require("react-native") as {
+      NativeModules?: Record<string, unknown>;
     };
-    const module = requireNativeModule("MobileClawFiles") as NativeFilesModule | undefined;
-    return module ?? undefined;
-  } catch {
+    const module = NativeModules?.["MobileClawFiles"] as NativeFilesModule | undefined;
+    if (!module) {
+      // Logged rather than swallowed: falling back changes which driver is in use, and a
+      // silent fallback is what hid this defect for several rounds.
+      console.log("[mobileclaw] native files: MobileClawFiles is not registered; using expo");
+      return undefined;
+    }
+    console.log("[mobileclaw] native files: MobileClawFiles registered");
+    return module;
+  } catch (error) {
+    console.log(
+      `[mobileclaw] native files unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return undefined;
   }
 }
@@ -95,28 +107,28 @@ export function base64ToBytes(base64: string): Uint8Array {
 export function createNativeDriver(native: NativeFilesModule): FsDriver {
   return {
     async readFile(path) {
-      const value = native.readText(path);
+      const value = await native.readText(path);
       if (value === null) throw new Error(`ENOENT: ${path}`);
       return value;
     },
     async readFileBytes(path) {
-      const value = native.readBase64(path);
+      const value = await native.readBase64(path);
       if (value === null) throw new Error(`ENOENT: ${path}`);
       return base64ToBytes(value);
     },
     async writeFile(path, data) {
       if (typeof data === "string") {
-        native.writeText(path, data);
+        await native.writeText(path, data);
       } else {
-        native.writeBase64(path, bytesToBase64(data));
+        await native.writeBase64(path, bytesToBase64(data));
       }
     },
     async stat(path) {
-      if (!native.exists(path)) throw new Error(`ENOENT: ${path}`);
-      const directory = native.isDirectory(path);
+      if (!(await native.exists(path))) throw new Error(`ENOENT: ${path}`);
+      const directory = await native.isDirectory(path);
       return {
-        size: native.size(path),
-        mtimeMs: native.mtime(path),
+        size: await native.size(path),
+        mtimeMs: await native.mtime(path),
         isDirectory: () => directory,
         isFile: () => !directory,
       };
@@ -125,20 +137,20 @@ export function createNativeDriver(native: NativeFilesModule): FsDriver {
       return native.list(path);
     },
     async mkdir(path) {
-      native.mkdirs(path);
+      await native.mkdirs(path);
     },
     async rm(path) {
-      native.delete(path);
+      await native.delete(path);
     },
     async rename(from, to) {
-      if (!native.move(from, to)) throw new Error(`could not move ${from} to ${to}`);
+      if (!(await native.move(from, to))) throw new Error(`could not move ${from} to ${to}`);
     },
     async copy(from, to) {
-      // The module has no copy; read and write keeps it to one traversal and works for
-      // the file sizes this app handles.
-      const bytes = native.readBase64(from);
+      // The module has no copy; read then write keeps it to one traversal and covers the file
+      // sizes this app handles.
+      const bytes = await native.readBase64(from);
       if (bytes === null) throw new Error(`ENOENT: ${from}`);
-      native.writeBase64(to, bytes);
+      await native.writeBase64(to, bytes);
     },
   };
 }

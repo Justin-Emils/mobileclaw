@@ -105,6 +105,12 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   }
   const config = mergeConfig(parsedConfig);
 
+  // Deliberately `warn`: it shows as a distinct logcat level, so this line proves the
+  // bootstrap version in the bundle is the one actually running. A `console.log` here was
+  // indistinguishable from the other output while chasing why the file driver stayed on
+  // expo-file-system.
+  console.warn("[mobileclaw] bootstrap v2 (native file driver present)");
+
   // Test-only endpoint override; see `testOverrides` for why and for the safety gates.
   const overrides = testOverrides();
   if (overrides.baseUrl || overrides.model) {

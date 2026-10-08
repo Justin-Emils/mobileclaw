@@ -2,7 +2,9 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
 // `expo/config-plugins` (the sub-export) rather than the `@expo/config-plugins`
 // package: Expo requires the former, and installing the latter directly makes
 // expo-doctor fail and risks two copies of the plugin runtime.
-import { withAndroidManifest, withAppBuildGradle, type ConfigPlugin } from "expo/config-plugins";
+import { withAndroidManifest, withAppBuildGradle, withDangerousMod, withMainApplication, type ConfigPlugin } from "expo/config-plugins";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 interface QueryEntry {
   package?: string;
@@ -139,6 +141,258 @@ const withLegacyStoragePermissions: ConfigPlugin = (config) =>
   });
 
 /**
+ * Install MobileClaw's native file module, which is the only way to write shared storage.
+ *
+ * ## Why a native module at all
+ *
+ * `expo-file-system` decides whether an operation is allowed by asking the *filesystem*
+ * about the file (expo-modules-core, `FilePermissionService.kt`):
+ *
+ *     protected open fun getExternalPathPermissions(path: String): EnumSet<Permission> =
+ *       EnumSet.noneOf(Permission::class.java).apply {
+ *         if (file.canRead())  { add(Permission.READ) }
+ *         if (file.canWrite()) { add(Permission.WRITE) }
+ *       }
+ *
+ * `File.canRead()` / `canWrite()` compare the file's owner, group and mode bits against the
+ * calling process. A file in `/storage/emulated/0/Download` belongs to another uid
+ * (`u0_a270 media_rw`, mode `rw-rw----` on the device this was diagnosed on), so the app is
+ * neither owner nor group member and both calls return false -- and a file that does not
+ * exist yet can never pass either check. All-files access does not change those bits, so the
+ * gate refuses no matter what the user grants, and reports it as
+ * `Missing 'READ' permission`, which sends them to a switch that is already on.
+ *
+ * `java.io.File` performs no such pre-check: it attempts the operation and the kernel
+ * decides. That is the correct behaviour, because all-files access is precisely the grant
+ * that lets the kernel say yes.
+ *
+ * ## Why `ReactPackage` rather than an Expo module
+ *
+ * A local Expo module was built first and never registered: its Kotlin compiled into the APK
+ * and Gradle included the project, but `requireNativeModule` could not resolve it, so the app
+ * silently fell back to expo-file-system. `expo-modules-autolinking search` found the module
+ * while `resolve` -- which feeds the generated package list -- did not, and that gap was not
+ * tractable to read from the outside.
+ *
+ * A `ReactPackage` named in `MainApplication`'s `PackageList` has no discovery step: either
+ * the class compiles and is registered, or the build fails loudly. Given how much of this
+ * defect hid behind silent fallbacks, a mechanism that cannot fail quietly beats a tidier one.
+ */
+const MOBILECLAW_FILES_SOURCE_DIR = "app/src/main/java/dev/mobileclaw/app/files";
+
+/** A thin wrapper over `java.io.File`. Paths are already validated by PathGuard. */
+const MOBILECLAW_FILES_MODULE_KT = `package dev.mobileclaw.app.files
+
+import android.util.Base64
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.module.annotations.ReactModule
+import java.io.File
+
+/**
+ * File access that bypasses expo-file-system's permission pre-check.
+ *
+ * That check gates on File.canRead()/canWrite(), which are false for any file the app does
+ * not own -- so it refuses shared-storage writes even with all-files access granted, and
+ * reports it as a missing READ permission. java.io.File runs no pre-check: it attempts the
+ * operation and the kernel decides.
+ *
+ * Paths arrive already validated by PathGuard, which is the authoritative containment check,
+ * so this class deliberately does not repeat it. Failures are rejected with the kernel's own
+ * message rather than a generic one, so "no permission" can be told from "no such directory"
+ * instead of guessed at.
+ *
+ * @ReactModule is what makes a legacy module visible under the New Architecture; without it
+ * the package is listed but NativeModules never resolves the name.
+ */
+@ReactModule(name = MobileClawFilesModule.NAME)
+class MobileClawFilesModule(private val reactContext: ReactApplicationContext) :
+  ReactContextBaseJavaModule(reactContext) {
+
+  override fun getName() = NAME
+
+  companion object {
+    const val NAME = "MobileClawFiles"
+  }
+
+  @ReactMethod
+  fun writeText(path: String, contents: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      file.parentFile?.mkdirs()
+      file.writeText(contents)
+      file.length().toDouble()
+    }
+  }
+
+  @ReactMethod
+  fun writeBase64(path: String, base64: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      file.parentFile?.mkdirs()
+      file.writeBytes(Base64.decode(base64, Base64.DEFAULT))
+      file.length().toDouble()
+    }
+  }
+
+  @ReactMethod
+  fun readText(path: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      if (file.isFile) file.readText() else null
+    }
+  }
+
+  @ReactMethod
+  fun readBase64(path: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      if (file.isFile) Base64.encodeToString(file.readBytes(), Base64.NO_WRAP) else null
+    }
+  }
+
+  @ReactMethod
+  fun exists(path: String, promise: Promise) {
+    run(promise) { File(path).exists() }
+  }
+
+  @ReactMethod
+  fun isDirectory(path: String, promise: Promise) {
+    run(promise) { File(path).isDirectory }
+  }
+
+  @ReactMethod
+  fun size(path: String, promise: Promise) {
+    run(promise) { File(path).length().toDouble() }
+  }
+
+  @ReactMethod
+  fun mtime(path: String, promise: Promise) {
+    run(promise) { File(path).lastModified().toDouble() }
+  }
+
+  @ReactMethod
+  fun mkdirs(path: String, promise: Promise) {
+    run(promise) { File(path).mkdirs() }
+  }
+
+  @ReactMethod
+  fun delete(path: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      if (file.isDirectory) file.deleteRecursively() else file.delete()
+    }
+  }
+
+  /** Move, falling back to copy-then-delete when a rename across mounts is refused. */
+  @ReactMethod
+  fun move(from: String, to: String, promise: Promise) {
+    run(promise) {
+      val source = File(from)
+      val target = File(to)
+      target.parentFile?.mkdirs()
+      if (source.renameTo(target)) return@run true
+      if (source.isDirectory) return@run false
+      source.copyTo(target, overwrite = true)
+      source.delete()
+    }
+  }
+
+  @ReactMethod
+  fun list(path: String, promise: Promise) {
+    run(promise) {
+      val dir = File(path)
+      val names = if (dir.isDirectory) dir.list()?.sorted() ?: emptyList() else emptyList()
+      Arguments.createArray().apply { names.forEach { pushString(it) } }
+    }
+  }
+
+  /** What the filesystem says about a path, for diagnosing a refusal without guessing. */
+  @ReactMethod
+  fun describe(path: String, promise: Promise) {
+    run(promise) {
+      val file = File(path)
+      val parent = file.parentFile
+      Arguments.createMap().apply {
+        putString("path", path)
+        putBoolean("exists", file.exists())
+        putBoolean("isDirectory", file.isDirectory)
+        putBoolean("canRead", file.canRead())
+        putBoolean("canWrite", file.canWrite())
+        putString("parent", parent?.absolutePath ?: "")
+        putBoolean("parentExists", parent?.exists() ?: false)
+        putBoolean("parentCanWrite", parent?.canWrite() ?: false)
+      }
+    }
+  }
+
+  /** Runs [block] off the JS thread and settles [promise] with its result or failure. */
+  private fun run(promise: Promise, block: () -> Any?) {
+    Thread {
+      try {
+        promise.resolve(block())
+      } catch (error: Throwable) {
+        promise.reject("E_MOBILECLAW_FILES", error.message ?: error.toString(), error)
+      }
+    }.start()
+  }
+}
+`;
+
+/** Registers the module above. */
+const MOBILECLAW_FILES_PACKAGE_KT = `package dev.mobileclaw.app.files
+
+import com.facebook.react.ReactPackage
+import com.facebook.react.bridge.NativeModule
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.uimanager.ViewManager
+
+/** Registers MobileClawFilesModule. See withMobileClawFiles in app.config.ts. */
+class MobileClawFilesPackage : ReactPackage {
+  override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
+    listOf(MobileClawFilesModule(reactContext))
+
+  override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
+    emptyList()
+}
+`;
+
+const withMobileClawFiles: ConfigPlugin = (config) => {
+  // `android/` is git-ignored and regenerated by prebuild, so the Kotlin has to be written by
+  // the plugin rather than committed into the generated project.
+  config = withDangerousMod(config, [
+    "android",
+    async (cfg) => {
+      const target = path.join(cfg.modRequest.platformProjectRoot, MOBILECLAW_FILES_SOURCE_DIR);
+      fs.mkdirSync(target, { recursive: true });
+      fs.writeFileSync(path.join(target, "MobileClawFilesModule.kt"), MOBILECLAW_FILES_MODULE_KT, "utf8");
+      fs.writeFileSync(path.join(target, "MobileClawFilesPackage.kt"), MOBILECLAW_FILES_PACKAGE_KT, "utf8");
+      return cfg;
+    },
+  ]);
+
+  return withMainApplication(config, (cfg) => {
+    const hook = "          // add(MyReactNativePackage())";
+    if (!cfg.modResults.contents.includes(hook)) {
+      // Throwing beats writing an unregistered module: the app would otherwise fall back to
+      // expo-file-system and look like the fix had simply not worked.
+      throw new Error(
+        "withMobileClawFiles: the PackageList hook is missing from MainApplication.kt, so the " +
+          "native file module would compile but never register. The Expo template shape changed.",
+      );
+    }
+    cfg.modResults.contents = cfg.modResults.contents.replace(
+      hook,
+      `${hook}\n          add(dev.mobileclaw.app.files.MobileClawFilesPackage())`,
+    );
+    return cfg;
+  });
+};
+
+/**
  * Wire the local release keystore into `app/build.gradle`.
  *
  * `expo prebuild` generates a release buildType signed with the **debug** key. That
@@ -267,6 +521,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // the string/serializable forms, hence the casts.
       withPackageQueries as unknown as string,
       withLegacyStoragePermissions as unknown as string,
+      withMobileClawFiles as unknown as string,
       withLocalReleaseSigning as unknown as string,
       ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],

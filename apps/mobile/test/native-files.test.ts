@@ -42,33 +42,33 @@ function fakeNative(): NativeFilesModule & { files: Map<string, string>; dirs: S
   return {
     files,
     dirs,
-    writeText(path, contents) {
+    async writeText(path, contents) {
       files.set(path, contents);
       return contents.length;
     },
-    writeBase64(path, base64) {
+    async writeBase64(path, base64) {
       files.set(path, `${BINARY}${base64}`);
       return base64.length;
     },
-    readText: (path) => asText(files.get(path)),
-    readBase64: (path) => asText(files.get(path)),
-    exists: (path) => files.has(path) || dirs.has(path),
-    isDirectory: (path) => dirs.has(path),
-    size: (path) => files.get(path)?.length ?? 0,
-    mtime: () => 1234,
-    mkdirs(path) {
+    readText: async (path) => asText(files.get(path)),
+    readBase64: async (path) => asText(files.get(path)),
+    exists: async (path) => files.has(path) || dirs.has(path),
+    isDirectory: async (path) => dirs.has(path),
+    size: async (path) => files.get(path)?.length ?? 0,
+    mtime: async () => 1234,
+    async mkdirs(path) {
       dirs.add(path);
       return true;
     },
-    delete: (path) => files.delete(path) || dirs.delete(path),
-    move(from, to) {
+    delete: async (path) => files.delete(path) || dirs.delete(path),
+    async move(from, to) {
       const value = files.get(from);
       if (value === undefined) return false;
       files.set(to, value);
       files.delete(from);
       return true;
     },
-    list(path) {
+    async list(path) {
       const prefix = `${stripTrailingSep(path)}${SEP}`;
       const names: string[] = [];
       for (const key of files.keys()) {
@@ -78,7 +78,7 @@ function fakeNative(): NativeFilesModule & { files: Map<string, string>; dirs: S
       }
       return names.sort();
     },
-    describe: (path) => ({ path, exists: files.has(path) }),
+    describe: async (path) => ({ path, exists: files.has(path) }),
   };
 }
 
@@ -133,7 +133,7 @@ describe("createNativeDriver", () => {
 
   it("reports a directory through stat", async () => {
     const native = fakeNative();
-    native.mkdirs("/sdcard/Download");
+    await native.mkdirs("/sdcard/Download");
     const driver = createNativeDriver(native);
     const stat = await driver.stat("/sdcard/Download");
     expect(stat.isDirectory()).toBe(true);
