@@ -1,0 +1,6 @@
+{
+  "platforms": ["android"],
+  "android": {
+    "modules": ["dev.mobileclaw.app.files.MobileClawFilesModule"]
+  }
+}

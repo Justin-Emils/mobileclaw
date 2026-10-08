@@ -217,6 +217,13 @@ export interface ExpoFsOptions {
   walkLimit?: number;
   /** Platform string for path semantics; Android/iOS are POSIX. */
   platform?: string;
+  /**
+   * Driver to use instead of the expo-file-system one.
+   *
+   * Supplied by the caller so this module stays free of a native import, which the test
+   * environment cannot resolve.
+   */
+  driver?: FsDriver;
 }
 
 /** Build a guarded filesystem over expo-file-system. */
@@ -233,7 +240,10 @@ export function createExpoFileSystem(options: ExpoFsOptions): GuardedFileSystem 
     platform,
   );
   return new GuardedFileSystem({
-    driver: new ExpoFsDriver(options.fs),
+    // The native driver replaces the expo one wholesale rather than patching a call site:
+    // the refusal lives inside expo-file-system's own permission pre-check, which every
+    // operation passes through. See services/native-files.ts for the evidence.
+    driver: options.driver ?? new ExpoFsDriver(options.fs),
     roots: options.roots,
     guard,
     ...(options.maxReadBytes !== undefined ? { maxReadBytes: options.maxReadBytes } : {}),

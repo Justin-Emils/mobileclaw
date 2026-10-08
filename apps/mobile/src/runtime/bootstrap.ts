@@ -21,6 +21,7 @@ import {
   type ExpoFsLike,
 } from "./services/expo-file-system";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
+import { createNativeDriver, loadNativeFiles } from "./services/native-files";
 import { MobileClawRuntime } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
 import type { FileSystemService } from "@mobileclaw/core";
@@ -123,12 +124,20 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // --- filesystem ----------------------------------------------------------
   const appRoots = defaultAppRoots(expoFsModule());
   const roots = config.roots.length > 0 ? config.roots : dedupe([...appRoots, ...sharedRoots()]);
+  // Prefer the native driver: expo-file-system refuses shared-storage writes regardless of
+  // permission, because it gates on `File.canRead()`/`canWrite()` and those are false for a
+  // file owned by another uid. Falls back to expo when the native module is absent.
+  const nativeFiles = loadNativeFiles();
   const fs = createExpoFileSystem({
     fs: expoFsModule(),
     roots,
     allowReadOutsideRoots: false,
     maxReadBytes: 1_000_000,
+    ...(nativeFiles ? { driver: createNativeDriver(nativeFiles) } : {}),
   });
+  console.log(
+    `[mobileclaw] file driver = ${nativeFiles ? "native (MobileClawFiles)" : "expo-file-system"}`,
+  );
 
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend();
