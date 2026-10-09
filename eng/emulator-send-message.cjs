@@ -10,11 +10,24 @@
  */
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
+const path = require("node:path");
+const { resolveToolchain } = require("./toolchain.cjs");
 
-const ADB = "E:\\code\\Eng\\.android-sdk\\platform-tools\\adb.exe";
+const REPO_ROOT = path.resolve(__dirname, "..");
 const message = process.argv[2] ?? "list the folder";
 
-const adb = (...args) => execFileSync(ADB, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+/**
+ * Resolved on first use rather than at load, so a bad invocation still gets the usage
+ * message instead of a toolchain error. `eng/toolchain.cjs` finds adb from the
+ * environment or a repo-adjacent install; see eng/BUILD.md.
+ */
+let adbPath;
+function adbBinary() {
+  if (!adbPath) adbPath = resolveToolchain({ repoRoot: REPO_ROOT, env: process.env }).adb;
+  return adbPath;
+}
+
+const adb = (...args) => execFileSync(adbBinary(), args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function dump(name = "drive") {

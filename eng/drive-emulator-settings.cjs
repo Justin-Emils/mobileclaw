@@ -9,15 +9,28 @@
  * Usage: node eng/drive-emulator-settings.cjs <baseUrl> <model> <apiKey>
  */
 const { execFileSync } = require("node:child_process");
+const path = require("node:path");
+const { resolveToolchain } = require("./toolchain.cjs");
 
-const ADB = "E:\\code\\Eng\\.android-sdk\\platform-tools\\adb.exe";
+const REPO_ROOT = path.resolve(__dirname, "..");
 const [baseUrl, model, apiKey] = process.argv.slice(2);
 if (!baseUrl || !model || !apiKey) {
   console.error("usage: node drive-emulator-settings.cjs <baseUrl> <model> <apiKey>");
   process.exit(2);
 }
 
-const adb = (...args) => execFileSync(ADB, args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+/**
+ * Resolved on first use rather than at load, so a bad invocation still gets the usage
+ * message instead of a toolchain error. `eng/toolchain.cjs` finds adb from the
+ * environment or a repo-adjacent install; see eng/BUILD.md.
+ */
+let adbPath;
+function adbBinary() {
+  if (!adbPath) adbPath = resolveToolchain({ repoRoot: REPO_ROOT, env: process.env }).adb;
+  return adbPath;
+}
+
+const adb = (...args) => execFileSync(adbBinary(), args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Pull the current view hierarchy. */

@@ -1,17 +1,25 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Build the Android APK locally, using the toolchain in E:\code\Eng.
+    Build the Android APK locally, using a toolchain resolved by eng/toolchain.cjs.
 
 .DESCRIPTION
-    The EAS cloud build works but is slow (queue + ~15 min) and capped by quota.
-    This machine already has a complete Android toolchain, so local builds are
-    faster and unlimited:
+    The EAS cloud build works but is slow (queue + ~15 min) and capped by quota, so a
+    local build is faster and unlimited.
 
-        E:\code\Eng\.jdk21            Temurin 21        (PATH has only Java 8)
-        E:\code\Eng\.android-sdk      build-tools 36, platforms/android-36,
-                                      ndk 27.1.12297006, platform-tools (adb)
-        E:\code\Eng\.gradle-home      warmed Gradle 9.3.1 cache
+    The toolchain is *resolved*, not hardcoded. eng/toolchain.cjs looks for a JDK, an
+    Android SDK and a Gradle home in the environment, in a `.toolchain/` directory
+    beside the repository (installed by eng/setup-toolchain.ps1), then in the
+    platform's usual locations. Run `node eng/toolchain.cjs print` to see what it
+    picks, or pass -Jdk / -Sdk / -GradleHome to override it. What the build needs:
+
+        JDK 21              Temurin; PATH often has only Java 8
+        Android SDK         build-tools 36, platforms/android-36,
+                            ndk 27.1.12297006, platform-tools (adb)
+        Gradle home         a warmed cache avoids re-downloading Gradle 9.3.1
+
+    The versions are pinned in eng/toolchain-versions.cjs — not in comments here,
+    where nothing could check them.
 
     The script deliberately does NOT commit the generated android/ directory: it is
     produced by `expo prebuild` from app.config.ts, so the config plugins (the
@@ -41,7 +49,12 @@ param(
     [string]$Variant = "debug",
     [switch]$Clean,
     [switch]$GenerateKeystore,
-    [switch]$Install
+    [switch]$Install,
+    # Toolchain locations, when the automatic lookup picks the wrong one.
+    # Everything is resolved by eng/toolchain.cjs; see eng/BUILD.md.
+    [string]$Jdk,
+    [string]$Sdk,
+    [string]$GradleHome
 )
 
 $ErrorActionPreference = "Stop"
@@ -56,13 +69,32 @@ $androidDir = Join-Path $appDir "android"
 $script:BuildStartedAt = Get-Date
 
 # --- toolchain -------------------------------------------------------------
-$jdk = "E:\code\Eng\.jdk21"
-$sdk = "E:\code\Eng\.android-sdk"
-$gradleHome = "E:\code\Eng\.gradle-home"
-
-foreach ($p in @($jdk, $sdk, $gradleHome)) {
-    if (-not (Test-Path $p)) { throw "required toolchain path missing: $p" }
+#
+# Resolved, not hardcoded. These three paths used to be absolute (`E:\code\Eng\...`),
+# which meant the build only ran on the machine they were written for. The lookup
+# order is the one a person would use — explicit argument, environment variable, a
+# `.toolchain/` directory beside the repository, then the platform's usual locations
+# — and a miss prints every place it looked. See eng/toolchain.cjs.
+if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+    throw "node is required to resolve the Android toolchain but is not on PATH"
 }
+
+$resolverArgs = @((Join-Path $PSScriptRoot "toolchain.cjs"), "print")
+if ($Jdk) { $resolverArgs += @("--jdk", $Jdk) }
+if ($Sdk) { $resolverArgs += @("--sdk", $Sdk) }
+if ($GradleHome) { $resolverArgs += @("--gradle-home", $GradleHome) }
+
+# The resolver writes its "looked in ..." list to stderr, so let that flow to the
+# console and keep this message to a pointer.
+$resolvedJson = & node @resolverArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "could not resolve the Android toolchain (eng/toolchain.cjs exited $LASTEXITCODE; see the list above)"
+}
+$resolved = $resolvedJson | ConvertFrom-Json
+
+$jdk = $resolved.jdk
+$sdk = $resolved.sdk
+$gradleHome = $resolved.gradleHome
 
 $env:JAVA_HOME = $jdk
 $env:ANDROID_HOME = $sdk

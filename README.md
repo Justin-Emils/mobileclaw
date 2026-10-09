@@ -43,21 +43,21 @@ reported precisely instead of failing mid-conversation.
 | Path | What it is |
 | --- | --- |
 | `packages/core` | Kernel: context, event bus, plugin host, tool registry, permission gate, path guard, agent loop, providers, conversation store. **No `node:*`, no RN.** |
-| `packages/capabilities` | Guarded filesystem + the tools: `fs_*`, `shell_*`, `web_fetch`, `system_*`, `python_*`, `shizuku_*`. `./node` subpath holds the Node-only backends. |
+| `packages/capabilities` | Guarded filesystem + the tools: `fs_*`, `shell_*`, `web_fetch`, `system_*`, `python_*`, `shizuku_*`, `screen_*`. `./node` subpath holds the Node-only backends. |
 | `apps/mobile` | Expo app (SDK 57): runtime wiring, chat UI, approval sheet, settings, permission matrix, EAS config. |
 | `docs/android-capabilities.md` | Hard-won detail on what Android actually allows, and the native-module plan. |
 | `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
-| `docs/dev-environment.md` | **Read this before building anything.** Toolchain paths (`E:\code\Eng`), why the SDK's outdated ninja blocked local native builds (and the two fixes), and fourteen environment-specific traps with symptoms and fixes. Shared across projects. |
+| `docs/dev-environment.md` | **Read this before building anything.** How the Android toolchain is resolved (`eng/toolchain.cjs` / `eng/setup-toolchain.ps1`), why the SDK's outdated ninja blocked local native builds (and the two fixes), and fourteen environment-specific traps with symptoms and fixes. Shared across projects. |
 
-> **Repository location:** `E:\code\mobileclaw`. (On 2026-10-07 it was briefly moved to
-> `E:\mc\mobileclaw` and moved back — the migration was chasing a path-length problem that
-> turned out to be an outdated bundled ninja.) See `docs/dev-environment.md`.
+> **Repository location:** anywhere. The build resolves its toolchain at run time instead of
+> hardcoding it (`eng/toolchain.cjs`); on a fresh machine `eng/setup-toolchain.ps1` installs a JDK
+> and the Android SDK into a git-ignored `.toolchain/` beside the repo. See `docs/dev-environment.md`.
 
 ## Quick start
 
 ```bash
 pnpm install
-pnpm check            # typecheck + 130 tests + a real Metro bundle, no device needed
+pnpm check            # typecheck + 343 tests (core 102 / capabilities 74 / mobile 167) + a real Metro bundle
 pnpm doctor           # expo-doctor: dependency/SDK consistency (21 checks)
 pnpm mobile           # Metro for a dev build (needs a dev client installed)
 ```
@@ -69,8 +69,10 @@ catch the two failures that actually block a device build: Metro not reading tsc
 
 Building an installable APK.
 
-**Locally** (uses the `E:\code\Eng` toolchain; see `docs/dev-environment.md`). The machine's
-execution policy refuses unsigned scripts, hence the explicit host:
+**Locally** (resolves a JDK + Android SDK + Gradle through `eng/toolchain.cjs`; run
+`eng/setup-toolchain.ps1` once on a fresh machine if none is present — see
+`docs/dev-environment.md`). The machine's execution policy refuses unsigned scripts, hence the
+explicit host:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Variant debug
@@ -111,6 +113,7 @@ The key is written to `expo-secure-store`.
 | `cap-system` | `system_open` `system_apps` `system_clipboard` `system_share` `system_notify` `system_calendar` | Intents / clipboard / share sheet / calendar writes. |
 | `cap-python` | `python_run` `python_script` `python_status` | Reaches an interpreter through the shell backend (Termux, or Chaquopy later). Code goes over **stdin**, so quoting never breaks it. |
 | `cap-shizuku` | `shizuku_status` `shizuku_request` `shizuku_run` | Privileged execution with shell identity (uid 2000), not root. |
+| `cap-automation` | `screen_current` `screen_capture` `screen_tap` `screen_scroll` `screen_type` `screen_wait` | See the screen and act on it through Shizuku. **The native side is not written yet**, so on a device every one of these reports "unavailable" — the contract and the safety machinery are what exist. Each screen-changing tool declares `neverRemember`, so "always allow" can never cover the next press, and returns a screenshot as evidence. |
 
 Safety model, in one line: **containment is lexical and absolute** (every model-supplied path goes
 through `PathGuard`, which refuses anything outside the configured roots), and **capability is
@@ -125,9 +128,12 @@ per-session "always allow" that expires).
   and SAF-granted trees only).
 - **Android 10+ forbids executing files from app storage.** Any bundled tool must ship inside the
   APK as `jniLibs/<abi>/lib*.so`; you cannot download a binary and run it.
-- **The native module is not written yet.** Termux, Shizuku and the storage-access prompt are
-  specified and stubbed (`apps/mobile/src/runtime/bootstrap.ts`) so nothing pretends to work; the
-  current build's shell tools report unavailability. See `docs/android-capabilities.md` for the plan.
+- **The privileged native module is not written yet.** The storage one *is*: `MobileClawFilesModule`
+  is inline Kotlin in `apps/mobile/app.config.ts`, written out by the `withMobileClawFiles` config
+  plugin at prebuild time (there is deliberately no `.kt` file on disk), and it is how shared-storage
+  writes work. Termux, Shizuku and the storage-access *prompt* are still specified and stubbed
+  (`apps/mobile/src/runtime/bootstrap.ts`) so nothing pretends to work; the shell tools report
+  unavailability. See `docs/android-capabilities.md` for the plan.
 - **The Expo FileSystem adapter is the one unverified seam.** It is written against the SDK 57
   `File`/`Directory`/`Paths` API and is the single place to fix if Expo renames a member
   (`apps/mobile/src/runtime/services/expo-file-system.ts`).

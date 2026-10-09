@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createAutomationTools,
   createPythonTools,
   createShizukuTools,
   createSystemTools,
@@ -10,7 +11,7 @@ import {
   htmlToText,
 } from "@mobileclaw/capabilities";
 import { NodeShellService, runFile } from "@mobileclaw/capabilities/node";
-import type { ShellService, SystemService, HttpService } from "@mobileclaw/core";
+import type { AutomationService, ShellService, SystemService, HttpService } from "@mobileclaw/core";
 
 const shell = new NodeShellService({ policy: { forbidShellSyntax: false } });
 const call = { signal: new AbortController().signal, callId: "call_1" };
@@ -214,6 +215,380 @@ describe("Shizuku tools", () => {
       stdout: string;
     };
     expect(result.stdout).toContain("uid=2000");
+  });
+});
+
+describe("Automation tools", () => {
+  const systemWithout: SystemService = {
+    kind: "stub",
+    async openUrl() {},
+    async openApp() {},
+  };
+
+  /** A working screen backend, with any single method replaceable. */
+  const screen = (over: Partial<AutomationService> = {}): SystemService => ({
+    ...systemWithout,
+    automation: {
+      kind: "shizuku",
+      async status() {
+        return { available: true, backend: "shizuku", uid: 2000 };
+      },
+      async captureScreen() {
+        return { path: "file:///w/shot.jpg", width: 720, height: 1600 };
+      },
+      async tap() {},
+      async scroll() {},
+      async typeText() {
+        return { method: "input" as const };
+      },
+      async currentWindow() {
+        return { package: "com.tencent.mm", activity: ".ui.LauncherUI", raw: "mCurrentFocus=…" };
+      },
+      ...over,
+    },
+  });
+
+  const toolNamed = (system: SystemService, name: string) => {
+    const tool = createAutomationTools({ system }).find((entry) => entry.name === name);
+    if (!tool) throw new Error(`no automation tool named ${name}`);
+    return tool;
+  };
+
+  it("says the platform has no screen backend instead of failing vaguely", async () => {
+    // `screen_current` is a probe: with nothing to probe it reports, it does not throw.
+    const result = (await toolNamed(systemWithout, "screen_current").execute({} as never, call as never)) as {
+      available: boolean;
+      reason: string;
+      howTo: string;
+    };
+    expect(result.available).toBe(false);
+    expect(result.reason).toMatch(/no screen backend/);
+    expect(result.howTo).toMatch(/privileged backend/);
+  });
+
+  it("reports why the backend cannot act instead of throwing from the probe", async () => {
+    const system = screen({
+      async status() {
+        return { available: false, reason: "Shizuku is not running", howTo: "Open Shizuku and start the service." };
+      },
+    });
+    const result = (await toolNamed(system, "screen_current").execute({} as never, call as never)) as {
+      available: boolean;
+      reason: string;
+      howTo: string;
+      backend: string;
+    };
+    expect(result.available).toBe(false);
+    expect(result.reason).toBe("Shizuku is not running");
+    expect(result.howTo).toBe("Open Shizuku and start the service.");
+  });
+
+  it("throws for every action tool when there is no backend, carrying the hint", async () => {
+    // Only `screen_current` returns; everything that would act on the screen throws so
+    // the model is told the capability is missing and where to get it. `screen_wait`
+    // shares the same `requireScreen` guard, so it must throw too, not park forever.
+    const actions: Array<[string, Record<string, unknown>]> = [
+      ["screen_capture", {}],
+      ["screen_tap", { target: "search box", x: 10, y: 20 }],
+      ["screen_scroll", { direction: "down" }],
+      ["screen_type", { text: "hello" }],
+      ["screen_wait", { package: "com.tencent.mm", timeoutMs: 100 }],
+    ];
+    for (const [name, input] of actions) {
+      await expect(toolNamed(systemWithout, name).execute(input as never, call as never)).rejects.toMatchObject({
+        code: "E_TOOL_FAILED",
+        details: { hint: expect.stringMatching(/privileged backend/) },
+      });
+    }
+  });
+
+  it("passes the backend's own guidance through when it cannot act", async () => {
+    const howTo = "Open Shizuku and start the service.";
+    const system = screen({
+      async status() {
+        return { available: false, reason: "Shizuku is not running", howTo };
+      },
+    });
+    await expect(
+      toolNamed(system, "screen_tap").execute({ target: "search box", x: 10, y: 20 } as never, call as never),
+    ).rejects.toMatchObject({
+      code: "E_TOOL_FAILED",
+      details: { hint: howTo },
+    });
+  });
+
+  it("marks every screen-changing tool so one approval cannot cover the next", () => {
+    // Structural, not a name list: a future screen-changing tool that forgets the
+    // flag fails here, at the exact-name comparison and at the flag assertions, rather
+    // than quietly becoming rememberable in production.
+    const changing = createAutomationTools({ system: screen() }).filter((tool) => tool.risk === "system");
+    expect(changing.map((tool) => tool.name).sort()).toEqual([
+      "screen_capture",
+      "screen_scroll",
+      "screen_tap",
+      "screen_type",
+    ]);
+    for (const tool of changing) {
+      expect(tool.neverRemember, tool.name).toBe(true);
+      expect(tool.alwaysAsk, tool.name).toBe(true);
+    }
+  });
+
+  it("refuses to tap when nobody chose a point", async () => {
+    // The model cannot see the screen, so a tap without a user-chosen point is a
+    // guess — and a guess at a coordinate is exactly what must never happen.
+    await expect(
+      toolNamed(screen(), "screen_tap").execute({ target: "search box" } as never, call as never),
+    ).rejects.toThrowError(/no point was chosen/);
+  });
+
+  it("taps the chosen point and returns a screenshot as evidence", async () => {
+    const taps: [number, number][] = [];
+    const system = screen({
+      async tap(x, y) {
+        taps.push([x, y]);
+      },
+    });
+    const result = (await toolNamed(system, "screen_tap").execute(
+      { target: "search box", x: 540, y: 120 } as never,
+      call as never,
+    )) as { x: number; evidence: { path: string; width: number } };
+
+    expect(taps).toEqual([[540, 120]]);
+    expect(result.evidence.path).toBe("file:///w/shot.jpg");
+    expect(result.evidence.width).toBe(720);
+  });
+
+  it("keeps a successful tap successful when the evidence shot fails", async () => {
+    // The press already happened. Turning that into a tool error would report a
+    // failed action that did in fact happen, which is worse than thin evidence.
+    const system = screen({
+      async captureScreen() {
+        throw new Error("FLAG_SECURE");
+      },
+    });
+    const result = (await toolNamed(system, "screen_tap").execute(
+      { target: "OK", x: 1, y: 2 } as never,
+      call as never,
+    )) as { evidenceNote: string };
+
+    expect(result.evidenceNote).toMatch(/evidence capture failed/);
+    expect(result.evidenceNote).toMatch(/FLAG_SECURE/);
+  });
+
+  it("carries a blocked frame's note into an action's evidence", async () => {
+    // A blocked frame is not a blank screen: the note has to survive into the evidence
+    // the user is shown, or a protected window would be reported as empty.
+    const note = "the frame may be protected content and is shown black";
+    const system = screen({
+      async captureScreen() {
+        return { path: "file:///w/black.jpg", width: 720, height: 1600, note };
+      },
+    });
+    const result = (await toolNamed(system, "screen_tap").execute(
+      { target: "OK", x: 5, y: 6 } as never,
+      call as never,
+    )) as { evidence: { note?: string } };
+
+    expect(result.evidence.note).toBe(note);
+  });
+
+  it("passes a blocked-frame note through instead of reporting a blank screen", async () => {
+    const note = "the frame may be protected content and is shown black";
+    const system = screen({
+      async captureScreen() {
+        return { path: "file:///w/black.jpg", width: 720, height: 1600, note };
+      },
+    });
+    const result = (await toolNamed(system, "screen_capture").execute(
+      { maxWidth: 720, quality: 70 } as never,
+      call as never,
+    )) as { note: string; evidence: { note?: string } };
+    expect(result.note).toBe(note);
+    expect(result.evidence.note).toBe(note);
+  });
+
+  it("exposes the capture as its own evidence so the transcript can render it", async () => {
+    // The transcript only picks up an explicit `evidence` key. A capture with no such
+    // key would never reach the card whose whole purpose is to show the picture.
+    const shot = { path: "file:///w/shot.jpg", width: 720, height: 1600 };
+    const system = screen({
+      async captureScreen() {
+        return { ...shot };
+      },
+    });
+    const result = (await toolNamed(system, "screen_capture").execute({} as never, call as never)) as {
+      path: string;
+      width: number;
+      height: number;
+      evidence: { path: string; width: number; height: number };
+    };
+
+    expect(result.evidence.path).toBe(shot.path);
+    expect(result.evidence.width).toBe(shot.width);
+    expect(result.evidence.height).toBe(shot.height);
+  });
+
+  it("saves the capture into the conversation workspace when there is one", async () => {
+    let seen: string | undefined;
+    const system = screen({
+      async captureScreen(options) {
+        seen = options?.destDir;
+        return { path: "file:///w/shot.jpg", width: 720, height: 1600 };
+      },
+    });
+    await toolNamed(system, "screen_capture").execute(
+      { maxWidth: 720, quality: 70 } as never,
+      { ...call, workspace: "/data/ws/conv_1" } as never,
+    );
+    expect(seen).toBe("/data/ws/conv_1");
+  });
+
+  describe("defaults are decided in one place", () => {
+    it("leaves the capture size and quality to the backend instead of defaulting them", async () => {
+      // Regression: the tool used to fill in maxWidth/quality itself, duplicating
+      // SCREEN_DEFAULTS. It now forwards only what the caller supplied, so the
+      // fallback lives in the service (and in SCREEN_DEFAULTS) and nowhere else.
+      const calls: Array<Record<string, unknown>> = [];
+      const system = screen({
+        async captureScreen(options) {
+          calls.push((options ?? {}) as Record<string, unknown>);
+          return { path: "file:///w/shot.jpg", width: 720, height: 1600 };
+        },
+      });
+      const tool = toolNamed(system, "screen_capture");
+      await tool.execute({} as never, call as never);
+      await tool.execute({ maxWidth: 1024 } as never, call as never);
+
+      expect(Object.keys(calls[0]!)).toEqual([]);
+      expect(calls[1]).toEqual({ maxWidth: 1024 });
+    });
+
+    it("lets the backend decide how far a scroll travels", async () => {
+      const seen: Array<[string, number | undefined]> = [];
+      const system = screen({
+        async scroll(direction, fraction) {
+          seen.push([direction, fraction]);
+        },
+      });
+      const tool = toolNamed(system, "screen_scroll");
+      await tool.execute({ direction: "down" } as never, call as never);
+      await tool.execute({ direction: "up", amount: 0.3 } as never, call as never);
+
+      expect(seen).toEqual([
+        ["down", undefined],
+        ["up", 0.3],
+      ]);
+    });
+  });
+
+  it("scrolls by direction without asking the model for coordinates", async () => {
+    const seen: [string, number | undefined][] = [];
+    const system = screen({
+      async scroll(direction, fraction) {
+        seen.push([direction, fraction]);
+      },
+    });
+    const result = (await toolNamed(system, "screen_scroll").execute(
+      { direction: "down", amount: 0.6 } as never,
+      call as never,
+    )) as { direction: string; evidence?: unknown };
+
+    expect(seen).toEqual([["down", 0.6]]);
+    expect(result.direction).toBe("down");
+    expect(result.evidence).toBeDefined();
+  });
+
+  it("reports the clipboard fallback, because a paste replaces what the user copied", async () => {
+    const system = screen({
+      async typeText() {
+        return { method: "paste" as const };
+      },
+    });
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello" } as never,
+      call as never,
+    )) as { method: string; length: number };
+
+    expect(result.method).toBe("paste");
+    expect(result.length).toBe(5);
+  });
+
+  it("summarises each action, and never echoes the typed text", () => {
+    // Whatever is typed already lands on the transcript entry; the summary is a second
+    // copy in the UI, so a password typed into a field must not appear here.
+    const tools = createAutomationTools({ system: screen() });
+    const summary = (name: string, input: unknown) =>
+      tools.find((tool) => tool.name === name)?.summarize?.(input as never);
+
+    expect(summary("screen_capture", {})).toBe("screen capture");
+    expect(summary("screen_scroll", { direction: "down" })).toBe("scroll down");
+    expect(summary("screen_tap", { target: "search box" })).toBe("tap search box");
+    expect(summary("screen_type", { text: "hunter2" })).toBe("type 7 characters");
+  });
+
+  it("reports the foreground app", async () => {
+    const result = (await toolNamed(screen(), "screen_current").execute({} as never, call as never)) as {
+      available: boolean;
+      package: string;
+      uid: number;
+    };
+    expect(result.available).toBe(true);
+    expect(result.package).toBe("com.tencent.mm");
+    expect(result.uid).toBe(2000);
+  });
+
+  it("waits for the foreground app, and reports a timeout rather than guessing", async () => {
+    let calls = 0;
+    const arriving = screen({
+      async currentWindow() {
+        calls += 1;
+        return calls >= 2
+          ? { package: "com.tencent.mm", activity: ".ui.LauncherUI", raw: "matched" }
+          : { package: "com.android.launcher", activity: "", raw: "not yet" };
+      },
+    });
+    const matched = (await toolNamed(arriving, "screen_wait").execute(
+      { package: "com.tencent.mm", timeoutMs: 5000 } as never,
+      call as never,
+    )) as { matched: boolean };
+    expect(matched.matched).toBe(true);
+    expect(calls).toBe(2);
+
+    const never = screen({
+      async currentWindow() {
+        return { raw: "" };
+      },
+    });
+    const missed = (await toolNamed(never, "screen_wait").execute(
+      { package: "com.tencent.mm", timeoutMs: 150 } as never,
+      call as never,
+    )) as { matched: boolean; reason: string };
+    expect(missed.matched).toBe(false);
+    expect(missed.reason).toMatch(/timed out/);
+  });
+
+  it("matches a substring of the activity name as well as the package", async () => {
+    const result = (await toolNamed(screen(), "screen_wait").execute(
+      { package: "com.tencent.mm", activity: "Launcher", timeoutMs: 5000 } as never,
+      call as never,
+    )) as { matched: boolean };
+    expect(result.matched).toBe(true);
+  });
+
+  it("stops waiting when the run is cancelled", async () => {
+    const controller = new AbortController();
+    const never = screen({
+      async currentWindow() {
+        return { raw: "" };
+      },
+    });
+    const pending = toolNamed(never, "screen_wait").execute(
+      { package: "nope", timeoutMs: 30000 } as never,
+      { ...call, signal: controller.signal } as never,
+    );
+    controller.abort();
+    await expect(pending).rejects.toThrowError(/cancelled/);
   });
 });
 

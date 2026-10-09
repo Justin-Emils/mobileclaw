@@ -8,28 +8,43 @@
 Verification that runs without a device or an Expo account (all local):
 
 ```bash
-pnpm check      # typecheck + 130 tests + a real Metro bundle
+pnpm check      # typecheck + 343 tests (core 102 / capabilities 74 / mobile 167) + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
 
-> **The repository lives at `E:\code\mobileclaw`.** On 2026-10-07 it was briefly moved to
-> `E:\mc\mobileclaw` and moved back: the migration was chasing a path-length problem that
-> turned out to be the Android SDK's bundled ninja being too old — see Blocker 2. Commands
-> below assume this path.
+> **The build no longer assumes where the repository is.** The toolchain is resolved at build time
+> by `eng/toolchain.cjs` (explicit `-Jdk`/`-Sdk`/`-GradleHome` → environment variables → a
+> git-ignored `.toolchain/` beside the repo → the platform's usual locations). On a fresh machine,
+> `eng/setup-toolchain.ps1` installs a JDK and the Android SDK into `.toolchain/`. The 2026-10-07
+> relocation was chasing a path-length problem that turned out to be the Android SDK's bundled ninja
+> being too old — see Blocker 2.
 
 ## Local Android build (`eng/build-local.ps1`)
 
-This machine already has a complete Android toolchain in `E:\code\Eng`, so a local
-build needs no EAS quota:
+A local build needs no EAS quota. The toolchain is resolved by `eng/toolchain.cjs`, and the component
+versions live in one place, `eng/toolchain-versions.cjs`. `node eng/toolchain.cjs print` shows what
+the build would use.
 
-| Component | Path | Version |
+| Component | Where (relative to `.toolchain/`, the resolver's fallback) | Version |
 | --- | --- | --- |
-| JDK | `E:\code\Eng\.jdk21` | Temurin 21.0.12 (PATH only has Java 8 — `JAVA_HOME` must be set) |
-| Android SDK | `E:\code\Eng\.android-sdk` | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006 |
-| CMake | `.android-sdk\cmake\3.30.5` | 3.30.5, pinned by `eng/pin-cmake-version.init.gradle` (3.22.1 loops — Blocker 1) |
-| ninja | `.android-sdk\cmake\{3.30.5,3.22.1}\bin\ninja.exe` | both swapped to 1.12.1 by hand; each original kept beside it as `ninja-1.10.2.exe.bak` (Blocker 2) |
-| adb | `.android-sdk\platform-tools\adb.exe` | 1.0.41 |
-| Gradle | `E:\code\Eng\.gradle-home` | 9.3.1, pre-extracted with a warm cache |
+| JDK | `jdk\` (`bin\java` must exist) | Temurin 21 (any ≥ 21; the resolver reads the JDK's `release` file and skips older ones) |
+| Android SDK | `android-sdk\` (`platform-tools\adb` must exist) | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006 |
+| CMake | `android-sdk\cmake\3.30.5` | 3.30.5, pinned by `eng/pin-cmake-version.init.gradle` (3.22.1 loops — Blocker 1) |
+| ninja | `android-sdk\cmake\{3.30.5,3.22.1}\bin\ninja.exe` | both swapped to 1.12.1 by hand; each original kept beside it as `ninja-1.10.2.exe.bak` (Blocker 2) |
+| adb | `android-sdk\platform-tools\adb.exe` | 1.0.41 |
+| Gradle | `gradle-home\` (need not exist — Gradle creates one) | 9.3.1, pre-extracted with a warm cache |
+
+On a fresh machine, install the toolchain first (or set `JAVA_HOME` / `ANDROID_HOME` to ones you
+already have — the resolver checks the environment before `.toolchain/`):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\setup-toolchain.ps1 -DryRun    # plan only
+powershell -NoProfile -ExecutionPolicy Bypass -File eng\setup-toolchain.ps1 -FixNinja  # install + replace ninja
+node eng\toolchain.cjs print                                                           # confirm resolution
+```
+
+`eng/build-local.ps1` is the **supported entry point**: a direct `gradle` invocation bypasses the
+staleness guards it applies (see "a successful build that ships a stale JS bundle" below).
 
 The machine's execution policy refuses unsigned scripts, and that error does not land in a
 redirected log — it exits silently. Launch it through a Bypass host:
@@ -57,7 +72,7 @@ Unblock-File eng\build-local.ps1     # after that, plain .\eng\build-local.ps1 w
    `...\.pnpm\react-native-worklets@0.13._82ad66a5…\node_modules\react-native-worklets\…`
    plus CMake's own directory overflowed. Mapping the repo to a short drive helps:
    ```powershell
-   subst S: E:\code\mobileclaw      # 252 -> 229 characters
+   subst S: <path to the repository>   # 252 -> 229 characters
    ```
    Note the flat layout is configured by `nodeLinker: hoisted` in `pnpm-workspace.yaml`,
    **not** by `node-linker=hoisted` in `.npmrc` — pnpm 11 reads layout settings only from
@@ -95,7 +110,7 @@ future-dated source: the rule can never converge.
 to use a CMake that does not emit that rule:
 
 ```powershell
-E:\code\Eng\.android-sdk\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.30.5"
+<android-sdk>\cmdline-tools\latest\bin\sdkmanager.bat "cmake;3.30.5"
 ```
 
 pinned by `eng/pin-cmake-version.init.gradle` (pass `-I` to Gradle). With this,
@@ -118,7 +133,7 @@ has long paths on (registry `LongPathsEnabled=1`, `RtlAreLongPathsEnabled()==1`)
 SDK's CMake 3.30.5 bundles **ninja 1.10.2**, which predates that probe: its binary carries
 the literal error text and no `RtlAreLongPathsEnabled` at all. Two fixes, both applied:
 
-1. **ninja 1.10.2 -> 1.12.1** at `E:\code\Eng\.android-sdk\cmake\3.30.5\bin\ninja.exe`
+1. **ninja 1.10.2 -> 1.12.1** at `<toolchain>\android-sdk\cmake\3.30.5\bin\ninja.exe`
    (the exact path AGP invokes; the original sits beside it as `ninja-1.10.2.exe.bak`).
    A/B on one `build.ninja` with a 340-character input path: 1.10.2 exits 1 with the error
    above, 1.12.1 exits 0 and runs the command.
@@ -256,13 +271,16 @@ contributions — so a manifest modifier does it).
 
 ## Network gotcha on this machine
 
-git and the Expo CLI route through a local proxy (`http.proxy = 127.0.0.1:7892`, set
-globally) which fails the TLS handshake to GitHub. `eng/commit.ps1` sets `NO_PROXY=*`
-on its child processes. For manual commands, do the same:
+git and the Expo CLI route through a local proxy (`http.proxy`, `127.0.0.1:7897` on this machine —
+**the port has moved before**) which fails the TLS handshake to GitHub. `eng/commit.ps1` sets
+`NO_PROXY=*` on its child processes. For manual commands, do the same:
 
 ```powershell
 $env:NO_PROXY='*'; $env:no_proxy='*'
 ```
+
+Note that only GitHub is blocked here: `dl.google.com`, `services.gradle.org` and `repo1.maven.org`
+are reachable directly and fast, so the SDK, Gradle and Maven downloads do not need the proxy.
 
 GitHub pushes also intermittently fail with `Connection was reset` or a 21-second
 connect timeout; retrying a few times works.

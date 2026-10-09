@@ -8,6 +8,7 @@ import type {
   Conversation,
   ConversationStore,
   LlmProvider,
+  ScreenCapture,
   Usage,
 } from "./types";
 
@@ -433,7 +434,15 @@ export class Agent {
       conversation.allowlist = [...allowlist];
     }
 
-    const outcome = await this.options.registry.execute(call.name, call.input, {
+    // The user may have supplied part of the argument while approving: the point they
+    // picked on a screenshot is the only source for a coordinate the model cannot see.
+    // What runs is the merged input, so the action matches what was approved — and the
+    // registry re-validates it against the tool's schema, so nothing unvalidated slips in.
+    const merged = mergeApprovedInput(call.input, decision.input);
+    const effectiveSummary =
+      merged === call.input || !definition ? summary : describeInput(definition, merged);
+
+    const outcome = await this.options.registry.execute(call.name, merged, {
       signal: signal ?? new AbortController().signal,
       callId: call.id,
       conversationId: conversation.id,
@@ -466,8 +475,8 @@ export class Agent {
           at: started,
           callId: call.id,
           name: call.name,
-          input: call.input,
-          ...(summary ? { summary } : {}),
+          input: merged,
+          ...(effectiveSummary ? { summary: effectiveSummary } : {}),
           status: "error",
           error: outcome.error.toToolResult(),
           durationMs,
@@ -498,11 +507,12 @@ export class Agent {
         at: started,
         callId: call.id,
         name: call.name,
-        input: call.input,
-        ...(summary ? { summary } : {}),
+        input: merged,
+        ...(effectiveSummary ? { summary: effectiveSummary } : {}),
         status: "ok",
         output: rendered.preview,
         durationMs,
+        ...evidenceOf(outcome.value),
       },
     };
   }
@@ -615,6 +625,77 @@ Before organising, moving or deleting other people's files:
  * is how an `fs_list` once returned paths cut off at ".../5404..." and pushed the
  * model into seven blind repeats of the same call.
  */
+/**
+ * Fold the argument the user supplied while approving into the model's input.
+ *
+ * **Only keys the model left out are taken.** The point of an approval-supplied
+ * argument is to add what the model cannot know — the coordinate to press, which it
+ * cannot see — so adding is the whole job. Overwriting is not, and it is dangerous:
+ * `paths` and the rule verdict are computed from the model's input *before* approval,
+ * so a value that replaced, say, `path` would walk past a path-pattern deny rule that
+ * had already been satisfied. Filling blanks keeps what runs inside what was checked.
+ *
+ * A non-object input is left alone for the same reason: replacing the whole argument
+ * would mean executing something that was never evaluated. A tool whose input is a
+ * scalar and needs user-supplied data should say so in its own schema instead.
+ */
+function mergeApprovedInput(base: unknown, approved: unknown): unknown {
+  if (approved === undefined || approved === null) return base;
+  if (!isPlainObject(base) || !isPlainObject(approved)) return base;
+
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(approved)) {
+    // `undefined` counts as absent: an explicitly-blank key is the same as a missing
+    // one here, since the schema will apply its own default either way.
+    if (!(key in merged) || merged[key] === undefined) merged[key] = value;
+  }
+  return merged;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Pull the screenshot a tool produced out of its output, for the transcript.
+ *
+ * Reads one agreed key rather than guessing: `renderToolOutput` flattens the output
+ * for the model, so the picture would otherwise be dropped on the way to the entry,
+ * and a tool that merely mentions a path in prose must not have it treated as evidence.
+ */
+function evidenceOf(value: unknown): { evidence?: ScreenCapture; evidenceNote?: string } {
+  if (!isPlainObject(value)) return {};
+  const out: { evidence?: ScreenCapture; evidenceNote?: string } = {};
+  const shot = value.evidence;
+  if (
+    isPlainObject(shot) &&
+    typeof shot.path === "string" &&
+    shot.path !== "" &&
+    isPixelCount(shot.width) &&
+    isPixelCount(shot.height)
+  ) {
+    out.evidence = {
+      path: shot.path,
+      width: shot.width,
+      height: shot.height,
+      ...(typeof shot.note === "string" ? { note: shot.note } : {}),
+    };
+  }
+  if (typeof value.evidenceNote === "string") out.evidenceNote = value.evidenceNote;
+  return out;
+}
+
+/**
+ * Dimensions are pixel counts, so they have to be positive and finite.
+ *
+ * A bare `typeof === "number"` let `NaN` (which JSON turns into `null` on the way to
+ * storage), zero and negatives through, and the card would then render a broken image
+ * as though it were the verified evidence for an action.
+ */
+function isPixelCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
 export function renderToolOutput(value: unknown): { text: string; preview: string } {
   if (typeof value === "string") {
     return { text: value, preview: truncate(value, 400) };

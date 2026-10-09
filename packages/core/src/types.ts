@@ -226,6 +226,8 @@ export interface SystemService {
   notify?(notification: { title: string; body?: string }): Promise<void>;
   /** Privileged shell via Shizuku/ADB when the user has paired the device. */
   privileged?: PrivilegedService;
+  /** Screen capture and input injection, when a privileged backend is available. */
+  automation?: AutomationService;
 }
 
 export interface PrivilegedService {
@@ -233,6 +235,81 @@ export interface PrivilegedService {
   isAvailable(): Promise<boolean>;
   requestPermission?(): Promise<boolean>;
   run(command: string, options?: ShellRunOptions): Promise<ShellResult>;
+}
+
+/**
+ * Screen automation through a privileged backend (Shizuku, shell uid 2000).
+ *
+ * Deliberately separate from `PrivilegedService`, which only runs commands: these
+ * are about what is *on screen*, and each one either changes it or exposes it.
+ *
+ * The geometry lives in the implementation, not here. The model cannot see the
+ * screen, so it cannot invent coordinates — a tap point comes from the user
+ * pointing at a capture, and scrolling is expressed as a direction and resolved
+ * against the real display size.
+ */
+export interface AutomationService {
+  readonly kind: string;
+  /** Whether the backend can act right now, and if not, what the user should do. */
+  status(): Promise<AutomationStatus>;
+  /**
+   * Capture the screen, downscaled, and save it where the UI can render it.
+   *
+   * A window that sets `FLAG_SECURE` (banking, some password fields) comes back
+   * black; the result says so rather than reporting an empty screen.
+   */
+  captureScreen(options?: {
+    maxWidth?: number;
+    quality?: number;
+    /** Directory the capture should land in; the conversation workspace when known. */
+    destDir?: string;
+  }): Promise<ScreenCapture>;
+  tap(x: number, y: number): Promise<void>;
+  scroll(direction: "up" | "down" | "left" | "right", fraction?: number): Promise<void>;
+  /**
+   * Type into whatever holds focus.
+   *
+   * The method is reported because it is user-visible: Chinese cannot go through
+   * the `input` command, so it is routed via the clipboard and a paste keystroke,
+   * which overwrites whatever the user had copied.
+   */
+  typeText(text: string): Promise<{ method: "input" | "paste" }>;
+  /**
+   * Which app is in the foreground.
+   *
+   * Best effort: the values come from parsing debug output, so on some ROMs this
+   * returns nothing. `raw` is kept so an empty result is diagnosable rather than
+   * looking like "nothing is open".
+   */
+  currentWindow(): Promise<ForegroundWindow>;
+}
+
+export interface AutomationStatus {
+  available: boolean;
+  /** Where the privilege comes from, e.g. `shizuku`. */
+  backend?: string;
+  /** 0 when running as root, 2000 when riding on ADB. */
+  uid?: number;
+  reason?: string;
+  /** What the user has to do to make this work, in their own language. */
+  howTo?: string;
+}
+
+export interface ScreenCapture {
+  /** A `file://` URI the UI can render directly. */
+  path: string;
+  /** Pixel size of the capture, i.e. the coordinate space taps are expressed in. */
+  width: number;
+  height: number;
+  /** Set when the frame is unusable for a reason the user should know. */
+  note?: string;
+}
+
+export interface ForegroundWindow {
+  package?: string;
+  activity?: string;
+  /** The line the values were parsed from, so a miss can be diagnosed. */
+  raw: string;
 }
 
 /* ------------------------------------------------------------------ Web svc */
@@ -287,6 +364,15 @@ export type TranscriptEntry =
       output?: string;
       durationMs?: number;
       error?: string;
+      /**
+       * Screenshot of what the action did, when the tool produced one.
+       *
+       * The "show your work" half of the automation promise: the user is shown the
+       * result rather than asked to trust a sentence the model wrote about it.
+       */
+      evidence?: ScreenCapture;
+      /** Why the evidence is missing, when the action ran but produced none. */
+      evidenceNote?: string;
     }
   | { kind: "notice"; id: string; at: number; level: "info" | "warn" | "error"; text: string };
 

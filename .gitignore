@@ -20,6 +20,11 @@ coverage/
 # Auto-commit job output (see eng/commit.ps1)
 .logs/
 
+# Android build toolchain installed beside the repository by eng/setup-toolchain.ps1
+# (see eng/BUILD.md). Deliberately not committed: the SDK alone is several GB, Google's
+# licence does not allow redistributing it, and the binaries are platform-specific.
+/.toolchain/
+
 # Local Metro bundle used by `pnpm bundle` to verify the app compiles
 apps/mobile/.expo-export-check/
 

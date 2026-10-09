@@ -1,5 +1,19 @@
 import type { ApprovalHandler, PermissionRequest } from "@mobileclaw/core";
 
+/** What the UI sends back when the user answers. */
+export interface ApprovalAnswer {
+  approved: boolean;
+  remember?: boolean;
+  /**
+   * Argument the user supplied while answering, merged over the tool's input.
+   *
+   * The only case today is a point picked on a screenshot: the model cannot see the
+   * screen, so the human is the source of the coordinate, and approval is the moment
+   * they are in the loop.
+   */
+  input?: unknown;
+}
+
 export interface PendingApproval {
   id: string;
   request: PermissionRequest;
@@ -7,7 +21,7 @@ export interface PendingApproval {
   title: string;
   detail: string;
   createdAt: number;
-  resolve: (answer: { approved: boolean; remember?: boolean }) => void;
+  resolve: (answer: ApprovalAnswer) => void;
 }
 
 /**
@@ -29,14 +43,14 @@ export class ApprovalBroker {
   readonly request: ApprovalHandler = (request) => this.handle(request);
 
   /** Auto-answer hook used by tests and by the "auto-approve in dev" toggle. */
-  autoAnswer?: (request: PermissionRequest) => { approved: boolean; remember?: boolean } | undefined;
+  autoAnswer?: (request: PermissionRequest) => ApprovalAnswer | undefined;
 
   /** The gate's approval callback: parks the run until the user answers. */
-  async handle(request: PermissionRequest): Promise<{ approved: boolean; remember?: boolean }> {
+  async handle(request: PermissionRequest): Promise<ApprovalAnswer> {
     const preset = this.autoAnswer?.(request);
     if (preset) return preset;
 
-    return new Promise<{ approved: boolean; remember?: boolean }>((resolve) => {
+    return new Promise<ApprovalAnswer>((resolve) => {
       const entry: PendingApproval = {
         id: `approval_${(this.counter += 1)}`,
         request,
@@ -51,7 +65,7 @@ export class ApprovalBroker {
   }
 
   /** Called by the UI when the user answers the modal. */
-  answer(id: string, answer: { approved: boolean; remember?: boolean }): void {
+  answer(id: string, answer: ApprovalAnswer): void {
     const index = this.queue.findIndex((entry) => entry.id === id);
     if (index === -1) return;
     const [entry] = this.queue.splice(index, 1);
@@ -60,7 +74,7 @@ export class ApprovalBroker {
   }
 
   /** Grant or deny every waiting request at once (used on run cancellation). */
-  flush(answer: { approved: boolean; remember?: boolean }): void {
+  flush(answer: ApprovalAnswer): void {
     for (const entry of this.queue.splice(0)) entry.resolve(answer);
     this.notify();
   }
