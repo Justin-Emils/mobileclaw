@@ -27,8 +27,42 @@ the build would use.
 
 | Component | Where (relative to `.toolchain/`, the resolver's fallback) | Version |
 | --- | --- | --- |
-| JDK | `jdk\` (`bin\java` must exist) | Temurin 21 (any ≥ 21; the resolver reads the JDK's `release` file and skips older ones) |
+| JDK | `jdk\` (`bin\java` must exist) | Temurin **21**. See the warning below: not every newer JDK works. |
 | Android SDK | `android-sdk\` (`platform-tools\adb` must exist) | build-tools 36.0.0, platforms/android-36, ndk 27.1.12297006 |
+
+### Do not build with JDK 24
+
+`:react-native-worklets:configureCMakeRelWithDebInfo[<abi>]` aborts under JDK 24 with
+
+```
+> WARNING: A restricted method in java.lang.System has been called
+```
+
+That is a JDK 24 strictness change against the CMake integration, not a Gradle or CMake fault,
+and it fails the whole build. JDK 21 builds the same tree in under a minute. The resolver only
+checks that a JDK is *at least* 21, so a newer one is accepted and then fails much later with a
+message that names neither Java nor the version.
+
+### Pin the toolchain per machine: `.toolchain/.config`
+
+The resolver reads this file before it consults any environment variable, so a setting here
+beats a generic `JAVA_HOME` — which matters, because a machine can easily have a JDK in
+`JAVA_HOME` that this project cannot build with.
+
+The file is inside `.toolchain/`, which is git-ignored, so it stays local. One `KEY=VALUE` per
+line, `#` starts a comment:
+
+```
+MOBILECLAW_JDK=E:\code\Eng\.jdk21
+MOBILECLAW_ANDROID_SDK=E:\code\Eng\.android-sdk
+MOBILECLAW_GRADLE_HOME=E:\code\Eng\.gradle-home
+MOBILECLAW_ENG_ROOT=E:\code\Eng
+```
+
+All four are optional. With none of them set, the resolver falls back to environment variables,
+then to `.toolchain/`, then to the usual install locations, and `node eng/toolchain.cjs print`
+lists everywhere it looked when it fails.
+
 | CMake | `android-sdk\cmake\3.30.5` | 3.30.5, pinned by `eng/pin-cmake-version.init.gradle` (3.22.1 loops — Blocker 1) |
 | ninja | `android-sdk\cmake\{3.30.5,3.22.1}\bin\ninja.exe` | both swapped to 1.12.1 by hand; each original kept beside it as `ninja-1.10.2.exe.bak` (Blocker 2) |
 | adb | `android-sdk\platform-tools\adb.exe` | 1.0.41 |
