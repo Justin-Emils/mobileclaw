@@ -14,12 +14,15 @@
 #   3) pm list packages -s/-3 —— 区分系统应用和第三方应用。
 
 param(
-  [string]$Adb = "E:\code\Eng\.android-sdk\platform-tools\adb.exe",
+    # Empty means "resolve it" - see Resolve-adb.ps1. There is no machine-specific default:
+  # this used to hardcode one developer's SDK path, which made the script unusable elsewhere.
+  [string]$Adb = "",
   [string]$OutDir = $PSScriptRoot
 )
 
 $ErrorActionPreference = "Stop"
-if (-not (Test-Path $Adb)) { throw "找不到 adb: $Adb" }
+. (Join-Path $PSScriptRoot 'Resolve-adb.ps1')
+$Adb = Resolve-Adb -Explicit $Adb
 
 # ---------------------------------------------------------------- 能力清单
 # 名称 -> adb shell 里执行的完整命令

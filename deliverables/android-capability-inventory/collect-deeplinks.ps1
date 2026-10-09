@@ -8,12 +8,16 @@
 # 产出：deep-link-dictionary.csv
 
 param(
-  [string]$Adb = "E:\code\Eng\.android-sdk\platform-tools\adb.exe",
+    # Empty means "resolve it" - see Resolve-adb.ps1. There is no machine-specific default:
+  # this used to hardcode one developer's SDK path, which made the script unusable elsewhere.
+  [string]$Adb = "",
   [string]$OutDir = $PSScriptRoot,
   [string]$CapCsv = "app-capabilities.csv"
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot 'Resolve-adb.ps1')
+$Adb = Resolve-Adb -Explicit $Adb
 
 $names = @{}
 Import-Csv (Join-Path $OutDir $CapCsv) | ForEach-Object { if ($_.名称) { $names[$_.包名] = $_.名称 } }

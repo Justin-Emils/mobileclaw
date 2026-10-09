@@ -9,14 +9,17 @@
 #   media-services.csv    可被浏览的媒体库服务(MediaBrowserService)
 
 param(
-  [string]$Adb = "E:\code\Eng\.android-sdk\platform-tools\adb.exe",
+    # Empty means "resolve it" - see Resolve-adb.ps1. There is no machine-specific default:
+  # this used to hardcode one developer's SDK path, which made the script unusable elsewhere.
+  [string]$Adb = "",
   [string]$OutDir = $PSScriptRoot,
   [int]$ChunkSize = 40,
   [int]$MaxSystemProbes = 40
 )
 
 $ErrorActionPreference = "Stop"
-if (-not (Test-Path $Adb)) { throw "找不到 adb: $Adb" }
+. (Join-Path $PSScriptRoot 'Resolve-adb.ps1')
+$Adb = Resolve-Adb -Explicit $Adb
 
 # 名称映射复用 collect.ps1 的产出，避免重复维护
 $names = @{}
