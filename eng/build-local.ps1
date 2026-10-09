@@ -411,7 +411,16 @@ try {
     $gradleExit = 1
     for ($attempt = 1; $attempt -le $attempts; $attempt++) {
         try {
-            & $gradleCmd $task --console=plain @initArgs
+            # Invoked through `cmd /c`, not PowerShell's `&` call operator.
+            #
+            # `&` runs the batch file through PowerShell's own process plumbing, and on this
+            # machine that combination HANGS: `gradle assembleRelease` reached 23 seconds of
+            # work and then sat for over twenty minutes with an idle daemon and no further
+            # output, three times in a row. The identical command line through `
+            # cmd /c ` finishes in under thirty seconds, every time. Whatever the two do
+            # differently about console handles, the direct form is the one that works, so it is
+            # the one used here.
+            cmd /c "`"$gradleCmd`" $task --console=plain $($initArgs -join ' ')"
             $gradleExit = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $prevEap
