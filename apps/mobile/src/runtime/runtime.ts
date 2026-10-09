@@ -9,6 +9,7 @@ import {
   PermissionGate,
   PluginHost,
   ToolRegistry,
+  type AutomationStatus,
   type Conversation,
   type ConversationStore,
   type FileSystemService,
@@ -17,9 +18,19 @@ import {
   type LlmProvider,
   type ShellService,
   type SystemService,
+  type WebSearchService,
   createId,
 } from "@mobileclaw/core";
-import { capabilityPlugins, type CapabilityDeps } from "@mobileclaw/capabilities";
+import {
+  capabilityPlugins,
+  createProbeCache,
+  readCache,
+  runScreenProbe,
+  type CapabilityDeps,
+  type ScreenProbeHooks,
+  type ScreenProbeRecord,
+  type ScreenProbeReport,
+} from "@mobileclaw/capabilities";
 import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
@@ -53,6 +64,15 @@ export interface RuntimeDeps {
   shell: ShellService;
   http: HttpService;
   system: SystemService;
+  /**
+   * Optional web search backend.
+   *
+   * Optional because search is the capability most likely to be unavailable: a scraper's
+   * markup moves, a self-hosted instance is down. Without one, `web_fetch` still works and
+   * `web_search` says plainly that no engine is configured — which keeps "no search" from
+   * being confused with "search found nothing".
+   */
+  search?: WebSearchService;
   /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
@@ -133,6 +153,7 @@ export class MobileClawRuntime {
       shell: this.deps.shell,
       http: this.deps.http,
       system: this.deps.system,
+      ...(this.deps.search ? { search: this.deps.search } : {}),
     };
     // Publish the platform services first: the host rejects a plugin whose
     // `inject` list is unmet, so they must exist before the bundles load.
@@ -232,11 +253,20 @@ export class MobileClawRuntime {
     tools: number;
     plugins: { name: string; status: string; tools: number; error?: string }[];
     storageAccess: AllFilesAccessReport;
+    /**
+     * Whether the privileged screen backend can act, and if not what to do about it.
+     *
+     * Reported here rather than probed by each caller because it decides whether a whole
+     * class of features is usable at all — the screen-probing screen needs to say "Shizuku
+     * is not running" once, instead of failing one app at a time and looking broken.
+     */
+    automation?: AutomationStatus;
   }> {
     const secretStore = await this.probeSecretStore();
     // Probed on every call rather than cached: the user can grant access in system
     // settings and come straight back, and a cached "denied" would then be a lie.
     const storageAccess = await this.checkStorageAccess();
+    const automation = this.deps.system.automation;
     return {
       apiKeyPresent: this.apiKey !== "",
       apiKeyLength: this.apiKey.length,
@@ -254,6 +284,14 @@ export class MobileClawRuntime {
       tools: this.registry.names().length,
       plugins: this.pluginStatus(),
       storageAccess,
+      ...(automation
+        ? {
+            automation: await automation.status().catch(() => ({
+              available: false,
+              reason: "the screen backend did not answer",
+            })),
+          }
+        : {}),
     };
   }
 
@@ -372,6 +410,65 @@ export class MobileClawRuntime {
 
   toolNames(): string[] {
     return this.registry.names();
+  }
+
+  /* ------------------------------------------------------- screen probing */
+
+  /**
+   * Installed apps, for the screen-probing picker.
+   *
+   * An empty list rather than an exception when the platform cannot enumerate them: the
+   * picker's job is to show what is there, and "no native module" is a state the screen
+   * renders as an explanation.
+   */
+  async listInstalledApps(): Promise<{ packageId: string; label: string }[]> {
+    if (!this.deps.system.listApps) return [];
+    try {
+      return await this.deps.system.listApps();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Probe the given apps for a readable accessibility tree, and cache the verdicts.
+   *
+   * On the runtime because it is orchestration rather than a capability: it needs the
+   * platform services *and* the persistent store, and it is driven by a person ticking
+   * boxes rather than by the model. The logic being orchestrated lives in
+   * `@mobileclaw/capabilities`, where it is unit-tested without a device.
+   */
+  async probeScreens(
+    packageIds: string[],
+    options: { cachedOnly?: boolean; settleMs?: number } = {},
+    hooks: ScreenProbeHooks = {},
+  ): Promise<ScreenProbeReport> {
+    const apps = await this.listInstalledApps();
+    const labels = new Map(apps.map((app) => [app.packageId, app.label]));
+    return runScreenProbe(
+      { system: this.deps.system, cache: createProbeCache(this.deps.kv) },
+      packageIds.map((packageId) => {
+        const label = labels.get(packageId);
+        return label === undefined ? { packageId } : { packageId, label };
+      }),
+      {
+        ...(options.cachedOnly !== undefined ? { cachedOnly: options.cachedOnly } : {}),
+        ...(options.settleMs !== undefined ? { settleMs: options.settleMs } : {}),
+      },
+      hooks,
+    );
+  }
+
+  /** What the probe cache currently holds, without probing anything. */
+  async probeInventory(): Promise<ScreenProbeRecord[]> {
+    return readCache(createProbeCache(this.deps.kv));
+  }
+
+  /** Forget one app's verdict so the next probe looks again. */
+  async forgetProbe(packageId: string): Promise<void> {
+    const cache = createProbeCache(this.deps.kv);
+    const kept = (await readCache(cache)).filter((record) => record.packageId !== packageId);
+    await cache.write(kept);
   }
 
   pluginStatus(): { name: string; status: string; tools: number; error?: string }[] {

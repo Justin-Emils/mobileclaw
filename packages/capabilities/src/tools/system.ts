@@ -15,7 +15,18 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
       url: z.string().optional().describe("URL to open."),
       packageId: z.string().optional().describe("Android package id, e.g. com.android.calendar."),
     }),
-    risk: "system",
+    /**
+     * Bringing an app to the front changes nothing on the device, so it is not asked.
+     *
+     * This used to be `system`, which made every cross-app task open with a prompt for the
+     * most innocuous step in it — "open the app I am about to look at". That trains the
+     * user to tap through prompts, which is precisely what makes the prompts that *do*
+     * matter (typing into a field, pressing send) stop working. Opening is navigation;
+     * the injection is the action, and `screen_type`/`screen_tap_element` still ask every
+     * single time.
+     */
+    risk: "read",
+    category: "system",
     summarize: (input) => input.url ?? input.packageId ?? "open",
     async execute(input: { url?: string; packageId?: string }) {
       if (!input.url && !input.packageId) {
@@ -32,6 +43,7 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
     description: "List installed apps (Android only) so you can pick a package id for system_open.",
     input: z.object({ filter: z.string().optional().describe("Case-insensitive substring filter.") }),
     risk: "read",
+    category: "system",
     async execute(input: { filter?: string }) {
       if (!deps.system.listApps) {
         throw new CoreError("E_TOOL_FAILED", "listing installed apps is not supported on this platform");
@@ -54,6 +66,11 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
       text: z.string().optional().describe("Required when action is set."),
     }),
     risk: "system",
+    category: "system",
+    // The clipboard is the user's own shared surface: reading it is what a paste depends on and
+    // writing it is what a copy does. Neither leaves the device.
+    effects: ["edit"],
+    cost: "cheap",
     summarize: (input) => `clipboard ${input.action}`,
     async execute(input: { action: "get" | "set"; text?: string }) {
       if (input.action === "set") {
@@ -76,6 +93,12 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
       title: z.string().optional(),
     }),
     risk: "system",
+    category: "system",
+    // Hands content to another app through the system chooser: it leaves the app, and the user
+    // is the one who decides where it goes.
+    effects: ["share"],
+    // Asked every time: the share sheet is a real hand-off of the user's data, and which app
+    // receives it is a decision, not a detail.
     alwaysAsk: true,
     summarize: (input) => `share ${input.text.length} chars`,
     async execute(input: { text: string; title?: string }) {
@@ -90,6 +113,9 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
     description: "Post a local notification. Use for long-running work you finished in the background.",
     input: z.object({ title: z.string().min(1), body: z.string().optional() }),
     risk: "system",
+    category: "system",
+    effects: ["edit"],
+    cost: "cheap",
     summarize: (input) => `notify: ${input.title}`,
     async execute(input: { title: string; body?: string }) {
       if (!deps.system.notify) throw new CoreError("E_TOOL_FAILED", "notifications are not supported here");
@@ -111,6 +137,9 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
       durationMinutes: z.number().int().min(5).max(24 * 60).optional().default(60),
     }),
     risk: "system",
+    category: "system",
+    effects: ["edit"],
+    cost: "slow",
     alwaysAsk: true,
     summarize: (input) => `calendar: ${input.title} @ ${input.start}`,
     async execute(input: {

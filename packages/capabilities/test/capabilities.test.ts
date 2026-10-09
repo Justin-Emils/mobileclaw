@@ -244,6 +244,11 @@ describe("Automation tools", () => {
       async currentWindow() {
         return { package: "com.tencent.mm", activity: ".ui.LauncherUI", raw: "mCurrentFocus=…" };
       },
+      // Required by the AutomationService port so that "can act" and "can be read"
+      // stay one capability. The reading tools have their own suite.
+      async readScreen() {
+        return { nodes: [], total: 0 };
+      },
       ...over,
     },
   });
@@ -289,7 +294,7 @@ describe("Automation tools", () => {
     // shares the same `requireScreen` guard, so it must throw too, not park forever.
     const actions: Array<[string, Record<string, unknown>]> = [
       ["screen_capture", {}],
-      ["screen_tap", { target: "search box", x: 10, y: 20 }],
+      ["screen_tap", { target: "search box", x: 0.5, y: 0.05 }],
       ["screen_scroll", { direction: "down" }],
       ["screen_type", { text: "hello" }],
       ["screen_wait", { package: "com.tencent.mm", timeoutMs: 100 }],
@@ -310,7 +315,7 @@ describe("Automation tools", () => {
       },
     });
     await expect(
-      toolNamed(system, "screen_tap").execute({ target: "search box", x: 10, y: 20 } as never, call as never),
+      toolNamed(system, "screen_tap").execute({ target: "search box", x: 0.5, y: 0.05 } as never, call as never),
     ).rejects.toMatchObject({
       code: "E_TOOL_FAILED",
       details: { hint: howTo },
@@ -329,9 +334,17 @@ describe("Automation tools", () => {
       "screen_type",
     ]);
     for (const tool of changing) {
-      expect(tool.neverRemember, tool.name).toBe(true);
+      // `alwaysAsk` is the blanket promise: no allow rule can pre-grant any of these.
       expect(tool.alwaysAsk, tool.name).toBe(true);
     }
+
+    // `neverRemember` is the *stronger* promise, and it belongs only to the tools that write
+    // or capture. `screen_scroll` moves content and declares `mutates: false`, so a read-only
+    // task scope may relax it — while typing must never be relaxable by any scope.
+    const neverRememberable = changing.filter((tool) => tool.neverRemember === true).map((tool) => tool.name);
+    expect(neverRememberable.sort()).toEqual(["screen_capture", "screen_tap", "screen_type"]);
+    expect(changing.find((tool) => tool.name === "screen_scroll")?.mutates).toBe(false);
+    expect(changing.find((tool) => tool.name === "screen_type")?.mutates).not.toBe(false);
   });
 
   it("refuses to tap when nobody chose a point", async () => {
@@ -350,11 +363,13 @@ describe("Automation tools", () => {
       },
     });
     const result = (await toolNamed(system, "screen_tap").execute(
-      { target: "search box", x: 540, y: 120 } as never,
+      { target: "search box", x: 0.5, y: 0.05 } as never,
       call as never,
     )) as { x: number; evidence: { path: string; width: number } };
 
-    expect(taps).toEqual([[540, 120]]);
+    // The point reaches the service unchanged: the tool passes the fraction through and
+    // the adapter is what resolves it against the display.
+    expect(taps).toEqual([[0.5, 0.05]]);
     expect(result.evidence.path).toBe("file:///w/shot.jpg");
     expect(result.evidence.width).toBe(720);
   });
@@ -368,7 +383,7 @@ describe("Automation tools", () => {
       },
     });
     const result = (await toolNamed(system, "screen_tap").execute(
-      { target: "OK", x: 1, y: 2 } as never,
+      { target: "OK", x: 0.5, y: 0.9 } as never,
       call as never,
     )) as { evidenceNote: string };
 
@@ -386,7 +401,7 @@ describe("Automation tools", () => {
       },
     });
     const result = (await toolNamed(system, "screen_tap").execute(
-      { target: "OK", x: 5, y: 6 } as never,
+      { target: "OK", x: 0.2, y: 0.8 } as never,
       call as never,
     )) as { evidence: { note?: string } };
 
@@ -525,6 +540,107 @@ describe("Automation tools", () => {
     expect(summary("screen_scroll", { direction: "down" })).toBe("scroll down");
     expect(summary("screen_tap", { target: "search box" })).toBe("tap search box");
     expect(summary("screen_type", { text: "hunter2" })).toBe("type 7 characters");
+  });
+
+  /**
+   * Write-then-verify.
+   *
+   * The failure this closes: `screen_type` returned `{ok}` from the keystroke alone, so the
+   * model's only evidence that the text landed was its own intention. A read-only field, a
+   * rejected paste and a field that lost focus all looked exactly like success — and the
+   * project's rule is that a statement about what happened must come from a fact, not from
+   * having called a function.
+   */
+  it("confirms the typed text really landed when asked to", async () => {
+    const system = screen({
+      async readScreen() {
+        return {
+          nodes: [{ index: 0, text: "search: hello world", className: "EditText", clickable: true }],
+          total: 1,
+        };
+      },
+    });
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello world", expect: "hello world" } as never,
+      call as never,
+    )) as { verified?: boolean; verifyNote?: string; method: string };
+
+    expect(result.verified).toBe(true);
+    expect(result.verifyNote).toMatch(/is on screen/);
+    // The plain report is still there: verification adds to the result, it does not replace it.
+    expect(result.method).toBe("input");
+  });
+
+  it("reports that the text did NOT land, rather than reporting success", async () => {
+    // A field that silently refused the input. This is the case the tool exists for.
+    const system = screen({
+      async readScreen() {
+        return { nodes: [{ index: 0, text: "read-only field", className: "TextView" }], total: 1 };
+      },
+    });
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello world", expect: "hello world" } as never,
+      call as never,
+    )) as { verified?: boolean; verifyNote?: string };
+
+    expect(result.verified).toBe(false);
+    expect(result.verifyNote).toMatch(/was NOT found/);
+    // The instruction has to be unmistakable, because the tempting failure is to describe the
+    // keystroke as if it had worked.
+    expect(result.verifyNote).toMatch(/do not report this as done/);
+  });
+
+  it("passes the backend's own note through when the screen could not be read back", async () => {
+    const blocked = "the window is FLAG_SECURE, so nothing readable was published";
+    const system = screen({
+      async readScreen() {
+        return { nodes: [], total: 0, note: blocked };
+      },
+    });
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello", expect: "hello" } as never,
+      call as never,
+    )) as { verified?: boolean; verifyNote?: string };
+
+    expect(result.verified).toBe(false);
+    expect(result.verifyNote).toBe(blocked);
+  });
+
+  it("says the check could not be made when reading back throws", async () => {
+    const system = screen({
+      async readScreen() {
+        throw new Error("uiautomator timed out");
+      },
+    });
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello", expect: "hello" } as never,
+      call as never,
+    )) as { verified?: boolean; verifyNote?: string };
+
+    expect(result.verified).toBe(false);
+    expect(result.verifyNote).toMatch(/could not read the screen back/);
+    expect(result.verifyNote).toMatch(/timed out/);
+  });
+
+  it("does not read the screen back when nothing was asked to be verified", async () => {
+    // Verification costs a second reading. Making it opt-in keeps the common case one step and
+    // one round trip; making it automatic would tax every keystroke for a check most of them
+    // do not need.
+    let reads = 0;
+    const system = screen({
+      async readScreen() {
+        reads += 1;
+        return { nodes: [], total: 0 };
+      },
+    });
+
+    const result = (await toolNamed(system, "screen_type").execute(
+      { text: "hello" } as never,
+      call as never,
+    )) as { verified?: boolean };
+
+    expect(reads).toBe(0);
+    expect(result.verified).toBeUndefined();
   });
 
   it("reports the foreground app", async () => {

@@ -408,6 +408,13 @@ export default function SettingsScreen() {
             <Text style={styles.buttonGhostText}>{strings.settings.openPermissions}</Text>
           </Pressable>
         </Link>
+        {/* Which apps can be read through the semantic tree is a device fact, not a setting,
+            so it gets a screen of its own rather than a toggle here. */}
+        <Link href="/screen-probe" asChild>
+          <Pressable style={styles.buttonGhost}>
+            <Text style={styles.buttonGhostText}>{strings.probe.title}</Text>
+          </Pressable>
+        </Link>
         <Text style={styles.hint}>
           {strings.settings.capabilitySummary(
             tools.length,

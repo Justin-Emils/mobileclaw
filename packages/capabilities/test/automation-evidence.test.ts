@@ -52,6 +52,11 @@ function screenSystem(over: Partial<AutomationService> = {}): SystemService {
       async currentWindow() {
         return { package: "com.tencent.mm", raw: "" };
       },
+      // A backend that can act can also be read; the reading tools are exercised in
+      // screen-read.test.ts, so this only has to satisfy the port.
+      async readScreen() {
+        return { nodes: [], total: 0 };
+      },
       ...over,
     },
   };
@@ -95,7 +100,7 @@ describe("screen evidence reaches the transcript", () => {
   it("also carries the evidence an action tool took afterwards", async () => {
     // The other half of the picture: screen_tap captures after acting, so the user sees
     // the result of the press, not just that a press happened.
-    const entry = await runTool("screen_tap", { target: "search box", x: 10, y: 20 }, screenSystem());
+    const entry = await runTool("screen_tap", { target: "search box", x: 0.5, y: 0.05 }, screenSystem());
 
     expect(entry?.status).toBe("ok");
     expect(entry?.evidence).toEqual(CAPTURE);
@@ -120,7 +125,7 @@ describe("screen evidence reaches the transcript", () => {
       },
     });
 
-    const entry = await runTool("screen_tap", { target: "confirm", x: 1, y: 2 }, system);
+    const entry = await runTool("screen_tap", { target: "confirm", x: 0.5, y: 0.9 }, system);
 
     // The press did happen — `tap()` was called and returned — so the entry is a
     // success. What the user loses is the picture, and that has to be said out loud.

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PermissionGate, type PermissionRequest } from "@mobileclaw/core";
+import type { AnyToolDefinition } from "@mobileclaw/core";
 
 const request = (over: Partial<PermissionRequest> = {}): PermissionRequest => ({
   tool: "fs_read",
@@ -7,6 +8,137 @@ const request = (over: Partial<PermissionRequest> = {}): PermissionRequest => ({
   input: { path: "/sdcard/Download/a.txt" },
   paths: ["/sdcard/Download/a.txt"],
   ...over,
+});
+
+/**
+ * A tool definition carrying only what the gate reads.
+ *
+ * Built by hand rather than importing a real tool: these tests are about the gate's rules,
+ * and dragging a real capability in would make a failure here look like a failure there.
+ */
+function definitionOf(over: Partial<AnyToolDefinition> = {}): AnyToolDefinition {
+  return {
+    name: "screen_scroll",
+    description: "test",
+    input: undefined as never,
+    risk: "system",
+    async execute() {
+      return {};
+    },
+    ...over,
+  };
+}
+
+/**
+ * The read-only task scope.
+ *
+ * The point of these is not that the scope relaxes prompts — it is that it relaxes **nothing
+ * else**. A permission relaxation is the easiest place in this codebase to lose the property
+ * that a user's refusal cannot be undone by configuration, so each guarantee is pinned
+ * separately: deny rules still win, `neverRemember` still wins, a mutating tool is unaffected,
+ * a different conversation is unaffected, and the scope ends when the run does.
+ */
+describe("PermissionGate read-only task scope", () => {
+  const conversation = "conv_1";
+  const readOnly = (over: Partial<PermissionRequest> = {}) =>
+    request({
+      tool: "screen_scroll",
+      risk: "system",
+      conversationId: conversation,
+      definition: definitionOf({ alwaysAsk: true, mutates: false }),
+      ...over,
+    });
+
+  it("stops asking for a non-mutating action once the task is confirmed read-only", () => {
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    // Before the confirmation there is no scope, so the ordinary rules apply.
+    expect(gate.evaluate(readOnly()).allowed).toBe(false);
+
+    gate.beginReadOnlyTask(conversation);
+    const verdict = gate.evaluate(readOnly());
+    expect(verdict.allowed).toBe(true);
+    // The reason names the scope and the grounds, so the transcript explains why nothing was
+    // asked. Both halves matter: "the user confirmed" (who allowed it) and "changes nothing"
+    // (why this action qualified).
+    expect(verdict.reason).toMatch(/task scope/);
+    expect(verdict.reason).toMatch(/only reads/);
+    expect(verdict.reason).toMatch(/changes nothing/);
+  });
+
+  it("does not relax a tool that changes something", () => {
+    // Typing writes into another app's field. A read-only task must not be able to authorise
+    // it, whatever the user confirmed.
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    const verdict = gate.evaluate(
+      readOnly({ tool: "screen_type", definition: definitionOf({ name: "screen_type", alwaysAsk: true }) }),
+    );
+    expect(verdict.allowed).toBe(false);
+  });
+
+  it("treats a tool that says nothing as mutating", () => {
+    // The safe default for something reaching outside the app is the cautious one.
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    expect(gate.evaluate(readOnly({ definition: definitionOf({ alwaysAsk: true }) })).allowed).toBe(false);
+  });
+
+  it("still honours neverRemember inside the scope", () => {
+    // The stronger promise wins: a tool that promised to ask every time keeps asking, so a
+    // scope can never erase it.
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    const verdict = gate.evaluate(
+      readOnly({ definition: definitionOf({ alwaysAsk: true, neverRemember: true, mutates: false }) }),
+    );
+    expect(verdict.allowed).toBe(false);
+  });
+
+  it("still honours a deny rule inside the scope", () => {
+    const gate = new PermissionGate({
+      defaultMode: "ask",
+      rules: [{ tool: "screen_scroll", decision: "deny" }],
+    });
+    gate.beginReadOnlyTask(conversation);
+    const verdict = gate.evaluate(readOnly());
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toMatch(/denied by rule/);
+  });
+
+  it("does not cover a different conversation", () => {
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    expect(gate.evaluate(readOnly({ conversationId: "conv_2" })).allowed).toBe(false);
+  });
+
+  it("does not cover a call that names no conversation", () => {
+    // The scope belongs to a task the user saw. An anonymous call has no task to belong to.
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    expect(gate.evaluate(readOnly({ conversationId: undefined })).allowed).toBe(false);
+  });
+
+  it("ends when the run ends, so the next task starts from scratch", () => {
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    expect(gate.evaluate(readOnly()).allowed).toBe(true);
+
+    gate.endReadOnlyTask();
+    expect(gate.evaluate(readOnly()).allowed).toBe(false);
+  });
+
+  it("is replaced, not accumulated, by a second confirmation", () => {
+    const gate = new PermissionGate({ defaultMode: "ask" });
+    gate.beginReadOnlyTask(conversation);
+    gate.beginReadOnlyTask("conv_2");
+    expect(gate.evaluate(readOnly()).allowed).toBe(false);
+    expect(gate.evaluate(readOnly({ conversationId: "conv_2" })).allowed).toBe(true);
+  });
+
+  it("leaves an ordinary allow auto-allowed with no scope at all", () => {
+    const gate = new PermissionGate({ defaultMode: "ask", riskModes: { read: "allow" } });
+    expect(gate.evaluate(request({ tool: "screen_read", risk: "read" })).allowed).toBe(true);
+  });
 });
 
 describe("PermissionGate", () => {

@@ -24,6 +24,10 @@ export function createShellTools(deps: Pick<BundleDeps, "shell">): AnyToolDefini
       timeoutMs: z.number().int().min(1000).max(600000).optional().default(60000),
     }),
     risk: "execute",
+    category: "shell",
+    effects: ["process"],
+    requires: ["shell"],
+    cost: "slow",
     alwaysAsk: true,
     paths: (input) => (input.cwd ? [input.cwd] : []),
     summarize: (input) => input.command.slice(0, 120),
@@ -53,6 +57,9 @@ export function createShellTools(deps: Pick<BundleDeps, "shell">): AnyToolDefini
     description: "Report which shell backends are available on this device and why the others are not.",
     input: z.object({}),
     risk: "read",
+    category: "shell",
+    effects: [],
+    requires: ["shell"],
     async execute() {
       const available = await deps.shell.available();
       return {

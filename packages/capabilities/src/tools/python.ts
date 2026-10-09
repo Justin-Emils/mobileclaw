@@ -43,6 +43,10 @@ export function createPythonTools(deps: PythonToolDeps): AnyToolDefinition[] {
       timeoutMs: z.number().int().min(1000).max(600000).optional().default(120000),
     }),
     risk: "execute",
+    category: "python",
+    effects: ["process"],
+    requires: ["python", "shell"],
+    cost: "slow",
     alwaysAsk: true,
     paths: (input) => (input.cwd ? [input.cwd] : []),
     summarize: (input) => `python: ${input.code.split("\n")[0]?.slice(0, 100) ?? ""}`,
@@ -85,6 +89,10 @@ export function createPythonTools(deps: PythonToolDeps): AnyToolDefinition[] {
       timeoutMs: z.number().int().min(1000).max(900000).optional().default(300000),
     }),
     risk: "execute",
+    category: "python",
+    effects: ["process"],
+    requires: ["python", "shell"],
+    cost: "slow",
     alwaysAsk: true,
     paths: (input) => [input.path, ...(input.cwd ? [input.cwd] : [])],
     summarize: (input) => `python ${input.path}`,
@@ -117,6 +125,10 @@ export function createPythonTools(deps: PythonToolDeps): AnyToolDefinition[] {
     description: "Check whether a Python runtime is available and which one.",
     input: z.object({}),
     risk: "read",
+    category: "python",
+    effects: [],
+    requires: ["python", "shell"],
+    cost: "slow",
     async execute() {
       const shellReady = await deps.shell.available();
       if (!shellReady) {

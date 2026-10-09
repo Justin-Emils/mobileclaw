@@ -25,6 +25,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       limit: z.number().int().min(1).max(2000).optional().default(200),
     }),
     risk: "read",
+    category: "files",
     paths: (input: { path?: string }) => (input.path ? [input.path] : []),
     summarize: (input: { path?: string }) => (input.path ? `list ${input.path}` : "list allowed roots"),
     async execute(input: { path?: string; limit: number }) {
@@ -125,6 +126,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       limit: z.number().int().min(1).max(5000).optional().describe("Maximum lines to return."),
     }),
     risk: "read",
+    category: "files",
     paths: (input: { path: string }) => [input.path],
     summarize: (input: { path: string }) => `read ${input.path}`,
     async execute(input: { path: string; offset?: number; limit?: number }) {
@@ -154,6 +156,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       content: z.string().describe("Full file content."),
     }),
     risk: "write",
+    category: "files",
     paths: (input: { path: string }) => [input.path],
     summarize: (input: { path: string; content: string }) =>
       `write ${input.path} (${input.content.length} chars)`,
@@ -174,6 +177,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       replaceAll: z.boolean().optional().default(false),
     }),
     risk: "write",
+    category: "files",
     paths: (input: { path: string }) => [input.path],
     summarize: (input: { path: string }) => `edit ${input.path}`,
     async execute(input: { path: string; old: string; new: string; replaceAll: boolean }) {
@@ -210,6 +214,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
       ignoreCase: z.boolean().optional().default(false),
     }),
     risk: "read",
+    category: "files",
     paths: (input: { path?: string }) => (input.path ? [input.path] : []),
     summarize: (input: { glob?: string; content?: string }) =>
       [input.glob ? `glob ${input.glob}` : "", input.content ? `grep /${input.content}/` : ""]
@@ -299,6 +304,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
     description: "Stat one or more paths: existence, size, type, modification time.",
     input: z.object({ paths: z.array(pathArg).min(1).max(100) }),
     risk: "read",
+    category: "files",
     paths: (input: { paths: string[] }) => input.paths,
     summarize: (input: { paths: string[] }) => `stat ${input.paths.length} path(s)`,
     async execute(input: { paths: string[] }) {
@@ -339,6 +345,7 @@ export function createFilesystemTools(deps: FsToolDeps): AnyToolDefinition[] {
         .describe("Validate and report without touching the disk."),
     }),
     risk: "write" as const,
+    category: "files",
     alwaysAsk: true,
     paths: (input: { from: string; to?: string }) => (input.to ? [input.from, input.to] : [input.from]),
     summarize: (input: { op: string; from: string; to?: string; dryRun: boolean }) =>

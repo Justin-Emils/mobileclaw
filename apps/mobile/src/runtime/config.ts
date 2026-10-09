@@ -21,6 +21,14 @@ export interface AppConfig {
   roots: string[];
   useMockProvider: boolean;
   systemPrompt?: string;
+  /**
+   * Base URL of a self-hosted SearXNG instance, when the user has one.
+   *
+   * Empty means "use the built-in backend". Empty is not "no search": the fallback needs
+   * no configuration at all, so this field is a *preference*, and the transcript records
+   * which backend actually answered rather than assuming.
+   */
+  searxngBaseUrl?: string;
 }
 
 export const DEFAULT_PRESETS: ProviderPreset[] = [
@@ -71,8 +79,16 @@ export interface ProviderPreset {
 }
 
 /**
- * Permission defaults chosen for a phone agent: reading is frictionless, anything
- * that writes, executes or leaves the device prompts.
+ * Permission defaults chosen for a phone agent: reading is frictionless, anything that
+ * writes, executes or leaves the device prompts.
+ *
+ * `system` is deliberately **not** in `alwaysAskRisks`. It used to be, which forced a
+ * prompt for `system_open` — bringing an app to the front, the most innocuous step of any
+ * cross-app task. Prompting for navigation is what teaches a user to tap through prompts,
+ * and that is the state in which the prompts that matter stop being read. The tools that
+ * inject input (`screen_type`, `screen_tap_element`, `screen_find` with a tap,
+ * `system_share`) ask every single time on their own account, via `alwaysAsk` plus
+ * `neverRemember`, so they do not depend on this list.
  */
 export const DEFAULT_PERMISSIONS: PermissionConfig = {
   defaultMode: "ask",
@@ -88,7 +104,7 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
     // already forces a prompt (alwaysAsk), this is belt and braces.
     { tool: "shizuku_run", decision: "deny" },
   ],
-  alwaysAskRisks: ["execute", "system"],
+  alwaysAskRisks: ["execute"],
 };
 
 export const DEFAULT_CONFIG: AppConfig = {

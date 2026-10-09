@@ -91,6 +91,36 @@ const failingTool = {
   },
 };
 
+/**
+ * The plan-confirmation tool, by the name the loop watches for.
+ *
+ * The literal is used rather than importing the constant: this test exists to pin the loop's
+ * behaviour *for that name*, so asserting against the same constant the loop reads would let a
+ * rename break the feature while the test stayed green.
+ */
+const planTool = {
+  name: "confirm_plan",
+  description: "restate the task and wait for confirmation",
+  input: z.object({
+    restatement: z.string(),
+    steps: z.array(z.string()),
+    changes: z.array(z.string()).optional(),
+    stepEstimate: z.number().int().optional(),
+  }),
+  risk: "read" as const,
+  alwaysAsk: true,
+  neverRemember: true,
+  // Mirrors the real tool: the agent loop reads `stepEstimate` out of the *approved* input,
+  // so one that did not survive to `execute` would never reach the budget.
+  async execute(input: { restatement: string; stepEstimate?: number }) {
+    return {
+      confirmed: true,
+      restatement: input.restatement,
+      ...(input.stepEstimate !== undefined ? { stepEstimate: input.stepEstimate } : {}),
+    };
+  },
+};
+
 function buildAgent(options: {
   turns: ConstructorParameters<typeof MockProvider>[0]["turns"];
   permissions?: ConstructorParameters<typeof PermissionGate>[0];
@@ -582,6 +612,93 @@ describe("Agent", () => {
     // Every assistant tool call must be answered, or the next request is invalid.
     const toolMessages = conversation?.messages.filter((message) => message.role === "tool") ?? [];
     expect(toolMessages).toHaveLength(3);
+  });
+
+  /**
+   * The budget a confirmed plan asks for.
+   *
+   * The reason this exists: the configured step limit is a number chosen before anything is
+   * known about the task, so it is wrong for exactly the tasks that need it most — "read a
+   * list and look each item up" cannot run in twelve steps, and nothing in the loop could
+   * previously change that. A plan that declares its own cost is the one honest way to raise
+   * it, because raising it passes through an approval the user can refuse.
+   */
+  it("raises the step budget to what the confirmed plan asked for", async () => {
+    // Four reads and an answer: six steps, against a configured limit of three. Without the
+    // raise this run would have been cut off after the third read.
+    const { agent } = buildAgent({
+      turns: [
+        { toolCalls: [{ id: "p1", name: "confirm_plan", input: { restatement: "read four files", steps: ["read one"], stepEstimate: 10 } }] },
+        { toolCalls: [{ id: "c1", name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        { toolCalls: [{ id: "c2", name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        { toolCalls: [{ id: "c3", name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        { toolCalls: [{ id: "c4", name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+        "done",
+      ],
+      tools: [planTool, readTool],
+      permissions: { defaultMode: "allow" },
+      approval: async () => ({ approved: true }),
+      maxSteps: 3,
+    });
+    files.set("/sdcard/Download/notes.txt", "hello");
+
+    const events: string[] = [];
+    const result = await agent.run({
+      input: "read four files",
+      onEvent: (event) => events.push(event.type),
+    });
+
+    // The run finished rather than being truncated.
+    expect(result.stopReason).toBe("completed");
+    expect(result.toolCalls).toBe(5);
+    // Announced, so a settings screen promising three steps cannot quietly preside over ten.
+    expect(events).toContain("budget");
+  });
+
+  it("does not raise the budget when no plan was confirmed", async () => {
+    // The default path must be untouched: an unlimited run by omission would be worse than a
+    // low default, because nothing would warn the user.
+    const looping = new MockProvider({
+      turns: [{ toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] }],
+      repeatLast: true,
+    });
+    files.set("/sdcard/Download/notes.txt", "loop");
+    const agent = new Agent({
+      provider: looping,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+      maxSteps: 3,
+    });
+
+    const result = await run(agent, "keep reading");
+    expect(result.stopReason).toBe("step_limit");
+    expect(result.steps).toBe(3);
+  });
+
+  it("ignores a plan that asks for an absurd number of steps", async () => {
+    // An estimate is a model's guess. An unbounded one would spend real money unattended, so
+    // it is clamped — and the clamp is a ceiling on the run, not a promise to use it.
+    const looping = new MockProvider({
+      turns: [
+        { toolCalls: [{ id: "p1", name: "confirm_plan", input: { restatement: "anything", steps: ["go"], stepEstimate: 100000 } }] },
+        { toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] },
+      ],
+      repeatLast: true,
+    });
+    files.set("/sdcard/Download/notes.txt", "loop");
+    const agent = new Agent({
+      provider: looping,
+      registry: new ToolRegistry().registerAll([planTool, readTool]),
+      permissions: new PermissionGate({ defaultMode: "allow" }, async () => ({ approved: true })),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+      maxSteps: 2,
+    });
+
+    const result = await run(agent, "go");
+    // Clamped to the ceiling rather than honoured: 100000 must not become the loop's bound.
+    expect(result.stopReason).toBe("step_limit");
+    expect(result.steps).toBeLessThanOrEqual(61);
   });
 
   it("reports provider failures without losing the conversation", async () => {
