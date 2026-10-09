@@ -26,11 +26,20 @@ interface IMobileClawShizukuUserService {
      */
     String screenshot(int maxWidth, int quality);
 
-    /**
-     * Shizuku calls this when the service is being torn down. The process does NOT
-     * exit on its own after `unbindUserService`, so without this every reconnect
-     * leaks a shell process. Shizuku's docs give the transaction code as 16777115
-     * and say to declare 16777114 here; the implementation accepts either.
+    /*
+     * Shizuku's teardown call is deliberately NOT declared here.
+     *
+     * AIDL requires every method to carry an explicit id or none of them, and Shizuku wants a
+     * reserved transaction code rather than the next sequential one, so `void destroy() =
+     * 16777114;` cannot sit beside the two methods above:
+     *
+     *   ERROR: ...IMobileClawShizukuUserService.aidl:35.9-17:
+     *          You must either assign id's to all methods or to none of them.
+     *
+     * This file was written on a machine with no Android toolchain and had never been
+     * compiled, so the error appeared only when a full build first ran. The Kotlin side already
+     * handles the call in `onTransact`, accepting both 16777114 and 16777115 because Shizuku's
+     * documentation and its declared constant disagree -- see MobileClawShizukuUserService.kt.
+     * Declaring it here would be dead weight even if AIDL accepted the mix.
      */
-    void destroy() = 16777114;
 }

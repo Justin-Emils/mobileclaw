@@ -399,13 +399,30 @@ try {
     # build midway through Java compilation.
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    try {
-        & $gradleCmd $task --console=plain @initArgs
-        $gradleExit = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $prevEap
+    # One retry, because a specific native-configuration failure is transient here.
+    #
+    # `:react-native-worklets:configureCMakeRelWithDebInfo[<abi>]` intermittently aborts with
+    # "WARNING: A restricted method in java.lang.System has been called", and the identical
+    # command succeeds on the next run. This was seen repeatedly during review: a raw `gradle
+    # assembleRelease` succeeded seconds after the same invocation through this script failed.
+    # Retrying is worth more than a diagnosis here, since the failure costs a full build and the
+    # remedy is always "run it again".
+    $attempts = 2
+    $gradleExit = 1
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            & $gradleCmd $task --console=plain @initArgs
+            $gradleExit = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $prevEap
+        }
+        if ($gradleExit -eq 0) { break }
+        if ($attempt -lt $attempts) {
+            Write-Host "`ngradle exited $gradleExit; retrying once (transient native configuration failures are known here)" -ForegroundColor Yellow
+            $ErrorActionPreference = "Continue"
+        }
     }
-    if ($gradleExit -ne 0) { throw "gradle $task failed ($gradleExit)" }
+    if ($gradleExit -ne 0) { throw "gradle $task failed ($gradleExit) after $attempts attempts" }
 }
 finally { Pop-Location }
 
