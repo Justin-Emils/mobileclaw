@@ -22,9 +22,20 @@ import {
 } from "./services/expo-file-system";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
 import { createNativeDriver, listInstalledApps, loadNativeFiles } from "./services/native-files";
+import {
+  createAutomationService,
+  createPrivilegedService,
+  loadNativeShizuku,
+} from "./services/native-shizuku";
 import { MobileClawRuntime } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
-import type { FileSystemService } from "@mobileclaw/core";
+import type {
+  AutomationService,
+  FileSystemService,
+  PrivilegedService,
+  ShellResult,
+  ShellService,
+} from "@mobileclaw/core";
 
 const CONFIG_KEY = "mobileclaw.config";
 
@@ -139,14 +150,30 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     `[mobileclaw] file driver = ${nativeFiles ? "native (MobileClawFiles)" : "expo-file-system"}`,
   );
 
+  // --- privileged execution and screen automation ---------------------------
+  // Shizuku lends shell identity (uid 2000) without root, which is what makes screen
+  // capture and input injection reachable from an ordinary app. Without it both stay
+  // undefined, and the tools say so with instructions rather than failing obscurely.
+  const nativeShizuku = loadNativeShizuku();
+  const privileged = nativeShizuku ? createPrivilegedService(nativeShizuku) : undefined;
+  const automation = nativeShizuku ? createAutomationService(nativeShizuku) : undefined;
+  console.log(
+    `[mobileclaw] privileged backend = ${nativeShizuku ? "shizuku (MobileClawShizuku)" : "none"}`,
+  );
+
   // --- shell backends ------------------------------------------------------
-  const shell = await pickShellBackend();
+  const shell = await pickShellBackend(privileged);
 
   // --- HTTP ----------------------------------------------------------------
   const http = new ExpoHttpService();
 
   // --- system automation ---------------------------------------------------
-  const system = new ExpoSystemService(createSystemPorts());
+  const system = new ExpoSystemService(
+    createSystemPorts({
+      ...(privileged ? { privileged } : {}),
+      ...(automation ? { automation } : {}),
+    }),
+  );
 
   // --- runtime -------------------------------------------------------------
   const runtime = new MobileClawRuntime({
@@ -189,16 +216,13 @@ function sharedRoots(): string[] {
  *   2. Termux RUN_COMMAND       — cheapest real shell, needs user configuration
  *   3. none                     — a memory backend that explains itself
  */
-async function pickShellBackend() {
-  try {
-    // The native module is optional; a build without it simply skips this branch.
-    const native = await importOptionalNativeModule();
-    if (native?.isShizukuAvailable) {
-      const available = await native.isShizukuAvailable();
-      if (available) return new NativeBridgeShell(native);
+async function pickShellBackend(privileged?: PrivilegedService): Promise<ShellService> {
+  if (privileged) {
+    try {
+      if (await privileged.isAvailable()) return new NativeBridgeShell(privileged);
+    } catch {
+      // Fall through to Termux.
     }
-  } catch {
-    // Fall through to Termux.
   }
 
   const termuxInstalled = await isTermuxInstalled();
@@ -221,64 +245,28 @@ async function isTermuxInstalled(): Promise<boolean> {
   }
 }
 
-export interface MobileClawNativeModule {
-  isShizukuAvailable(): Promise<boolean>;
-  requestShizukuPermission(): Promise<boolean>;
-  runPrivileged(command: string, timeoutMs: number): Promise<{
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-  }>;
-  listApps?(): Promise<{ packageId: string; label: string }[]>;
-  hasAllFilesAccess?(): Promise<boolean>;
-  requestAllFilesAccess?(): Promise<void>;
-}
-
 /**
- * Placeholder for the local Expo module (`modules/mobileclaw-native`).
- *
- * The module is not part of this skeleton because it needs a device build to be
- * meaningful (see docs/android-capabilities.md). Returning undefined keeps every
- * caller honest: no code path pretends privileged execution exists.
+ * Shell backend over the privileged service, which runs with Shizuku's shell
+ * identity (uid 2000) rather than this app's own.
  */
-async function importOptionalNativeModule(): Promise<MobileClawNativeModule | undefined> {
-  try {
-    const moduleName = "mobileclaw-native";
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const mod = await import(/* @vite-ignore */ moduleName).catch(() => undefined);
-    return (mod as { default?: MobileClawNativeModule } | undefined)?.default;
-  } catch {
-    return undefined;
-  }
-}
-
-/** Shell backend over the native module (Shizuku UserService). */
 class NativeBridgeShell {
   readonly kind = "shizuku";
-  constructor(private readonly native: MobileClawNativeModule) {}
+  constructor(private readonly privileged: PrivilegedService) {}
 
   async available(): Promise<boolean> {
     try {
-      return await this.native.isShizukuAvailable();
+      return await this.privileged.isAvailable();
     } catch {
       return false;
     }
   }
 
   async reason(): Promise<string> {
-    return "Shizuku is not running: start the Shizuku app and grant MobileClaw permission";
+    return "Shizuku is not running: open the Shizuku app to start the service, then grant MobileClaw permission again";
   }
 
-  async run(command: string, options: { timeoutMs?: number } = {}) {
-    const started = Date.now();
-    const result = await this.native.runPrivileged(command, options.timeoutMs ?? 60_000);
-    return {
-      command,
-      exitCode: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      durationMs: Date.now() - started,
-    };
+  async run(command: string, options: { timeoutMs?: number } = {}): Promise<ShellResult> {
+    return this.privileged.run(command, { timeoutMs: options.timeoutMs ?? 60_000 });
   }
 }
 
@@ -314,7 +302,7 @@ class TermuxShellService {
  *      `com.termux/com.termux.app.RunCommandService`, with a `PendingIntent` for
  *      the result bundle. Needs `com.termux.permission.RUN_COMMAND` granted AND
  *      `allow-external-apps=true` in `~/.termux/termux.properties`.
- *   2. `MobileClawNativeModule.runPrivileged` → a Shizuku **UserService** (your
+ *   2. `NativeShizukuModule.runPrivileged` → a Shizuku **UserService** (your
  *      own AIDL `Stub`) because `Shizuku.newProcess` is deprecated as of 13.1.1.
  *      Never bind Shizuku on the main thread, and expect the binder to die on
  *      every reboot.
@@ -324,7 +312,9 @@ class TermuxShellService {
  *      runtime dialog for all-files access).
  */
 
-function createSystemPorts(): ExpoSystemPorts {
+function createSystemPorts(
+  extra: { privileged?: PrivilegedService; automation?: AutomationService } = {},
+): ExpoSystemPorts {
   const ports: ExpoSystemPorts = {
     async openUrl(url) {
       await Linking.openURL(url);
@@ -391,6 +381,12 @@ function createSystemPorts(): ExpoSystemPorts {
     });
     return { id };
   };
+
+  // Present only when the native module registered. Every consumer treats them as
+  // optional and reports what is missing, so a build without Shizuku is not broken —
+  // it just cannot see or touch the screen.
+  if (extra.privileged) ports.privileged = extra.privileged;
+  if (extra.automation) ports.automation = extra.automation;
 
   return ports;
 }

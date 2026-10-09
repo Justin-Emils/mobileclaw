@@ -37,7 +37,7 @@ export interface PermissionRequest {
    */
   reason?: string;
   conversationId?: string;
-  /** The full definition, when available (enables `alwaysAsk`). */
+  /** The full definition, when available (enables `alwaysAsk` and `neverRemember`). */
   definition?: ToolDefinition;
 }
 
@@ -49,11 +49,19 @@ export interface PermissionDecision {
   approved?: boolean;
   /** True when the user asked to stop being asked about this tool. */
   remember?: boolean;
+  /**
+   * Argument the user supplied while approving, merged over the model's input.
+   *
+   * Approval is the only moment a human is in the loop, and restricting it to
+   * yes/no would rule out the one case that needs more: a point the user picked
+   * on a screenshot is the *source* of a coordinate the model cannot know.
+   */
+  input?: unknown;
 }
 
 export type ApprovalHandler = (
   request: PermissionRequest,
-) => Promise<{ approved: boolean; remember?: boolean }>;
+) => Promise<{ approved: boolean; remember?: boolean; input?: unknown }>;
 
 export const permissionConfigSchema = z.object({
   defaultMode: z.enum(["allow", "ask", "deny"]).default("ask"),
@@ -84,9 +92,11 @@ export const permissionConfigSchema = z.object({
  * The single place where "may this capability run?" is answered.
  *
  * Order of evaluation:
- *   1. explicit allowlist (user said "always allow this tool")
- *   2. deny rules, then allow rules
- *   3. alwaysAskRisks, then riskModes, then defaultMode
+ *   1. explicit allowlist (user said "always allow this tool") — skipped entirely
+ *      for a tool declaring `neverRemember`
+ *   2. deny rules; then a `neverRemember` tool stops here, always prompting
+ *   3. allow rules
+ *   4. `alwaysAsk`, then `alwaysAskRisks`, then `riskModes`, then `defaultMode`
  *
  * `evaluate` never blocks; `authorize` may, by calling the host's approval
  * callback (in the app: a modal; in tests: a stub).
@@ -173,7 +183,9 @@ export class PermissionGate {
 
   /** Pure verdict; no user interaction. */
   evaluate(request: PermissionRequest): PermissionDecision {
-    if (this.isAllowed(request.tool, request.conversationId)) {
+    // A `neverRemember` tool is exempt from the allowlist before it is even consulted,
+    // so a grant saved by an older version cannot survive into the stricter regime.
+    if (!request.definition?.neverRemember && this.isAllowed(request.tool, request.conversationId)) {
       return {
         allowed: true,
         reason: request.conversationId ? "allowlisted for this conversation" : "allowlisted",
@@ -188,6 +200,12 @@ export class PermissionGate {
         continue;
       }
       return { allowed: false, reason: `denied by rule for "${rule.tool}"` };
+    }
+
+    // Placed after the deny rules so a hard denial still wins, and before the allow
+    // rules so neither an allow rule nor a seeded conversation allowlist can grant it.
+    if (request.definition?.neverRemember) {
+      return { allowed: false, reason: "tool requires explicit confirmation for every action" };
     }
 
     for (const rule of this.config.rules ?? []) {
@@ -228,18 +246,24 @@ export class PermissionGate {
         reason: verdict.reason,
       });
     }
-    const { approved, remember } = await this.approval(request);
+    const { approved, remember, input } = await this.approval(request);
     if (!approved) {
       return { allowed: false, reason: `user declined "${request.tool}"`, approved: false };
     }
+    // A `neverRemember` tool throws the user's "stop asking" away: the button may not
+    // even be shown, but a broker or a test could still ask for it, so the promise is
+    // kept here rather than in the UI. `agent.ts` only persists `remember`, so
+    // dropping it is enough to keep it out of the conversation.
+    const rememberable = remember === true && !request.definition?.neverRemember;
     // Recorded in this conversation only; the caller persists it onto the
     // conversation so the next run can seed the gate from there.
-    if (remember) this.allowForSession(request.tool, request.conversationId);
+    if (rememberable) this.allowForSession(request.tool, request.conversationId);
     return {
       allowed: true,
       reason: `user approved "${request.tool}"`,
       approved: true,
-      ...(remember ? { remember: true } : {}),
+      ...(rememberable ? { remember: true } : {}),
+      ...(input !== undefined ? { input } : {}),
     };
   }
 }

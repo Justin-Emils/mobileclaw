@@ -1,6 +1,19 @@
 # eng/ — repository automation
 
-Two scripts, one shared implementation of "commit and push this repo".
+Two scripts, one shared implementation of "commit and push this repo". The Android build toolchain
+lives here too — see below.
+
+## Android toolchain
+
+| Script | What it does |
+| --- | --- |
+| `toolchain.cjs` | Resolves the JDK / Android SDK / Gradle home: explicit `-Jdk`/`-Sdk`/`-GradleHome` → environment variables → a git-ignored `<repo>/.toolchain/` → the platform's usual locations. `node eng/toolchain.cjs print` shows the result. |
+| `toolchain-versions.cjs` | The single source for the component versions (JDK 21, the `sdkmanager` package list, CMake 3.30.5, ninja ≥ 1.12.1, Gradle 9.3.1). |
+| `setup-toolchain.ps1` | Installs a JDK and the Android SDK into `<repo>/.toolchain/`; `-DryRun` prints the plan, `-FixNinja` also replaces the SDK's bundled ninja. |
+| `build-local.ps1` | Builds the APK locally, resolving the toolchain through `toolchain.cjs`. |
+
+The versions, the ninja/path-length traps and the fourteen environment quirks are written up in
+[`BUILD.md`](./BUILD.md) and [`../docs/dev-environment.md`](../docs/dev-environment.md).
 
 ## Periodic commits
 

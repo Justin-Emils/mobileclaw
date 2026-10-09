@@ -26,6 +26,15 @@ export interface ToolDefinition<
   paths?: (input: z.infer<Input>) => string[];
   /** Force a prompt even when the risk level is auto-allowed. */
   alwaysAsk?: boolean;
+  /**
+   * Force a prompt for *every* call, immune to the allowlist and to allow rules.
+   *
+   * `alwaysAsk` still yields to "always allow this tool" — that is what the button
+   * means. This flag is the stricter promise: an action with it set can never be
+   * granted in advance, so a user who has approved it once is still asked the next
+   * time. Deny rules and deny modes still win.
+   */
+  neverRemember?: boolean;
   /** Hard timeout. Tool executions that hang would otherwise stall the agent loop. */
   timeoutMs?: number;
   /** Produce a short human-readable summary for the transcript UI. */

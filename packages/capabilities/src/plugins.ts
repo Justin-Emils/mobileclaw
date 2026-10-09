@@ -6,6 +6,7 @@ import { createWebTools } from "./tools/web";
 import { createSystemTools } from "./tools/system";
 import { createPythonTools } from "./tools/python";
 import { createShizukuTools } from "./tools/shizuku";
+import { createAutomationTools } from "./tools/automation";
 
 export * from "./availability";
 export * from "./tools/filesystem";
@@ -14,6 +15,7 @@ export * from "./tools/web";
 export * from "./tools/system";
 export * from "./tools/python";
 export * from "./tools/shizuku";
+export * from "./tools/automation";
 
 export interface CapabilityDeps {
   fs: FileSystemService;
@@ -85,6 +87,15 @@ export function capabilityPlugins(deps: CapabilityDeps): Plugin[] {
       version: "0.1.0",
       inject: ["system"],
       tools: createShizukuTools({ system: deps.system }),
+      apply: () => {},
+    }),
+    definePlugin({
+      name: "cap-automation",
+      description:
+        "See the screen and act on it through a privileged backend. Every screen-changing tool asks the user each time and returns a screenshot as evidence.",
+      version: "0.1.0",
+      inject: ["system"],
+      tools: createAutomationTools({ system: deps.system }),
       apply: () => {},
     }),
   ];

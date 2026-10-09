@@ -1,4 +1,4 @@
-import type { ShellResult, ShellRunOptions, SystemService } from "@mobileclaw/core";
+import type { AutomationService, PrivilegedService, SystemService } from "@mobileclaw/core";
 import { CoreError } from "@mobileclaw/core";
 
 /**
@@ -32,12 +32,9 @@ export interface ExpoSystemPorts {
     location?: string;
   }): Promise<{ id: string }>;
   /** Shizuku/ADB bridge; provided only by the native module. */
-  privileged?: {
-    kind: string;
-    isAvailable(): Promise<boolean>;
-    requestPermission?(): Promise<boolean>;
-    run(command: string, options?: ShellRunOptions): Promise<ShellResult>;
-  };
+  privileged?: PrivilegedService;
+  /** Screen capture and input injection; provided only by the native module. */
+  automation?: AutomationService;
 }
 
 export class ExpoSystemService implements SystemService {
@@ -112,6 +109,10 @@ export class ExpoSystemService implements SystemService {
 
   get privileged(): SystemService["privileged"] {
     return this.ports.privileged;
+  }
+
+  get automation(): SystemService["automation"] {
+    return this.ports.automation;
   }
 }
 

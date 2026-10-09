@@ -522,8 +522,10 @@ const withLocalReleaseSigning: ConfigPlugin = (config) =>
  *  - `<queries>` entries for Termux and common intent targets: without them
  *    Android 11+ refuses to resolve third-party packages, which silently breaks
  *    the cross-app automation tools.
- *  - The Shizuku provider is declared only when the native module is present, so
- *    a build without it does not advertise a capability it lacks.
+ *  - The Shizuku provider is **not** declared at all yet. The native module that needs
+ *    it has not been written, so the manifest advertises nothing the app cannot do.
+ *    When it lands, `withShizukuManifest` adds the `rikka.shizuku.ShizukuProvider`
+ *    entry (see docs/worklog/shizuku-screen-automation.md).
  */
 export default ({ config }: ConfigContext): ExpoConfig => {
   const playSafe = process.env["MOBILECLAW_PLAY_SAFE"] === "1";

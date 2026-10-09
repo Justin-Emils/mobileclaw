@@ -216,6 +216,8 @@ export const strings = {
     statusOk: "成功",
     statusError: "失败",
     statusDenied: "已拒绝",
+    /** 动作类工具的存证截图。 */
+    evidence: "截图存证",
   },
 
   risk: {

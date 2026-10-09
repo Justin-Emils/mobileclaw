@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { TranscriptEntry } from "@mobileclaw/core";
 import { safeStringify } from "@mobileclaw/core";
 import { statusColor, theme } from "@/ui/theme";
@@ -34,6 +34,8 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
   const [open, setOpen] = useState(false);
   const color = statusColor(entry.status);
   const title = entry.summary ?? entry.name;
+  const shot = entry.evidence;
+  const aspect = shot && shot.height > 0 ? shot.width / shot.height : 1;
 
   return (
     <Pressable style={styles.card} onPress={() => setOpen((value) => !value)}>
@@ -45,6 +47,7 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
         <Text style={styles.summary} numberOfLines={1}>
           {title === entry.name ? "" : title}
         </Text>
+        {shot ? <Text style={styles.badge}>{strings.tool.evidence}</Text> : null}
         <Text style={[styles.status, { color }]}>{statusLabel(entry.status)}</Text>
         {entry.durationMs !== undefined ? (
           <Text style={styles.duration}>{Math.round(entry.durationMs)}ms</Text>
@@ -65,6 +68,23 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
             <>
               <Text style={styles.label}>{strings.tool.error}</Text>
               <Text style={[styles.code, { color: theme.colors.danger }]}>{entry.error}</Text>
+            </>
+          ) : null}
+          {shot ? (
+            <>
+              <Text style={styles.label}>{strings.tool.evidence}</Text>
+              <Image
+                source={{ uri: shot.path }}
+                style={[styles.evidence, { aspectRatio: aspect }]}
+                resizeMode="contain"
+              />
+              {shot.note ? <Text style={styles.note}>{shot.note}</Text> : null}
+            </>
+          ) : null}
+          {!shot && entry.evidenceNote ? (
+            <>
+              <Text style={styles.label}>{strings.tool.evidence}</Text>
+              <Text style={styles.note}>{entry.evidenceNote}</Text>
             </>
           ) : null}
         </View>
@@ -107,4 +127,13 @@ const styles = StyleSheet.create({
     marginTop: theme.space(1),
   },
   code: { color: theme.colors.text, fontSize: 11, fontFamily: theme.font.mono, lineHeight: 16 },
+  badge: { color: theme.colors.textFaint, fontSize: 10 },
+  evidence: {
+    width: "100%",
+    borderRadius: theme.radius.md,
+    borderColor: theme.colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: theme.space(1),
+  },
+  note: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
 });

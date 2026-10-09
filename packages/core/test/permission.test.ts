@@ -169,4 +169,102 @@ describe("PermissionGate", () => {
     gate.revoke("shell_run");
     expect(gate.evaluate(request({ tool: "shell_run", risk: "execute" })).allowed).toBe(false);
   });
+
+  describe("neverRemember", () => {
+    const definition = (over: Record<string, unknown> = {}): NonNullable<PermissionRequest["definition"]> => ({
+      name: "screen_tap",
+      description: "tap something on screen",
+      input: { safeParse: () => ({ success: true }) } as never,
+      risk: "system",
+      neverRemember: true,
+      execute: async () => ({}),
+      ...over,
+    });
+
+    const tap = (over: Partial<PermissionRequest> = {}): PermissionRequest =>
+      request({ tool: "screen_tap", risk: "system", definition: definition(), ...over });
+
+    it("prompts on every call, even after the user approved the same tool", async () => {
+      // The whole point: an action that changes the screen is the user's decision each
+      // time, so approving it once must not authorise the next press.
+      const approve = vi.fn().mockResolvedValue({ approved: true });
+      const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+
+      expect((await gate.authorize(tap())).allowed).toBe(true);
+      expect(approve).toHaveBeenCalledTimes(1);
+
+      expect((await gate.authorize(tap())).allowed).toBe(true);
+      expect(approve).toHaveBeenCalledTimes(2);
+    });
+
+    it("throws away a remember request instead of trusting the UI to hide the button", async () => {
+      const approve = vi.fn().mockResolvedValue({ approved: true, remember: true });
+      const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+
+      const first = await gate.authorize(tap({ conversationId: "c1" }));
+      expect(first.allowed).toBe(true);
+      expect(first.remember).toBeUndefined();
+      // Nothing was recorded anywhere, so no later run can inherit the grant.
+      expect(gate.sessionAllows("c1")).not.toContain("screen_tap");
+      expect(gate.sessionAllows()).not.toContain("screen_tap");
+
+      await gate.authorize(tap({ conversationId: "c1" }));
+      expect(approve).toHaveBeenCalledTimes(2);
+    });
+
+    it("ignores a grant restored from a conversation saved by an older version", async () => {
+      const approve = vi.fn().mockResolvedValue({ approved: true });
+      const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+      gate.seedConversation("c1", ["screen_tap"]);
+
+      const decision = await gate.authorize(tap({ conversationId: "c1" }));
+      expect(decision.allowed).toBe(true);
+      expect(decision.reason).toMatch(/user approved/);
+      expect(approve).toHaveBeenCalledOnce();
+    });
+
+    it("ignores a global config allowlist entry", async () => {
+      const approve = vi.fn().mockResolvedValue({ approved: true });
+      const gate = new PermissionGate({ defaultMode: "ask", allowlist: ["screen_tap"] }, approve);
+
+      await gate.authorize(tap());
+      expect(approve).toHaveBeenCalledOnce();
+    });
+
+    it("ignores an allow rule that would otherwise match", () => {
+      const gate = new PermissionGate({
+        defaultMode: "deny",
+        rules: [{ tool: "screen_*", decision: "allow" }],
+      });
+      const decision = gate.evaluate(tap());
+      expect(decision.allowed).toBe(false);
+      expect(decision.reason).toMatch(/every action/);
+    });
+
+    it("still yields to a deny rule, which is final", () => {
+      const gate = new PermissionGate({
+        defaultMode: "ask",
+        rules: [{ tool: "screen_tap", decision: "deny" }],
+      });
+      const decision = gate.evaluate(tap());
+      expect(decision.allowed).toBe(false);
+      expect(decision.reason).toMatch(/denied by rule/);
+    });
+
+    it("leaves alwaysAsk alone, so only neverRemember is the strict promise", async () => {
+      // `alwaysAsk` means "ask the first time"; `neverRemember` means "ask every time".
+      // They are separate promises and the rememberable one must keep working.
+      const approve = vi.fn().mockResolvedValue({ approved: true, remember: true });
+      const gate = new PermissionGate({ defaultMode: "ask" }, approve);
+      const organize = request({
+        tool: "fs_organize",
+        risk: "write",
+        definition: definition({ name: "fs_organize", risk: "write", alwaysAsk: true, neverRemember: false }),
+      });
+
+      expect((await gate.authorize(organize)).remember).toBe(true);
+      await gate.authorize(organize);
+      expect(approve).toHaveBeenCalledOnce();
+    });
+  });
 });

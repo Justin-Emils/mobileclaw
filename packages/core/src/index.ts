@@ -5,6 +5,7 @@ export * from "./tool";
 export * from "./tools-registry";
 export * from "./plugin";
 export * from "./types";
+export * from "./automation";
 export * from "./path-guard";
 export * from "./permission";
 export * from "./store";

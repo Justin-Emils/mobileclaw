@@ -180,6 +180,139 @@ describe("Agent", () => {
     expect(approval).toHaveBeenCalledTimes(2);
   });
 
+  it("runs on the argument the user supplied while approving", async () => {
+    // The model cannot see the screen, so the point to press can only come from the
+    // human at approval time — which is why an approval carries an argument and not
+    // just a yes/no. `x`/`y` are optional so the model can ask for a tap without
+    // knowing where, and the merge fills them in before the schema sees them.
+    const seen: unknown[] = [];
+    const tapTool = {
+      name: "screen_tap",
+      description: "press one point",
+      input: z.object({
+        target: z.string(),
+        x: z.number().int().optional(),
+        y: z.number().int().optional(),
+      }),
+      risk: "system" as const,
+      neverRemember: true,
+      async execute(input: { target: string; x?: number; y?: number }) {
+        seen.push(input);
+        return { ok: true };
+      },
+    };
+
+    const approval = vi.fn().mockResolvedValue({ approved: true, input: { x: 540, y: 120 } });
+    const { agent } = buildAgent({
+      turns: [{ toolCalls: [{ id: "c1", name: "screen_tap", input: { target: "搜索框" } }] }, "done"],
+      permissions: { defaultMode: "ask" },
+      approval,
+      tools: [tapTool],
+    });
+
+    await run(agent, "点一下搜索框");
+
+    expect(seen).toEqual([{ target: "搜索框", x: 540, y: 120 }]);
+  });
+
+  it("still validates what the approval supplied", async () => {
+    // An approval may only add keys the model omitted, so the value it adds is the one
+    // the schema sees — and a bad one is refused there rather than reaching the tool.
+    // The rest of that contract lives in approval-input.test.ts.
+    const seen: unknown[] = [];
+    const tapTool = {
+      name: "screen_tap",
+      description: "press one point",
+      input: z.object({ target: z.string(), x: z.number().int().optional() }),
+      risk: "system" as const,
+      async execute(input: unknown) {
+        seen.push(input);
+        return { ok: true };
+      },
+    };
+
+    const approval = vi.fn().mockResolvedValue({ approved: true, input: { x: "not a number" } });
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const { agent } = buildAgent({
+      turns: [{ toolCalls: [{ id: "c1", name: "screen_tap", input: { target: "搜索框" } }] }, "done"],
+      permissions: { defaultMode: "ask" },
+      approval,
+      tools: [tapTool],
+      store,
+    });
+
+    const result = await run(agent, "点一下");
+
+    expect(seen).toEqual([]);
+    const entries = (await store.load(result.conversationId))?.entries ?? [];
+    const toolEntry = entries.find((item) => item.kind === "tool" && item.name === "screen_tap");
+    expect(toolEntry?.kind === "tool" ? toolEntry.status : undefined).toBe("error");
+    expect(toolEntry?.kind === "tool" ? toolEntry.error : undefined).toMatch(/E_TOOL_INPUT/);
+  });
+
+  it("carries a screenshot from the tool into the transcript", async () => {
+    // Evidence has to survive `renderToolOutput`, which flattens the output for the
+    // model. Without that the user would be told what ran and shown nothing.
+    const shotTool = {
+      name: "screen_tap",
+      description: "press one point",
+      input: z.object({ target: z.string() }),
+      risk: "system" as const,
+      async execute() {
+        return {
+          target: "搜索框",
+          evidence: { path: "file:///w/shot.jpg", width: 720, height: 1600 },
+        };
+      },
+    };
+
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const { agent } = buildAgent({
+      turns: [{ toolCalls: [{ id: "c1", name: "screen_tap", input: { target: "搜索框" } }] }, "done"],
+      permissions: { defaultMode: "allow" },
+      tools: [shotTool],
+      store,
+    });
+
+    const result = await run(agent, "点一下");
+    const entries = (await store.load(result.conversationId))?.entries ?? [];
+    const entry = entries.find((item) => item.kind === "tool" && item.name === "screen_tap");
+
+    expect(entry?.kind === "tool" ? entry.evidence : undefined).toEqual({
+      path: "file:///w/shot.jpg",
+      width: 720,
+      height: 1600,
+    });
+  });
+
+  it("does not treat a path mentioned in prose as evidence", async () => {
+    // Only the agreed key counts. A tool that happens to print a file:// path in its
+    // output must not have the UI present it to the user as verified evidence.
+    const chattyTool = {
+      name: "fs_read",
+      description: "read a file",
+      input: z.object({ path: z.string() }),
+      risk: "read" as const,
+      async execute() {
+        return { note: "saved a copy to file:///w/shot.jpg" };
+      },
+    };
+
+    const store = new KeyValueConversationStore(new MemoryKeyValueStore());
+    const { agent } = buildAgent({
+      turns: [{ toolCalls: [{ id: "c1", name: "fs_read", input: { path: "/a.txt" } }] }, "done"],
+      permissions: { defaultMode: "allow" },
+      tools: [chattyTool],
+      store,
+    });
+
+    const result = await run(agent, "读一下");
+    const entries = (await store.load(result.conversationId))?.entries ?? [];
+    const entry = entries.find((item) => item.kind === "tool" && item.name === "fs_read");
+
+    expect(entry?.kind === "tool" ? entry.evidence : undefined).toBeUndefined();
+  });
+
   it("assigns a conversation workspace once and persists it", async () => {
     const store = new KeyValueConversationStore(new MemoryKeyValueStore());
     const assignWorkspace = vi.fn((id: string) => `/workspaces/${id}`);
