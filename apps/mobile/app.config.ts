@@ -33,6 +33,10 @@ const PACKAGE_QUERIES: QueryEntry[] = [
   { package: "com.termux" },
   { package: "com.android.calendar" },
   { package: "com.android.documentsui" },
+  // Needed to tell "Shizuku is not installed" apart from "installed but not running",
+  // which need different instructions. A <queries> entry is visible on play-safe builds
+  // too, unlike QUERY_ALL_PACKAGES.
+  { package: "moe.shizuku.privileged.api" },
   { intent: { action: "android.intent.action.SEND", data: { mimeType: "text/plain" } } },
   { intent: { action: "android.intent.action.VIEW", data: { scheme: "https" } } },
 ];
@@ -454,6 +458,157 @@ const withMobileClawFiles: ConfigPlugin = (config) => {
   });
 };
 
+/* ----------------------------------------------------------------- Shizuku --- */
+
+/**
+ * The Shizuku native surface: a `ReactPackage` plus the AIDL user service it binds.
+ *
+ * Unlike the file module above, the Kotlin and AIDL live as **real files** under
+ * `apps/mobile/android-native/shizuku/` and are copied in. Inlining is a trap here:
+ * `${...}` is a Kotlin string template, and inside a TS template literal it would be
+ * interpolated away. Real files also get read by people and by tooling, which a
+ * five-hundred-line escaped string never does. (The file module predates this and
+ * should move too.)
+ */
+const SHIZUKU_NATIVE_DIR = path.join(__dirname, "android-native", "shizuku");
+const SHIZUKU_JAVA_DIR = "app/src/main/java/dev/mobileclaw/app/shizuku";
+const SHIZUKU_AIDL_DIR = "app/src/main/aidl/dev/mobileclaw/app/shizuku";
+
+const SHIZUKU_PROVIDER = "rikka.shizuku.ShizukuProvider";
+
+/** Idempotency marker for the gradle patch, which has two separate insertions. */
+const SHIZUKU_GRADLE_MARKER = "MOBILECLAW_SHIZUKU";
+
+/**
+ * The newest stable Shizuku API on Maven Central — read from the repository index, not
+ * guessed. `:provider` is only needed when Shizuku (rather than Sui) has to be
+ * supported, which is exactly the case here.
+ */
+const SHIZUKU_API_VERSION = "13.1.5";
+
+const withMobileClawShizuku: ConfigPlugin = (config) => {
+  config = withDangerousMod(config, [
+    "android",
+    async (cfg) => {
+      const root = cfg.modRequest.platformProjectRoot;
+      const javaTarget = path.join(root, SHIZUKU_JAVA_DIR);
+      const aidlTarget = path.join(root, SHIZUKU_AIDL_DIR);
+      fs.mkdirSync(javaTarget, { recursive: true });
+      fs.mkdirSync(aidlTarget, { recursive: true });
+
+      // AIDL goes to its own source set; AGP compiles it into the Stub the Kotlin
+      // extends. Copying rather than writing strings keeps every byte verbatim.
+      for (const entry of fs.readdirSync(SHIZUKU_NATIVE_DIR)) {
+        const target = entry.endsWith(".aidl") ? aidlTarget : javaTarget;
+        fs.copyFileSync(path.join(SHIZUKU_NATIVE_DIR, entry), path.join(target, entry));
+      }
+      return cfg;
+    },
+  ]);
+
+  return withMainApplication(config, (cfg) => {
+    const registration = "add(dev.mobileclaw.app.shizuku.MobileClawShizukuPackage())";
+    if (cfg.modResults.contents.includes(registration)) return cfg;
+
+    // Anchored on the template hook, *not* on the file module's registration line. That
+    // was the first attempt and it failed loudly: Expo's mod compiler groups mods by
+    // type, so two plugins' `withMainApplication` mods are not guaranteed to run in the
+    // order the plugins were listed. Depending on another plugin's edit is a race even
+    // when it happens to work. The hook is always present in a fresh template, and the
+    // order of entries inside the package list does not matter.
+    const hook = "          // add(MyReactNativePackage())";
+    if (!cfg.modResults.contents.includes(hook)) {
+      throw new Error(
+        "withMobileClawShizuku: the PackageList hook is missing from MainApplication.kt, so the " +
+          "Shizuku package would compile but never register. The Expo template shape changed.",
+      );
+    }
+    cfg.modResults.contents = cfg.modResults.contents.replace(
+      hook,
+      `${hook}\n          ${registration}`,
+    );
+    return cfg;
+  });
+};
+
+/** The `<provider>` element as the manifest mod carries it, which Expo's types omit. */
+interface ManifestProvider {
+  $: Record<string, string>;
+}
+
+/**
+ * Declare the provider Shizuku uses to reach this app.
+ *
+ * `authorities` must be `${applicationId}.shizuku`, and the provider is protected by
+ * `INTERACT_ACROSS_USERS_FULL` so ordinary apps cannot bind to it. Both come from the
+ * official Shizuku-API README — which is also why there is no
+ * `moe.shizuku.manager.permission.API_V23` here. That string circulates online; the
+ * documentation does not contain it.
+ */
+const withShizukuManifest: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (cfg) => {
+    const application = cfg.modResults.manifest.application?.[0];
+    if (!application) {
+      throw new Error("withShizukuManifest: the manifest has no <application> element");
+    }
+
+    // `provider` is missing from Expo's `ManifestApplication` type even though the mod
+    // result carries the array through untouched. Narrowing here keeps the rest of the
+    // manifest typed, rather than casting the whole object to `any`.
+    const host = application as typeof application & { provider?: ManifestProvider[] };
+    const providers = (host.provider ??= []);
+    if (providers.some((entry) => entry.$["android:name"] === SHIZUKU_PROVIDER)) return cfg;
+
+    providers.push({
+      $: {
+        "android:name": SHIZUKU_PROVIDER,
+        "android:authorities": "${applicationId}.shizuku",
+        "android:multiprocess": "false",
+        "android:enabled": "true",
+        "android:exported": "true",
+        "android:permission": "android.permission.INTERACT_ACROSS_USERS_FULL",
+      },
+    });
+    return cfg;
+  });
+
+/**
+ * Add the Shizuku API and switch AIDL on.
+ *
+ * `buildFeatures { aidl true }` is not optional: AGP 8 defaults it off, and with it off
+ * the `.aidl` file is ignored — the Kotlin would then fail with a "cannot find symbol"
+ * for a Stub that was never generated, which reads like a code error rather than a
+ * configuration one. The generated template has no `buildFeatures` block at all, so one
+ * is inserted after `android {`; that was checked against the real generated file, not
+ * assumed.
+ */
+const withShizukuGradle: ConfigPlugin = (config) =>
+  withAppBuildGradle(config, (cfg) => {
+    if (cfg.modResults.contents.includes(SHIZUKU_GRADLE_MARKER)) return cfg;
+    let contents = cfg.modResults.contents;
+
+    const dependencies = "dependencies {";
+    if (!contents.includes(dependencies)) {
+      throw new Error(
+        "withShizukuGradle: no `dependencies {` block in the generated app/build.gradle",
+      );
+    }
+    const deps = [
+      `    implementation("dev.rikka.shizuku:api:${SHIZUKU_API_VERSION}")`,
+      `    implementation("dev.rikka.shizuku:provider:${SHIZUKU_API_VERSION}")`,
+    ].join("\n");
+    contents = contents.replace(dependencies, `${dependencies}\n    // ${SHIZUKU_GRADLE_MARKER}\n${deps}`);
+
+    const androidBlock = /^android \{\n/m;
+    if (!androidBlock.test(contents)) {
+      throw new Error("withShizukuGradle: no `android {` block in the generated app/build.gradle");
+    }
+    contents = contents.replace(androidBlock, "android {\n    buildFeatures {\n        aidl true\n    }\n");
+
+    cfg.modResults.contents = contents;
+    return cfg;
+  });
+
 /**
  * Wire the local release keystore into `app/build.gradle`.
  *
@@ -586,6 +741,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       withPackageQueries as unknown as string,
       withLegacyStoragePermissions as unknown as string,
       withMobileClawFiles as unknown as string,
+      // Each Shizuku plugin anchors on the template hook and guards on its own edit, so
+      // their relative order does not matter — see the note in withMobileClawShizuku.
+      withMobileClawShizuku as unknown as string,
+      withShizukuManifest as unknown as string,
+      withShizukuGradle as unknown as string,
       withLocalReleaseSigning as unknown as string,
       ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],

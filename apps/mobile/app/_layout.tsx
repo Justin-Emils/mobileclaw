@@ -24,6 +24,7 @@ export default function RootLayout() {
           {/* A screen with no entry here falls back to its file name, so this route's
               header read "conversations" on a device until it was registered. */}
           <Stack.Screen name="conversations" options={{ title: strings.conversations.title }} />
+          <Stack.Screen name="screen-probe" options={{ title: strings.probe.title }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>

@@ -48,6 +48,8 @@ reported precisely instead of failing mid-conversation.
 | `docs/android-capabilities.md` | Hard-won detail on what Android actually allows, and the native-module plan. |
 | `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
 | `docs/dev-environment.md` | **Read this before building anything.** How the Android toolchain is resolved (`eng/toolchain.cjs` / `eng/setup-toolchain.ps1`), why the SDK's outdated ninja blocked local native builds (and the two fixes), and fourteen environment-specific traps with symptoms and fixes. Shared across projects. |
+| `docs/worklog/project-status.md` | **Where the project is right now**: the product goals, what works and what does not, the gap between the plan and the code, and what to write next. |
+| `docs/worklog/shizuku-screen-automation.md` | The screen-automation work stream in full — decisions, evidence, and the traps that cost time. |
 
 > **Repository location:** anywhere. The build resolves its toolchain at run time instead of
 > hardcoding it (`eng/toolchain.cjs`); on a fresh machine `eng/setup-toolchain.ps1` installs a JDK
@@ -57,7 +59,7 @@ reported precisely instead of failing mid-conversation.
 
 ```bash
 pnpm install
-pnpm check            # typecheck + 343 tests (core 102 / capabilities 74 / mobile 167) + a real Metro bundle
+pnpm check            # typecheck + 370 tests (core 102 / capabilities 74 / mobile 194) + a real Metro bundle
 pnpm doctor           # expo-doctor: dependency/SDK consistency (21 checks)
 pnpm mobile           # Metro for a dev build (needs a dev client installed)
 ```
@@ -113,7 +115,7 @@ The key is written to `expo-secure-store`.
 | `cap-system` | `system_open` `system_apps` `system_clipboard` `system_share` `system_notify` `system_calendar` | Intents / clipboard / share sheet / calendar writes. |
 | `cap-python` | `python_run` `python_script` `python_status` | Reaches an interpreter through the shell backend (Termux, or Chaquopy later). Code goes over **stdin**, so quoting never breaks it. |
 | `cap-shizuku` | `shizuku_status` `shizuku_request` `shizuku_run` | Privileged execution with shell identity (uid 2000), not root. |
-| `cap-automation` | `screen_current` `screen_capture` `screen_tap` `screen_scroll` `screen_type` `screen_wait` | See the screen and act on it through Shizuku. **The native side is not written yet**, so on a device every one of these reports "unavailable" — the contract and the safety machinery are what exist. Each screen-changing tool declares `neverRemember`, so "always allow" can never cover the next press, and returns a screenshot as evidence. |
+| `cap-automation` | `screen_read` `screen_tap_element` `screen_current` `screen_capture` `screen_tap` `screen_scroll` `screen_type` `screen_wait` | **Reads** the current screen as text, then acts on it, through Shizuku. `screen_read` is the workhorse: it returns every readable or pressable element with its real pixel bounds, so `screen_tap_element` can press by the `#` number printed in the reading — no human in the loop, and no `AccessibilityService` (shell identity already sees the tree). `screen_capture` + `screen_tap` remain for what the tree cannot express, where the *user* places the point on the picture. Each screen-changing tool declares `neverRemember`, so "always allow" can never cover the next press, and returns a screenshot as evidence. **The native side has never been compiled**, so on a device every one of these still reports "unavailable" — the contract, the reader and the safety machinery are what exist. |
 
 Safety model, in one line: **containment is lexical and absolute** (every model-supplied path goes
 through `PathGuard`, which refuses anything outside the configured roots), and **capability is
@@ -128,18 +130,25 @@ per-session "always allow" that expires).
   and SAF-granted trees only).
 - **Android 10+ forbids executing files from app storage.** Any bundled tool must ship inside the
   APK as `jniLibs/<abi>/lib*.so`; you cannot download a binary and run it.
-- **The privileged native module is not written yet.** The storage one *is*: `MobileClawFilesModule`
-  is inline Kotlin in `apps/mobile/app.config.ts`, written out by the `withMobileClawFiles` config
-  plugin at prebuild time (there is deliberately no `.kt` file on disk), and it is how shared-storage
-  writes work. Termux, Shizuku and the storage-access *prompt* are still specified and stubbed
-  (`apps/mobile/src/runtime/bootstrap.ts`) so nothing pretends to work; the shell tools report
-  unavailability. See `docs/android-capabilities.md` for the plan.
+- **The privileged native module is written but has never been compiled.** The storage one works and was
+  verified on a device: `MobileClawFilesModule` is inline Kotlin in `apps/mobile/app.config.ts`, written
+  out by the `withMobileClawFiles` config plugin at prebuild time (there is deliberately no `.kt` file on
+  disk). The Shizuku one is *real Kotlin and AIDL* under `apps/mobile/android-native/shizuku/`, copied
+  into the generated project by three config plugins — but no Android toolchain has ever been present on
+  the development machine, so it is a blind spot until a device build says otherwise. What still degrades
+  honestly is the *backend*: with no Shizuku paired, `screen_*` and `shizuku_*` report exactly what is
+  missing. Termux and the storage-access prompt remain specified and stubbed
+  (`apps/mobile/src/runtime/bootstrap.ts`). See `docs/android-capabilities.md` for the detail.
 - **The Expo FileSystem adapter is the one unverified seam.** It is written against the SDK 57
   `File`/`Directory`/`Paths` API and is the single place to fix if Expo renames a member
   (`apps/mobile/src/runtime/services/expo-file-system.ts`).
-- **Skill-style automation via AccessibilityService is out of scope.** Play policy excludes
-  "automation tools", and Android 17's Advanced Protection Mode blocks the Accessibility API for
-  apps that are not accessibility tools.
+- **Skill-style automation via AccessibilityService is out of scope** — but not for the reason usually
+  given. This app already ships without Play (`MANAGE_EXTERNAL_STORAGE` is not in a permitted category),
+  so "Play rejects automation tools" excludes nothing here, and Android 17's Advanced Protection Mode
+  blocks the Accessibility API for non-accessibility apps whether or not Shizuku is involved. The real
+  reason is narrower and stronger: **shell identity already reads another app's accessibility tree**
+  (`screen_read`), so declaring an `AccessibilityService` would buy a second permission and a second
+  system-settings visit for a view we already have.
 
 ## Roadmap
 

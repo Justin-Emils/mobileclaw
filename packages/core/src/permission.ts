@@ -117,6 +117,15 @@ export class PermissionGate {
   private readonly defaultAllowlist = new Set<string>();
   /** conversationId -> tool names the user permanently allowed in it. */
   private readonly conversationAllowlists = new Map<string, Set<string>>();
+  /**
+   * The conversation whose task the user confirmed as read-only, if any.
+   *
+   * One at a time, and set only by a plan confirmation. Keeping it single rather than a set
+   * makes the blast radius obvious: a read-only scope is a property of *the task in front of
+   * the user*, and there is only ever one of those. A second confirmation replaces the first
+   * rather than accumulating permissions.
+   */
+  private readOnlyTask?: string;
   private current: PermissionConfig;
 
   constructor(
@@ -181,6 +190,34 @@ export class PermissionGate {
     return this.conversationAllowlists.get(conversationId)?.has(tool) ?? false;
   }
 
+  /**
+   * Record that the user confirmed a task which only reads.
+   *
+   * The effect is narrow on purpose: from here until {@link endReadOnlyTask}, a tool that
+   * **declares** `mutates: false` is not prompted for. Everything else is unchanged — deny
+   * rules still win, `neverRemember` still wins, and a tool that cannot prove it changes
+   * nothing is still asked. Nothing is written to the conversation's allowlist, so this
+   * cannot outlive the run it was granted for.
+   */
+  beginReadOnlyTask(conversationId?: string): void {
+    this.readOnlyTask = conversationId;
+  }
+
+  /** Drop the read-only scope, e.g. when the run ends. */
+  endReadOnlyTask(): void {
+    this.readOnlyTask = undefined;
+  }
+
+  /**
+   * Whether the scope is active for this request.
+   *
+   * A call with no conversation cannot be covered: the scope belongs to a specific task the
+   * user saw, and an anonymous call has no task to belong to.
+   */
+  private isReadOnlyTask(conversationId?: string): boolean {
+    return conversationId !== undefined && this.readOnlyTask === conversationId;
+  }
+
   /** Pure verdict; no user interaction. */
   evaluate(request: PermissionRequest): PermissionDecision {
     // A `neverRemember` tool is exempt from the allowlist before it is even consulted,
@@ -206,6 +243,20 @@ export class PermissionGate {
     // rules so neither an allow rule nor a seeded conversation allowlist can grant it.
     if (request.definition?.neverRemember) {
       return { allowed: false, reason: "tool requires explicit confirmation for every action" };
+    }
+
+    // Inside a task the user confirmed as read-only, an action that provably changes
+    // nothing does not need asking again. Placed *after* `neverRemember` deliberately: a
+    // tool that promised to ask every time still does, scope or no scope — the promise is
+    // the stronger statement, and a read-only scope must never be able to erase it.
+    if (
+      this.isReadOnlyTask(request.conversationId) &&
+      request.definition?.mutates === false
+    ) {
+      return {
+        allowed: true,
+        reason: "task scope: the user confirmed this task only reads, and this action changes nothing",
+      };
     }
 
     for (const rule of this.config.rules ?? []) {

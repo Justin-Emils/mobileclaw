@@ -1,5 +1,11 @@
 import { definePlugin, type Plugin } from "@mobileclaw/core";
-import type { FileSystemService, HttpService, ShellService, SystemService } from "@mobileclaw/core";
+import type {
+  FileSystemService,
+  HttpService,
+  ShellService,
+  SystemService,
+  WebSearchService,
+} from "@mobileclaw/core";
 import { createFilesystemTools } from "./tools/filesystem";
 import { createShellTools } from "./tools/shell";
 import { createWebTools } from "./tools/web";
@@ -7,8 +13,13 @@ import { createSystemTools } from "./tools/system";
 import { createPythonTools } from "./tools/python";
 import { createShizukuTools } from "./tools/shizuku";
 import { createAutomationTools } from "./tools/automation";
+import { createScreenReadTools } from "./tools/screen-read";
+import { createPlanTools } from "./tools/plan";
+import { createEnrichTools } from "./tools/enrich";
 
 export * from "./availability";
+export * from "./ui-dump";
+export * from "./android-ui-dump";
 export * from "./tools/filesystem";
 export * from "./tools/shell";
 export * from "./tools/web";
@@ -16,12 +27,26 @@ export * from "./tools/system";
 export * from "./tools/python";
 export * from "./tools/shizuku";
 export * from "./tools/automation";
+export * from "./tools/screen-read";
+export * from "./tools/plan";
+export * from "./tools/enrich";
+/**
+ * Re-exported from the kernel rather than redeclared: both the tool and the agent loop
+ * compare against this name, and two string literals would drift without failing.
+ */
+export { CONFIRM_PLAN_TOOL } from "@mobileclaw/core";
 
 export interface CapabilityDeps {
   fs: FileSystemService;
   shell: ShellService;
   http: HttpService;
   system: SystemService;
+  /**
+   * Optional web search backend. A host without one still gets `web_fetch`; the
+   * `web_search` tool then explains that no engine is configured rather than failing
+   * obscurely, which keeps "no search" distinguishable from "search found nothing".
+   */
+  search?: WebSearchService;
 }
 
 /**
@@ -61,7 +86,18 @@ export function capabilityPlugins(deps: CapabilityDeps): Plugin[] {
       version: "0.1.0",
       core: true,
       inject: ["http"],
-      tools: createWebTools({ http: deps.http }),
+      tools: [
+        ...createWebTools({
+          http: deps.http,
+          ...(deps.search ? { search: deps.search } : {}),
+        }),
+        // Lives in the web bundle because it is a network capability, and takes the same
+        // two services: `web_search` finds the pages, `enrich_list` does that per item.
+        ...createEnrichTools({
+          http: deps.http,
+          ...(deps.search ? { search: deps.search } : {}),
+        }),
+      ],
       apply: () => {},
     }),
     definePlugin({
@@ -71,6 +107,18 @@ export function capabilityPlugins(deps: CapabilityDeps): Plugin[] {
       core: true,
       inject: ["system"],
       tools: createSystemTools({ system: deps.system }),
+      apply: () => {},
+    }),
+    definePlugin({
+      name: "cap-plan",
+      description:
+        "Restate the intended task and wait for one explicit confirmation before acting on another app.",
+      version: "0.1.0",
+      core: true,
+      // No injected service: confirming a plan needs nothing but the user. Declared as an
+      // empty list rather than omitted so the host still validates it as a plugin.
+      inject: [],
+      tools: createPlanTools(),
       apply: () => {},
     }),
     definePlugin({
@@ -95,7 +143,10 @@ export function capabilityPlugins(deps: CapabilityDeps): Plugin[] {
         "See the screen and act on it through a privileged backend. Every screen-changing tool asks the user each time and returns a screenshot as evidence.",
       version: "0.1.0",
       inject: ["system"],
-      tools: createAutomationTools({ system: deps.system }),
+      tools: [
+        ...createAutomationTools({ system: deps.system }),
+        ...createScreenReadTools({ system: deps.system }),
+      ],
       apply: () => {},
     }),
   ];

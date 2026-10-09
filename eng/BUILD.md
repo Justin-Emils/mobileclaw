@@ -8,7 +8,7 @@
 Verification that runs without a device or an Expo account (all local):
 
 ```bash
-pnpm check      # typecheck + 343 tests (core 102 / capabilities 74 / mobile 167) + a real Metro bundle
+pnpm check      # typecheck + 370 tests (core 102 / capabilities 74 / mobile 194) + a real Metro bundle
 pnpm doctor     # expo-doctor, expect 21/21
 ```
 

@@ -20,6 +20,7 @@ import {
   uriToPath,
   type ExpoFsLike,
 } from "./services/expo-file-system";
+import { createWebSearchService } from "@mobileclaw/capabilities";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
 import { createNativeDriver, listInstalledApps, loadNativeFiles } from "./services/native-files";
 import {
@@ -156,7 +157,16 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // undefined, and the tools say so with instructions rather than failing obscurely.
   const nativeShizuku = loadNativeShizuku();
   const privileged = nativeShizuku ? createPrivilegedService(nativeShizuku) : undefined;
-  const automation = nativeShizuku ? createAutomationService(nativeShizuku) : undefined;
+  const automation = nativeShizuku
+    ? createAutomationService(nativeShizuku, {
+        // `input text` is ASCII-only, so anything else goes through the clipboard and a
+        // paste keystroke. Only this process can write the clipboard; the shell side
+        // runs as uid 2000 and cannot.
+        setClipboard: async (text) => {
+          await Clipboard.setStringAsync(text);
+        },
+      })
+    : undefined;
   console.log(
     `[mobileclaw] privileged backend = ${nativeShizuku ? "shizuku (MobileClawShizuku)" : "none"}`,
   );
@@ -166,6 +176,15 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
 
   // --- HTTP ----------------------------------------------------------------
   const http = new ExpoHttpService();
+
+  // --- web search ----------------------------------------------------------
+  // Composed here rather than inside the capability layer so the choice of backend is
+  // visible where the runtime is wired. A configured instance wins; otherwise the
+  // built-in scraper answers, and either way the response says which one it was.
+  const search = createWebSearchService(http, {
+    ...(config.searxngBaseUrl ? { searxngBaseUrl: config.searxngBaseUrl } : {}),
+  });
+  console.log(`[mobileclaw] web search backend = ${search.kind}`);
 
   // --- system automation ---------------------------------------------------
   const system = new ExpoSystemService(
@@ -184,6 +203,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     shell,
     http,
     system,
+    search,
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),

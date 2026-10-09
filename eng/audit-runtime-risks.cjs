@@ -40,6 +40,9 @@ const screenFiles = [
   "apps/mobile/app/settings.tsx",
   "apps/mobile/app/conversations.tsx",
   "apps/mobile/app/permissions.tsx",
+  // Every new screen has to be listed here or its `strings.*` references go unchecked —
+  // which is how a typo reaches a device as literal `undefined` on screen.
+  "apps/mobile/app/screen-probe.tsx",
 ];
 const usage = new Set();
 for (const file of screenFiles) {

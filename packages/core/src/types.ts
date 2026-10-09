@@ -264,7 +264,42 @@ export interface AutomationService {
     /** Directory the capture should land in; the conversation workspace when known. */
     destDir?: string;
   }): Promise<ScreenCapture>;
+  /**
+   * Press a point, given as a **fraction of the display** (`0..1`), not pixels.
+   *
+   * Nobody in the chain knows the display size: the model cannot see the screen, the
+   * person choosing the point is looking at a downscaled picture, and the picture's
+   * pixel size is not the display's. Expressing the point as a ratio removes the need
+   * to know it at all, and leaves the conversion — one place, resolved against the real
+   * display at tap time — inside the implementation, exactly like `scroll`.
+   */
   tap(x: number, y: number): Promise<void>;
+  /**
+   * Read what is currently on screen as text, with the coordinates already resolved.
+   *
+   * This is the *reading* half of screen automation and it is deliberately not the
+   * same thing as `captureScreen`: a screenshot is pixels, and neither the model nor
+   * the kernel can read pixels. Without this method the only way to act on another
+   * app is for the person to look at a capture and place the point themselves, which
+   * makes every step of a multi-app task a human step.
+   *
+   * On Android the privileged backend has shell identity, and shell may read any
+   * app's accessibility tree — so the text, the content descriptions and each node's
+   * real bounds come back without an `AccessibilityService`, and therefore without a
+   * second permission or an extra system-settings visit.
+   *
+   * What this cannot see must stay visible in the result rather than being smoothed
+   * over:
+   *
+   *  - surfaces that draw their own pixels and publish no nodes (games, some Flutter
+   *    and Unity views, video) contribute nothing;
+   *  - a window that sets `FLAG_SECURE` is absent here just as it is black in a
+   *    capture, but it is *silent* here — there is no flat frame to notice, so an
+   *    empty reading means "nothing readable was found", never "the screen is empty";
+   *  - the dump is budgeted (see `SCREEN_DEFAULTS.read*`), and how much was cut is
+   *    reported by the snapshot's `truncated` fields.
+   */
+  readScreen(options?: ScreenReadOptions): Promise<ScreenSnapshot>;
   scroll(direction: "up" | "down" | "left" | "right", fraction?: number): Promise<void>;
   /**
    * Type into whatever holds focus.
@@ -298,11 +333,110 @@ export interface AutomationStatus {
 export interface ScreenCapture {
   /** A `file://` URI the UI can render directly. */
   path: string;
-  /** Pixel size of the capture, i.e. the coordinate space taps are expressed in. */
+  /** Pixel size of the saved picture. Smaller than the display: captures are downscaled. */
   width: number;
   height: number;
   /** Set when the frame is unusable for a reason the user should know. */
   note?: string;
+}
+
+/**
+ * A screen reading: what could be read off the current window, already compressed.
+ *
+ * Not the raw dump. The platform's dump format is a megabyte of nested containers
+ * carrying layout flags, and passing it through would spend the model's whole context
+ * on markup. The implementation projects it down to what can be read and what can be
+ * pressed, within the `SCREEN_DEFAULTS.read*` budget.
+ */
+export interface ScreenSnapshot {
+  nodes: ScreenNode[];
+  /** Display size in pixels, when the backend could determine it. */
+  width?: number;
+  height?: number;
+  rotation?: number;
+  /**
+   * Package the reading came from, when the backend knows it.
+   *
+   * Worth checking before acting: the foreground app can change between the reading
+   * and the press.
+   */
+  package?: string;
+  /** How many nodes the projection examined, before any budget was applied. */
+  total: number;
+  /** How many nodes were dropped because of the character budget. */
+  truncatedNodes?: number;
+  /** True when any node's text was shortened to fit `readMaxTextLength`. */
+  truncatedText?: boolean;
+  /** Why a reading is thin or empty, when the backend can tell. */
+  note?: string;
+  /** True when more than one display or window was dumped. */
+  multiWindow?: boolean;
+}
+
+export interface ScreenNode {
+  /** Position in `ScreenSnapshot.nodes`; this is also the number shown in the reading. */
+  index: number;
+  text?: string;
+  /** Content description — for an icon-only control this *is* its label. */
+  description?: string;
+  /** Short class name, e.g. `EditText`. Lets a caller tell a field from a button. */
+  className?: string;
+  resourceId?: string;
+  /** Display pixels, as reported by the platform. */
+  bounds?: ScreenBounds;
+  clickable?: boolean;
+  longClickable?: boolean;
+  scrollable?: boolean;
+  /** Present only when true; a disabled target looks pressable and is not. */
+  disabled?: boolean;
+  /** Present only when true. */
+  password?: boolean;
+  checkable?: boolean;
+  checked?: boolean;
+  selected?: boolean;
+  /** Present only when true. */
+  focused?: boolean;
+}
+
+export interface ScreenBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  /** Width and height in pixels, derived from the corners. */
+  width: number;
+  height: number;
+  /**
+   * On-screen pixel point to press for this node.
+   *
+   * Derived for the caller so the geometry is computed in exactly one place: taps
+   * take pixels, and every consumer that recomputed a centre would be another chance
+   * to disagree about rounding.
+   */
+  centerX: number;
+  centerY: number;
+}
+
+export interface ScreenReadOptions {
+  /** Longest text to return per node; longer values are cut and flagged. */
+  maxTextLength?: number;
+  /** Most nodes to return. */
+  maxNodes?: number;
+  /** Most characters in total across all returned text. */
+  maxChars?: number;
+  /** How long the underlying dump may take before it is killed. */
+  timeoutMs?: number;
+  /**
+   * The real display size, when the platform backend can measure it.
+   *
+   * This takes priority over whatever the reading inferred, and it should be supplied
+   * whenever it is known. A reading's own idea of the screen is a heuristic: the dump
+   * may start at a dialog, a notification shade or a floating window rather than at
+   * the display, and a press computed against too small a screen is *clamped to the
+   * display edge* by the tap implementation — it lands somewhere real, silently, and
+   * nowhere near the element that was meant.
+   */
+  display?: { width: number; height: number };
 }
 
 export interface ForegroundWindow {

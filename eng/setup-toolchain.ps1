@@ -56,9 +56,230 @@ $versionsJson = & node -e "process.stdout.write(JSON.stringify(require(process.a
 if ($LASTEXITCODE -ne 0 -or -not $versionsJson) { throw "could not read eng/toolchain-versions.cjs (is node on PATH?)" }
 $V = $versionsJson | ConvertFrom-Json
 
+# The artifact host is throttled, so a stalled socket is expected rather than
+# exceptional: long timeouts, and retries that resume instead of starting over.
+#
+# Declared before the functions below because PowerShell resolves a script-scope
+# variable at call time: a constant written after its only reader looks like dead
+# code and invites the next person to delete it.
+#
+# No digit separators (`120_000`): that is PowerShell 7 syntax, and `eng/BUILD.md`
+# invokes this file through `powershell.exe`, which on Windows is 5.1. There the
+# literal parses as `120` followed by the bare token `_000`, and the script dies with
+# "The term '120_000' is not recognized as the name of a cmdlet" before printing a
+# single line -- an error that names the *number* and gives no hint that the cause is
+# the host's PowerShell version.
+$HTTP_TIMEOUT_MS = 120000
+$BUFFER_BYTES = 1MB
+$PROGRESS_SECONDS = 5
+$DOWNLOAD_ATTEMPTS = 4
+
 function Step([string]$text) { Write-Host "==> $text" -ForegroundColor Cyan }
 function Note([string]$text) { Write-Host "    $text" -ForegroundColor Gray }
 function Warn([string]$text) { Write-Host "!!  $text" -ForegroundColor Yellow }
+
+<#
+.SYNOPSIS
+    The first line a native tool prints, without letting its stderr abort the script.
+
+.DESCRIPTION
+    `java -version` reports itself on **stderr**, and this script runs under
+    `$ErrorActionPreference = "Stop"`. In Windows PowerShell 5.1 a native command's
+    stderr record is an ErrorRecord, so `2>&1` into a pipeline turns a successful
+    version check into a terminating `NativeCommandError` -- the install had already
+    succeeded and the script died printing that it had.
+
+    `EAP = "Continue"` is restored in `finally` rather than being assumed: leaving the
+    script-wide preference lowered would convert every later failure into a silent
+    continuation, which is a much worse bug than the one being fixed.
+#>
+function Get-NativeBanner([string]$Exe, [string[]]$Arguments) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $lines = & $Exe @Arguments 2>&1
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+    $first = $lines | Select-Object -First 1
+    if ($null -eq $first) { return "(no output)" }
+    return "$first".Trim()
+}
+
+<#
+.SYNOPSIS
+    Stream a large file to disk, resuming a partial download when one is there.
+
+.DESCRIPTION
+    `Invoke-WebRequest` is not usable for these artifacts. Measured on this project's
+    network, it sat at 0 bytes for five minutes on the 205 MB JDK while the same URL
+    through this function sustained ~560 KB/s -- because it buffers the response before
+    writing anything, and because the endpoint redirects to a rate-limited asset host.
+    A setup step that appears to hang is worse than one that fails.
+
+    The file is written as it arrives, so an interrupted transfer leaves a partial file
+    rather than nothing, and the next run sends a Range header to continue from where it
+    stopped. That matters more than speed here: the artifact comes from a throttled host,
+    and a stalled socket is a matter of when, not if.
+
+    Returns `Complete` when the expected number of bytes is on disk, otherwise
+    `Partial` (safe to retry) or `Failed` (a permanent error, e.g. HTTP 404).
+#>
+function Save-StreamedFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$Path,
+        # Bytes to expect. When known, it drives the progress readout, the resume
+        # offset and the completeness check; when not, a plain full download is done.
+        [long]$ExpectedSize = 0
+    )
+
+    # Start from the Range header when a partial file is already here.
+    $startAt = 0L
+    if (Test-Path $Path) {
+        $startAt = (Get-Item $Path).Length
+        if ($ExpectedSize -gt 0 -and $startAt -ge $ExpectedSize) {
+            Note "already complete ($(Format-Bytes $startAt)), nothing to download"
+            return "Complete"
+        }
+        if ($startAt -gt 0) { Note ("resuming at {0}" -f (Format-Bytes $startAt)) }
+    }
+    $request = [System.Net.HttpWebRequest]::Create($Uri)
+    # Both are the same generous value on purpose: this host stalls, and a timeout here
+    # is not a diagnosis, it is an interruption that costs the user the whole download.
+    $request.Timeout = $HTTP_TIMEOUT_MS
+    $request.ReadWriteTimeout = $HTTP_TIMEOUT_MS
+    $request.AllowAutoRedirect = $true
+    $request.UserAgent = "mobileclaw-setup-toolchain"
+    if ($startAt -gt 0) { $request.AddRange($startAt) }
+
+    try {
+        $response = $request.GetResponse()
+    } catch {
+        if ($startAt -gt 0) {
+            Warn "resume request failed ($($_.Exception.Message))"
+            return "Partial"
+        }
+        Warn "request failed: $($_.Exception.Message)"
+        return "Failed"
+    }
+
+    try {
+        $status = [int]$response.StatusCode
+        # Asked to resume but the host ignored the Range header: start over rather than
+        # appending a second copy to the front of the file.
+        if ($startAt -gt 0 -and $status -ne 206) {
+            Warn "the host ignored the resume request; downloading in full"
+            $startAt = 0
+        }
+
+        $length = $response.ContentLength
+        # The size is learned from the response rather than pinned: it is a live redirect
+        # target whose artifact changes with every JDK patch release, and a constant here
+        # would be wrong within weeks.
+        if ($length -gt 0) { $ExpectedSize = $startAt + $length }
+        if ($ExpectedSize -gt 0 -and $startAt -ge $ExpectedSize) {
+            Note "already complete ($(Format-Bytes $startAt)), nothing to download"
+            return "Complete"
+        }
+
+        $mode = if ($startAt -gt 0) { [System.IO.FileMode]::Append } else { [System.IO.FileMode]::Create }
+        $target = [System.IO.File]::Open($Path, $mode, [System.IO.FileAccess]::Write)
+        try {
+            $stream = $response.GetResponseStream()
+            $buffer = New-Object byte[] $BUFFER_BYTES
+            $total = $startAt
+            # Speed is measured against what *this* transfer moved. Reporting the running
+            # total over this run's clock credits the transfer with bytes an earlier run
+            # fetched, which is how "195.6 MB in 1s" gets printed for a resumed download.
+            $fetched = 0L
+            $watch = [System.Diagnostics.Stopwatch]::StartNew()
+            $lastReport = $watch.Elapsed
+
+            while ($true) {
+                $read = $stream.Read($buffer, 0, $buffer.Length)
+                if ($read -le 0) { break }
+                $target.Write($buffer, 0, $read)
+                $total += $read
+                $fetched += $read
+
+                if (($watch.Elapsed - $lastReport).TotalSeconds -ge $PROGRESS_SECONDS) {
+                    $lastReport = $watch.Elapsed
+                    $speed = if ($watch.Elapsed.TotalSeconds -gt 0) { $fetched / $watch.Elapsed.TotalSeconds } else { 0 }
+                    $pct = if ($ExpectedSize -gt 0) { " ({0:N0}%)" -f (100 * $total / $ExpectedSize) } else { "" }
+                    Note ("{0}{1} at {2}/s" -f (Format-Bytes $total), $pct, (Format-Bytes $speed))
+                }
+            }
+            $stream.Close()
+            $watch.Stop()
+        } finally {
+            $target.Close()
+        }
+
+        $onDisk = (Get-Item $Path).Length
+        if ($ExpectedSize -gt 0 -and $onDisk -lt $ExpectedSize) {
+            Warn ("incomplete: {0} of {1} - re-run to continue" -f (Format-Bytes $onDisk), (Format-Bytes $ExpectedSize))
+            return "Partial"
+        }
+        Note ("downloaded {0} ({1} fetched) in {2:N0}s" -f (Format-Bytes $onDisk), (Format-Bytes $fetched), $watch.Elapsed.TotalSeconds)
+        return "Complete"
+    } catch {
+        # A socket that stalls or drops leaves the bytes received so far in place for
+        # the next run, so this is reported as retryable rather than fatal.
+        Warn "transfer interrupted: $($_.Exception.Message)"
+        return "Partial"
+    } finally {
+        $response.Close()
+    }
+}
+
+function Format-Bytes([long]$value) {
+    if ($value -ge 1GB) { return "{0:N2} GB" -f ($value / 1GB) }
+    if ($value -ge 1MB) { return "{0:N1} MB" -f ($value / 1MB) }
+    if ($value -ge 1KB) { return "{0:N0} KB" -f ($value / 1KB) }
+    return "$value B"
+}
+
+<#
+.SYNOPSIS
+    Download to $Path, retrying the parts that are worth retrying.
+
+.DESCRIPTION
+    Resuming makes a retry cheap, so this just re-enters until the file is complete or
+    a permanent failure is reported. The URL is resolved once and reused: for the JDK it
+    is a redirect whose target carries a signed, expiring query string, and re-resolving
+    it on every attempt would waste a round trip and can change the expected size.
+#>
+function Get-Artifact {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [Parameter(Mandatory)][string]$Path,
+        [long]$ExpectedSize = 0,
+        [int]$Attempts = $DOWNLOAD_ATTEMPTS
+    )
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        $result = Save-StreamedFile -Uri $Uri -Path $Path -ExpectedSize $ExpectedSize
+        switch ($result) {
+            "Complete" { return $true }
+            "Partial" {
+                if ($attempt -lt $Attempts) { Note "retrying ($attempt of $Attempts)" }
+                continue
+            }
+            default {
+                if ($attempt -lt $Attempts) { Note "retrying ($attempt of $Attempts)" }
+                continue
+            }
+        }
+    }
+
+    if (Test-Path $Path) {
+        Warn "gave up; $(Format-Bytes (Get-Item $Path).Length) is on disk. Re-run this script to continue from there."
+    }
+    return $false
+}
 
 Write-Host "toolchain   = $toolchainRoot"
 Write-Host "jdk         = $jdkDir (JDK $($V.JDK_MAJOR))"
@@ -80,7 +301,9 @@ if ($jdkReady -and -not $Force) {
         if (Test-Path $jdkDir) { Remove-Item $jdkDir -Recurse -Force }
         New-Item -ItemType Directory -Force -Path $jdkDir | Out-Null
         $zip = Join-Path $env:TEMP "mobileclaw-jdk.zip"
-        Invoke-WebRequest -Uri $jdkUrl -OutFile $zip -UseBasicParsing
+        if (-not (Get-Artifact -Uri $jdkUrl -Path $zip)) {
+            throw "the JDK download did not complete; re-run this script to continue from the partial file at $zip"
+        }
         $staging = Join-Path $env:TEMP "mobileclaw-jdk"
         if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
         Expand-Archive -Path $zip -DestinationPath $staging -Force
@@ -90,7 +313,7 @@ if ($jdkReady -and -not $Force) {
         Get-ChildItem -Path $inner.FullName | Move-Item -Destination $jdkDir -Force
         Remove-Item $zip, $staging -Recurse -Force -ErrorAction SilentlyContinue
         Step "installed"
-        Note (& (Join-Path $jdkDir "bin\java.exe") -version 2>&1 | Select-Object -First 1)
+        Note (Get-NativeBanner (Join-Path $jdkDir "bin\java.exe") @("-version"))
     }
 }
 
@@ -114,7 +337,9 @@ if ((Test-Path $sdkManager) -and -not $Force) {
         $name = "commandlinetools-win-${build}_latest.zip"
         Note "$($V.DOWNLOADS.sdkBase)$name"
         $zip = Join-Path $env:TEMP $name
-        Invoke-WebRequest -Uri "$($V.DOWNLOADS.sdkBase)$name" -OutFile $zip -UseBasicParsing
+        if (-not (Get-Artifact -Uri "$($V.DOWNLOADS.sdkBase)$name" -Path $zip)) {
+            throw "the command-line tools download did not complete; re-run this script to continue from the partial file at $zip"
+        }
         $staging = Join-Path $env:TEMP "mobileclaw-cmdline-tools"
         if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }
         Expand-Archive -Path $zip -DestinationPath $staging -Force
@@ -131,15 +356,71 @@ if ((Test-Path $sdkManager) -and -not $Force) {
 
 Step "SDK packages"
 foreach ($package in $V.SDK_PACKAGES) { Note $package }
+
+# The component each package must leave behind, so "installed" can be checked instead
+# of believed. `SDK_PACKAGES` and this table are the two halves of the same claim, and
+# the key set is asserted below so adding a package without a path to verify fails loudly.
+$sdkProof = @{
+    "platform-tools"        = "platform-tools\adb.exe"
+    "platforms;android-36"  = "platforms\android-36\android.jar"
+    "build-tools;36.0.0"    = "build-tools\36.0.0\aapt2.exe"
+    "ndk;27.1.12297006"     = "ndk\27.1.12297006\source.properties"
+    "cmake;3.30.5"          = "cmake\3.30.5\bin\ninja.exe"
+}
+foreach ($package in $V.SDK_PACKAGES) {
+    if (-not $sdkProof.ContainsKey($package)) {
+        throw "SDK_PACKAGES lists '$package' but there is no path to verify it with; add one to `$sdkProof"
+    }
+}
+
 if ($DryRun) {
-    Note "would run: sdkmanager --sdk_root=$sdkDir $($V.SDK_PACKAGES -join ' ')"
-} elseif (Test-Path $sdkManager) {
-    # Licences first: sdkmanager refuses to install without them, and there is no
-    # non-interactive flag, so the prompt is answered from the pipeline.
-    Note "accepting licences"
-    ("y`n" * 40) | & $sdkManager "--sdk_root=$sdkDir" "--licenses" | Out-Null
-    & $sdkManager "--sdk_root=$sdkDir" @($V.SDK_PACKAGES)
-    if ($LASTEXITCODE -ne 0) { throw "sdkmanager exited $LASTEXITCODE; the packages above were not all installed" }
+    Note "would install each of the above through the SDK's command-line tools, then verify the files listed in `$sdkProof"
+} else {
+    # Which CLI to drive is detected, not assumed. Recent cmdline-tools ship
+    # `sdkmanager` as a deprecation shim that forwards to a new `android` CLI, and the
+    # shim *splits `platforms;android-36` into two arguments* at the semicolon -- so it
+    # reports "Package platforms not found. Package android-36 not found." and still
+    # exits 0. Trusting that exit code is how this step previously "succeeded" while
+    # installing nothing.
+    $androidCli = Join-Path (Split-Path -Parent $sdkManager) "android.exe"
+    $useAndroidCli = Test-Path $androidCli
+
+    Note ($(if ($useAndroidCli) { "using the current CLI: android sdk install" } else { "using sdkmanager" }))
+    if ($useAndroidCli) {
+        # `--licenses` is accepted as a no-op by the shim but unnecessary here: the CLI
+        # no longer gates installation on it.
+        foreach ($package in $V.SDK_PACKAGES) {
+            $proof = Join-Path $sdkDir $sdkProof[$package]
+            if (Test-Path $proof) { Note "already present: $package"; continue }
+
+            Note "installing $package"
+            # One package per invocation on purpose: the new CLI takes a single
+            # `<package>[@<version>]` positional, and this keeps a mid-list failure from
+            # hiding which package it was.
+            & $androidCli "--sdk=$sdkDir" "sdk" "install" $package
+            if ($LASTEXITCODE -ne 0) { throw "android sdk install exited $LASTEXITCODE on '$package'" }
+            if (-not (Test-Path $proof)) {
+                throw "'$package' reported success but $proof is missing; the package did not install"
+            }
+        }
+    } elseif (Test-Path $sdkManager) {
+        # Licences first: sdkmanager refuses to install without them, and there is no
+        # non-interactive flag, so the prompt is answered from the pipeline.
+        Note "accepting licences"
+        ("y`n" * 40) | & $sdkManager "--sdk_root=$sdkDir" "--licenses" | Out-Null
+        foreach ($package in $V.SDK_PACKAGES) {
+            $proof = Join-Path $sdkDir $sdkProof[$package]
+            if (Test-Path $proof) { Note "already present: $package"; continue }
+            Note "installing $package"
+            & $sdkManager "--sdk_root=$sdkDir" $package
+            if ($LASTEXITCODE -ne 0) { throw "sdkmanager exited $LASTEXITCODE on '$package'" }
+            if (-not (Test-Path $proof)) {
+                throw "'$package' reported success but $proof is missing; the package did not install"
+            }
+        }
+    } else {
+        throw "no SDK package installer found under $sdkDir\cmdline-tools (neither android.exe nor sdkmanager.bat)"
+    }
     Step "installed"
 }
 
@@ -157,10 +438,11 @@ if ($FixNinja) {
     Note "downloading $($V.DOWNLOADS.ninja)"
     if (-not $DryRun) {
         $zip = Join-Path $env:TEMP "mobileclaw-ninja.zip"
-        try {
-            Invoke-WebRequest -Uri $V.DOWNLOADS.ninja -OutFile $zip -UseBasicParsing
-        } catch {
-            throw "could not download ninja from GitHub ($($_.Exception.Message)). On a network that blocks it, download ninja-win.zip by hand from the URL above and put ninja.exe in the two paths listed below."
+        # Still a hard failure, because this one comes from GitHub and a network that
+        # cannot reach it needs the manual fallback in docs/dev-environment.md rather
+        # than a fourth retry.
+        if (-not (Get-Artifact -Uri $V.DOWNLOADS.ninja -Path $zip -Attempts 2)) {
+            throw "could not download ninja from GitHub. On a network that blocks it, download ninja-win.zip by hand from $($V.DOWNLOADS.ninja) and put ninja.exe in the two paths listed below."
         }
         $staging = Join-Path $env:TEMP "mobileclaw-ninja"
         if (Test-Path $staging) { Remove-Item $staging -Recurse -Force }

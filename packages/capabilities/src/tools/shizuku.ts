@@ -22,6 +22,8 @@ export function createShizukuTools(deps: { system: SystemService }): AnyToolDefi
       "Report whether privileged (Shizuku/ADB) execution is available. Check this before promising system-level changes.",
     input: z.object({}),
     risk: "read",
+    category: "shell",
+    effects: [],
     async execute() {
       const privileged = getPrivileged();
       if (!privileged) {
@@ -47,6 +49,17 @@ export function createShizukuTools(deps: { system: SystemService }): AnyToolDefi
     description: "Ask the user to grant Shizuku permission to this app (opens the Shizuku consent dialog).",
     input: z.object({}),
     risk: "system",
+    category: "shell",
+    effects: ["process"],
+    /**
+     * Deliberately **no** `requires: ["shizuku"]`.
+     *
+     * This tool's job is to obtain Shizuku access, so requiring that access in order to run it
+     * would make the catalogue announce it as unavailable at exactly the moment it is the only
+     * way forward — and a model that trusts the catalogue would tell the user the capability
+     * does not exist. It still fails without the manager installed, and says so in its own words.
+     */
+    cost: "slow",
     alwaysAsk: true,
     async execute() {
       const privileged = getPrivileged();
@@ -67,6 +80,10 @@ export function createShizukuTools(deps: { system: SystemService }): AnyToolDefi
       timeoutMs: z.number().int().min(1000).max(300000).optional().default(60000),
     }),
     risk: "system",
+    category: "shell",
+    effects: ["process"],
+    requires: ["shizuku"],
+    cost: "slow",
     alwaysAsk: true,
     summarize: (input) => `shizuku: ${input.command.slice(0, 120)}`,
     async execute(input: { command: string; timeoutMs: number }, ctx: { signal: AbortSignal }) {

@@ -223,7 +223,7 @@ node eng\toolchain.cjs print        # 确认解析到哪
 **验收（无需设备，秒级，改代码后必跑）** —— 在仓库根执行：
 
 ```powershell
-pnpm check        # 类型检查 + 343 个单测（core 102 / capabilities 74 / mobile 167）+ 真实 Metro 打包
+pnpm check        # 类型检查 + 370 个单测（core 102 / capabilities 74 / mobile 194）+ 真实 Metro 打包
 ```
 
 **出 APK（本地，首选）：**
