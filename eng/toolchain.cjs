@@ -36,6 +36,26 @@ const COMPONENTS = {
     marker: path.join("platform-tools", `adb${EXE}`),
     extra: () => true,
   },
+  gradleHome: {
+    /**
+     * A directory that can actually *reuse* a Gradle install.
+     *
+     * The marker is the wrapper distribution cache, because that is the difference between a
+     * warm home and a useless one. Without this entry `gradleHome` fell through to a bare
+     * existence check, and on this machine that selected `C:\Users\<user>\.gradle` -- which
+     * exists but holds only `daemon/ native/ notifications/`, no `wrapper/dists` and no
+     * `caches`. The warmed home beside the repo was never consulted, so the build fell back to
+     * `gradlew.bat` and hung downloading Gradle and every dependency: the exact trap that made
+     * the previously hardcoded path worth having.
+     */
+    marker: path.join("wrapper", "dists"),
+    /**
+     * Absence is not fatal -- Gradle creates its home on first run -- so this one is optional
+     * and its state is reported through `gradleHomeExists`.
+     */
+    optional: true,
+    extra: () => true,
+  },
 };
 
 /**
@@ -69,33 +89,41 @@ function jdkMajor(jdkDir, readFile) {
 
 /** Where each component may live, most specific first. Pure — no filesystem access. */
 const CANDIDATE_SOURCES = {
-  jdk: ({ overrides, env, local, home, listDirs }) => [
+  jdk: ({ overrides, env, local, home, listDirs, engRoot }) => [
     overrides.jdk,
     env.MOBILECLAW_JDK,
     env.JAVA_HOME,
     local,
+    // A pre-existing checkout beside the repository (MOBILECLAW_ENG_ROOT). Its JDK is named
+    // `.jdkNN`, so the directory is listed rather than guessed.
+    ...(engRoot ? listDirs(engRoot).filter((dir) => /\.jdk\d+$/i.test(dir)) : []),
     // JetBrains and the IntelliJ toolchain downloader both land here.
     ...listDirs(path.join(home, ".jdks")),
     ...listDirs("/usr/lib/jvm"),
   ],
 
-  sdk: ({ overrides, env, local, home }) => [
+  sdk: ({ overrides, env, local, home, engRoot }) => [
     overrides.sdk,
     env.MOBILECLAW_ANDROID_SDK,
     // ANDROID_HOME first: it is the one Google's own tooling sets.
     env.ANDROID_HOME,
     env.ANDROID_SDK_ROOT,
     local,
+    ...(engRoot ? [path.join(engRoot, ".android-sdk")] : []),
     path.join(home, "AppData", "Local", "Android", "Sdk"),
     path.join(home, "Library", "Android", "sdk"),
     path.join(home, "Android", "Sdk"),
   ],
 
-  gradleHome: ({ overrides, env, local, home }) => [
+  gradleHome: ({ overrides, env, local, home, engRoot }) => [
     overrides.gradleHome,
     env.MOBILECLAW_GRADLE_HOME,
     env.GRADLE_USER_HOME,
     local,
+    // A pre-existing checkout beside the repository (MOBILECLAW_ENG_ROOT). Both spellings are
+    // tried: `setup-toolchain.ps1` would use `gradle-home`, while a hand-built machine tends to
+    // use the dot-prefixed `.gradle-home`.
+    ...(engRoot ? [path.join(engRoot, "gradle-home"), path.join(engRoot, ".gradle-home")] : []),
     path.join(home, ".gradle"),
   ],
 };
@@ -120,7 +148,17 @@ function candidatesFor(kind, ctx = {}) {
 
   const local = repoRoot ? path.join(repoRoot, V.LOCAL_DIR, V.LOCAL_SUBDIRS[kind]) : undefined;
 
-  return clean(build({ overrides, env, local, home, listDirs }));
+  /**
+   * A directory that holds an already-checked-out toolchain beside the repository.
+   *
+   * `eng/setup-toolchain.ps1` installs into `.toolchain/`, but a machine that was set up
+   * before this resolver existed keeps its toolchain elsewhere -- on this one, `E:\code\Eng`.
+   * Honouring an explicit `MOBILECLAW_ENG_ROOT` gives those machines a supported way to say
+   * where it is, instead of requiring every component to be exported separately.
+   */
+  const engRoot = env.MOBILECLAW_ENG_ROOT;
+
+  return clean(build({ overrides, env, local, home, listDirs, engRoot }));
 }
 
 /** Drop blank values (an unset environment variable arrives as "" or undefined) and normalise. */
@@ -150,9 +188,12 @@ function resolveToolchain(ctx = {}) {
     searched[kind] = candidates;
 
     if (kind === "gradleHome") {
-      // Prefer a directory that already exists so a warmed Gradle cache is reused,
-      // but do not insist: Gradle creates one on first run.
-      found[kind] = candidates.find(exists) ?? candidates[0];
+      // Prefer a home that can actually reuse a Gradle install, then any existing directory,
+      // then the conventional location. `marker` is `wrapper/dists`; a bare existing directory
+      // is not enough, because `~/.gradle` with only daemon state in it forces a full
+      // re-download while looking like a perfectly good choice.
+      const usable = candidates.find((dir) => exists(path.join(dir, COMPONENTS.gradleHome.marker)));
+      found[kind] = usable ?? candidates.find(exists) ?? candidates[0];
       continue;
     }
 
