@@ -144,6 +144,7 @@ function candidatesFor(kind, ctx = {}) {
     env = {},
     home = os.homedir(),
     listDirs = () => [],
+    readFile = (file) => fs.readFileSync(file, "utf8"),
   } = ctx;
 
   const local = repoRoot ? path.join(repoRoot, V.LOCAL_DIR, V.LOCAL_SUBDIRS[kind]) : undefined;
@@ -158,7 +159,56 @@ function candidatesFor(kind, ctx = {}) {
    */
   const engRoot = env.MOBILECLAW_ENG_ROOT;
 
-  return clean(build({ overrides, env, local, home, listDirs, engRoot }));
+  // An explicit answer from the local file wins over everything else, including JAVA_HOME.
+  // That ordering matters: this machine has jdk-24 in JAVA_HOME, and jdk-24 breaks the CMake
+  // configuration step of `react-native-worklets` ("A restricted method in java.lang.System
+  // has been called"), so a generic environment variable silently selected a JDK that cannot
+  // build this repo while a working JDK 21 sat one directory away.
+  const pinned = readLocalConfig(repoRoot, readFile)[FLAG_TO_ENV[kind]];
+  const merged = { ...env };
+
+  return clean(
+    [pinned, ...build({ overrides, env: merged, local, home, listDirs, engRoot })],
+  );
+}
+
+/** Component name to the environment variable that names it outright. */
+const FLAG_TO_ENV = { jdk: "MOBILECLAW_JDK", sdk: "MOBILECLAW_ANDROID_SDK", gradleHome: "MOBILECLAW_GRADLE_HOME" };
+
+/**
+ * Read `<repo>/.toolchain/.config`.
+ *
+ * Per-machine settings that must not be committed: where the toolchain actually lives, and
+ * which JDK to use. Without this, every build depends on environment variables being exported
+ * in the current shell -- which is how this machine ended up building with a JDK that fails.
+ *
+ * Format is deliberately dull, one `KEY=VALUE` per line, `#` for comments. Anything
+ * unrecognised is ignored rather than fatal, so a hand-edited file cannot break the build in a
+ * confusing way.
+ */
+function readLocalConfig(repoRoot, readFile) {
+  if (!repoRoot) return {};
+  try {
+    const text = readFile(path.join(repoRoot, V.LOCAL_DIR, ".config"));
+    const out = {};
+    for (const line of text.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      // Tolerate a quoted value, which is how a path with spaces gets written down.
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (key && value) out[key] = value;
+    }
+    return out;
+  } catch {
+    // Absent is the normal case on a fresh clone.
+    return {};
+  }
 }
 
 /** Drop blank values (an unset environment variable arrives as "" or undefined) and normalise. */
