@@ -217,7 +217,7 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     @ReactMethod
     fun keepScreenOn(on: Boolean, promise: Promise) {
         run(promise) {
-            val activity = currentActivity
+            val activity = attachedActivity
             check(activity != null) { "no current activity to hold the display with" }
             activity.runOnUiThread {
                 if (on) {
@@ -230,8 +230,21 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
         }
     }
 
-    /** The Activity this module is attached to, when there is one. */
-    private val currentActivity: Activity?
+    /**
+     * The Activity this module is attached to, when there is one.
+     *
+     * Named `attachedActivity` rather than `currentActivity` on purpose. The base class
+     * `ReactContextBaseJavaModule` already declares `getCurrentActivity()`, so a Kotlin property
+     * called `currentActivity` generates a getter with the same JVM signature and the compiler
+     * rejects the file:
+     *
+     *   Accidental override: The following declarations have the same JVM signature
+     *   (getCurrentActivity()Landroid/app/Activity;)
+     *
+     * That surfaced only on the first full build, because this file was written on a machine with
+     * no Android toolchain. Do not rename it back.
+     */
+    private val attachedActivity: Activity?
         get() = (reactContext.currentActivity as? Activity)
 
     /**
