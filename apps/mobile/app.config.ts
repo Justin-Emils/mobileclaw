@@ -691,7 +691,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.1.0",
+    version: "0.2.0",
     orientation: "portrait",
     scheme: "mobileclaw",
     userInterfaceStyle: "dark",
@@ -702,6 +702,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
       permissions: [
+        // Android decides "is this an upgrade" from versionCode, not versionName, and the
+        // template default is 1 for every build. Bumping it alongside `version` keeps the two
+        // in step; 0.2.0 ships as code 2.
+        versionCode: 2,
         "INTERNET",
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
