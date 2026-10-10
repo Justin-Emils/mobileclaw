@@ -113,7 +113,8 @@ SKIP_SCHEME = {"http", "https", "file", "content", "market", "ftp", "javascript"
                "mailto", "sms", "smsto", "mms", "mmsto", "ed2k", "magnet", "thunder", "flashget"}
 BLACKLIST_SCHEME = {"android_secret_code", "chimera-action", "version", "wear", "app", "theme", "newhome",
                     "mifg", "bluelite", "voice_agent", "baidu_lauch", "flyme_3dtouch", "ucweb", "uclink",
-                    "content", "file", "browser", "widget", "widgetid"}
+                    "content", "file", "browser", "widget", "widgetid",
+                    "tpns", "stpns", "miui_packageinstaller", "milink", "micloud", "rtsp", "nfc"}
 JUNK_BLOB = re.compile(
     r"pay|auth|login|oauth|callback|sign|bind|wallet|verifycode|token|push|track|stat|umeng|agoo|report"
     r"|analytics|bugreport|crash|miniapp|smallapp|plugin|webapp|sdk|test|debug|/log|logcheck|monitor"
@@ -128,22 +129,28 @@ GOOD_HINT = re.compile(
 )
 PURPOSE = [
     (r"video|bangumi|movie|episode|season", "视频/番剧"),
-    (r"/mv|live", "直播/视频"),
+    (r"/mv|live|stream", "直播/视频"),
     (r"song|/music|/play|audio|/dj", "音乐播放"),
     (r"playlist|album|artist", "歌单/专辑/歌手"),
     (r"item|goods|product|/detail", "商品/详情页"),
     (r"shop|mall|store", "店铺/商城"),
-    (r"order|cart|coupon|bill", "交易/订单"),
+    (r"order|cart|coupon|bill|purchase", "交易/订单"),
+    (r"comment|review|rate|feedback", "评论/评价"),
+    (r"merchant|seller|biz", "商家"),
     (r"search|query", "搜索"),
-    (r"user|space|profile|author|uper", "用户主页"),
-    (r"note|feed|topic|article|read|book|comic|opus|post", "内容/阅读"),
-    (r"chat|message|/im|conversation", "聊天/消息"),
-    (r"scan|qr", "扫码"),
-    (r"home|main|root|index|splash", "首页"),
-    (r"map|navi|route|geo", "地图/导航"),
-    (r"ticket|train|flight", "票务"),
+    (r"user|space|profile|author|uper|account", "用户主页/账号"),
+    (r"publish|post|upload|compose|share|forward", "发布/分享"),
+    (r"scan|qr|code|barcode", "扫码"),
+    (r"wallet|balance|recharge|pay", "钱包/充值"),
+    (r"chat|message|/im|conversation|session|contact|group", "聊天/消息"),
+    (r"note|feed|topic|article|read|book|comic|opus|post|channel", "内容/阅读"),
+    (r"home|main|root|index|splash|launcher", "首页"),
+    (r"map|navi|route|geo|location", "地图/导航"),
+    (r"ticket|train|flight|hotel|travel|trip", "出行/票务"),
     (r"history|favorite|collect|follow", "个人列表"),
-    (r"camera|capture|photo", "拍照"),
+    (r"camera|capture|photo|image|media", "拍照/媒体"),
+    (r"setting|config|debug|preference", "设置"),
+    (r"login|auth|register|verify", "登录/授权"),
 ]
 
 
@@ -154,9 +161,38 @@ def guess_purpose(blob):
     return "打开指定页面"
 
 
+# 通用分发器：类名不透露任何信息，只有这种才必须实测
+GENERIC_COMPONENT = re.compile(
+    r"(IntentHandlerActivity|DeepLinkActivity|DeepLinkHandlerActivity|TransDeepLinkHandlerActivity"
+    r"|RouterPortalActivity|UriRouterActivity|RouterActivity|RedirectActivity|SchemeLauncherActivity"
+    r"|JumpActivity|OpenAppActivity|PortalActivity|DispatchActivity|MainActivity|EntryActivity"
+    r"|LauncherActivity|SplashActivity|ProxyActivity|DelegateActivity|RouteActivity|UriHandlerActivity"
+    r"|CustomSchemeEntryActivity|OpenSdkActivity|OutLinkActivity|H5Activity|ExternalLinkActivity"
+    r"|TransferActivity|BootActivity|WelcomeScreen|ExportedLaunchActivity|JoinActivity"
+    r"|Alias\d*|appicon|icon\d*)$"
+)
+
+
+def class_of(component):
+    """从 `包名/com.a.b.C` 里取出类名 C；带 Alias 后缀的往前退一格。"""
+    if "/" not in component:
+        return component
+    parts = [p for p in component.split("/")[-1].split(".") if p]
+    if not parts:
+        return component
+    last = parts[-1]
+    if re.match(r"^Alias\d*$", last) and len(parts) >= 2:
+        return parts[-2]
+    if len(last) <= 2 and len(parts) >= 2:
+        return parts[-2]
+    return last
+
+
 def sheet_common(wb, rows):
     ws = wb.create_sheet("深链·常用")
-    ws.append(["协议", "主要App", "这个App的条目", "推测用途（按路径关键词猜的，仅供参考）", "典型深链（挑过的）", "全部条目", "典型 host", "典型 路径"])
+    ws.append(["协议", "主要App", "这个App的条目",
+               "用途（优先依据 App 自己声明的组件名；没有则按路径关键词猜）",
+               "依据", "典型深链（挑过的）", "代表组件（App 自己声明）", "全部条目", "典型 host", "典型 路径"])
     groups = {}
     for r in rows:
         s = r["协议"]
@@ -166,7 +202,7 @@ def sheet_common(wb, rows):
             continue
         if JUNK_BLOB.search(s):
             continue
-        blob = " ".join([r["深链示例"], r["host"] or "", r["路径"] or ""])
+        blob = " ".join([r["深链示例"], r["host"] or "", r["路径"] or "", r["组件"]])
         if JUNK_BLOB.search(blob):
             continue
         groups.setdefault(s, []).append(r)
@@ -175,32 +211,54 @@ def sheet_common(wb, rows):
     for s, items in groups.items():
         apps = collections.Counter(x["App"] or x["包名"] for x in items)
         main_app, main_n = apps.most_common(1)[0]
-        scored = sorted(items, key=lambda x: (0 if GOOD_HINT.search(" ".join([x["深链示例"], x["host"] or "", x["路径"] or ""])) else 1,
-                                              0 if x["路径"] else 1))
+        # 只从"主要App 自己"的条目里挑样例和代表组件，否则会把别家声明的组件挂到这个 App 名下
+        own = [x for x in items if (x["App"] or x["包名"]) == main_app]
+        pool = own if own else items
+        scored = sorted(pool, key=lambda x: (0 if GOOD_HINT.search(" ".join([x["深链示例"], x["host"] or "", x["路径"] or ""])) else 1,
+                                             0 if x["路径"] else 1))
         ex, hosts, paths = [], [], []
+        comp, comp_class = "", ""
         for x in scored:
             u = x["深链示例"]
             if u not in ex:
                 ex.append(u)
+                if not comp:
+                    comp = x["组件"]
+                    comp_class = class_of(comp)
             if x["host"] and x["host"] not in hosts:
                 hosts.append(x["host"])
             if x["路径"] and x["路径"] not in paths:
                 paths.append(x["路径"])
             if len(ex) >= 4:
                 break
+        # 依据优先级：组件类名 > 路径关键词
+        if comp_class and not GENERIC_COMPONENT.search(comp_class):
+            purpose = guess_purpose(comp_class + " " + ex[0] + " " + s)
+            basis = "组件类名（App 自己起的名字）"
+        else:
+            purpose = guess_purpose(ex[0] + " " + s)
+            basis = "仅路径关键词（通用分发器，需实测）"
         out.append([
-            s, main_app, main_n, guess_purpose(ex[0] + " " + s),
-            "  |  ".join(ex), len(items),
+            s, main_app, main_n, purpose, basis,
+            "  |  ".join(ex), comp, len(items),
             ", ".join(hosts[:4]), ", ".join(paths[:4]),
         ])
-    out.sort(key=lambda x: (-x[5], x[0]))
+    out.sort(key=lambda x: (x[4] != "组件类名（App 自己起的名字）", -x[7], x[0]))
     for row in out:
         ws.append(row)
     style_header(ws)
-    widths(ws, {"A": 18, "B": 18, "C": 13, "D": 16, "E": 74, "F": 9, "G": 34, "H": 30})
-    paint(ws, mono_cols=(1,), wrap_cols=(5, 7, 8), center_cols=(3, 6))
+    widths(ws, {"A": 18, "B": 18, "C": 13, "D": 30, "E": 26, "F": 70, "G": 46, "H": 9, "I": 30, "J": 26})
+    paint(ws, mono_cols=(1, 7), wrap_cols=(6, 9, 10), center_cols=(3, 8))
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=5, max_col=5):
+        for cell in row:
+            if cell.value and cell.value.startswith("组件类名"):
+                cell.fill = OK_FILL
+                cell.font = Font(size=9, color="1B7F3B")
+            else:
+                cell.fill = WARN_FILL
+                cell.font = Font(size=9, color="A2701A")
     ws.freeze_panes = "C2"
-    ws.auto_filter.ref = f"A1:H{ws.max_row}"
+    ws.auto_filter.ref = f"A1:J{ws.max_row}"
     return len(out)
 
 

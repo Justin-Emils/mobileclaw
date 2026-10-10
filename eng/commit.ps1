@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     One way to commit and push MobileClaw: a human checkpoint, or the unattended
@@ -7,14 +7,14 @@
 .DESCRIPTION
     Two modes, one implementation, because the logic must not drift between them:
 
-      -Checkpoint "feat: add native module"
-          Conventional-commit style message supplied by hand (or by an agent).
-          Exits non-zero on failure so a caller notices.
+      -Checkpoint "feat: 增加原生模块"
+          手写（或由智能体给出）的提交说明。失败时以非零退出，便于调用方察觉。
 
       (no -Checkpoint)
-          The scheduled mode. Stages everything, and commits with a generated
-          "chore: checkpoint <timestamp>" message, but only when something
-          actually changed. Pushes unless -NoPush is given.
+          定时模式。暂存全部改动，并用自动生成的 "chore: 自动存档 <时间>" 提交，
+          但仅在确有改动时才提交。除非给出 -NoPush，否则会推送。
+
+    提交说明一律用中文（见 CONTRIBUTING.md）。
 
     Why a script instead of a bare `git commit`: it serialises runs with a lock
     (a slow push must not overlap the next tick), asserts the git identity is
@@ -183,7 +183,10 @@ try {
             $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm'
             $summary = ($staged | ForEach-Object { Split-Path -Leaf $_ }) -join ', '
             if ($summary.Length -gt 60) { $summary = $summary.Substring(0, 57) + '...' }
-            $message = "chore: checkpoint $stamp`n`n$($staged.Count) file(s): $summary"
+            # Chinese, matching the rest of the repository: commit messages here are written in
+            # Chinese. Kept to characters whose UTF-8 bytes survive PowerShell 5.1's ANSI
+            # reading of a BOM-less file -- see the BOM note at the top of this file.
+            $message = "chore: 自动存档 $stamp`n`n共 $($staged.Count) 个文件: $summary"
         }
 
         $commit = Invoke-Native -File 'git' -Arguments @('commit', '-q', '-m', $message)

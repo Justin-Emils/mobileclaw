@@ -1,4 +1,4 @@
-# Resolve-adb.ps1 — find adb the same way the build does.
+﻿# Resolve-adb.ps1 — find adb the same way the build does.
 #
 # These collection scripts used to hardcode
 # `E:\code\Eng\.android-sdk\platform-tools\adb.exe`, so on any other machine they failed at
