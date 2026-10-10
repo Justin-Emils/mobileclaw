@@ -587,5 +587,16 @@ body{font-family:var(--sans);background:var(--canvas);color:var(--ink);padding:3
 
 <div class="foot">MobileClaw 线框图 · 2026-10-10 · 10 屏 + 1 张 IA/主流程 · 与 <code>mobileclaw-prototype-2026-10-10.html</code> 逐屏对应</div>
 
+<script>
+/* 聚焦模式：?f=<序号> 只显示第 n 帧（0 = IA/主流程），用于导出单帧 PNG */
+const _f = new URLSearchParams(location.search).get('f');
+if(_f !== null){
+  document.querySelectorAll('.board > .frame').forEach((el,i)=>{ if(String(i)!==_f) el.style.display='none'; });
+  const h = document.querySelector('.board-head'); if(h) h.style.display='none';
+  const ft = document.querySelector('.foot'); if(ft) ft.style.display='none';
+  document.body.style.padding='16px';
+}
+</script>
+
 </body>
 </html>
