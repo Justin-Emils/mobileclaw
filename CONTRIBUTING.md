@@ -33,9 +33,18 @@ File.canRead()/canWrite() 判断，而共享存储里的文件属于其他 uid�
 如果一次改动推翻了之前的判断，把旧判断也写进去（「此前以为是 X，实际是 Y」），
 这样下一个人不会重复同一个错误。
 
-### 定时自动提交也是中文
+### 周期性自动提交已停用
 
-`eng/commit.ps1` 的定时模式生成 `chore: 自动存档 <时间>`，无需手工干预。
+曾有一个 Windows 定时任务 `MobileClaw auto-commit`，每 30 分钟自动提交并推送一次。
+**它已被停用**（任务保留着，状态为 Disabled，将来需要可重新启用）：
+
+```powershell
+Get-ScheduledTask -TaskName 'MobileClaw auto-commit'          # 查看状态
+Enable-ScheduledTask -TaskName 'MobileClaw auto-commit'       # 重新启用
+```
+
+脚本 `eng/commit.ps1` 和 `eng/schedule.ps1` 都还在。`commit.ps1` 仍可用于手工提交，
+自动模式生成的说明是中文（`chore: 自动存档 <时间>`）。
 
 ## 代码与文档
 

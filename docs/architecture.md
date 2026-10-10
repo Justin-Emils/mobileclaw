@@ -1,64 +1,62 @@
-# Architecture
+# 架构
 
-## The one rule
+## 唯一规则
 
-`packages/core` must never import a platform module. Not `node:fs`, not
-`react-native`, not `expo-*`. Everything the agent can *do* is a **service behind an interface**
-injected at construction time. This is what makes the agent loop testable on a laptop and what keeps
-the phone-specific mess confined to `apps/mobile`.
+`packages/core` 绝不能导入任何平台模块。不能是 `node:fs`，不能是
+`react-native`，也不能是 `expo-*`。智能体能*做*的一切，都是**接口背后的服务**，
+在构造时注入。正因如此，agent loop 才能在笔记本电脑上测试，也正因如此，
+手机相关的混乱才被限制在 `apps/mobile` 里。
 
-The dependency direction is strictly one-way:
+依赖方向严格单向：
 
 ```
 apps/mobile  ──▶  packages/capabilities  ──▶  packages/core
    (Expo/RN)          (tools, guard)            (pure kernel)
 ```
 
-`packages/capabilities` has a **`./node` subpath** for the Node-only backends (`node:fs`,
-`node:child_process`). The root entry point must stay importable from React Native, so a React
-Native bundle never reaches `node:*` through `@mobileclaw/capabilities`.
+`packages/capabilities` 为仅限 Node 的后端（`node:fs`、
+`node:child_process`）提供了一个 **`./node` 子路径**。根入口必须始终能从 React Native 导入，
+因此 React Native bundle 永远不会通过 `@mobileclaw/capabilities` 触达 `node:*`。
 
-## Layers
+## 分层
 
-### 1. Kernel (`packages/core`)
+### 1. 内核（`packages/core`）
 
-| Module | Responsibility |
+| 模块 | 职责 |
 | --- | --- |
-| `context.ts` | Service container + logger + per-plugin store. Child contexts resolve services through their ancestors, so a plugin sees what the host published. |
-| `events.ts` | Typed event bus. **Hosts that add events must declare them as a type alias**, not an interface — TypeScript only gives type aliases an implicit index signature, which is what `extends EventMap` needs. |
-| `plugin.ts` | `PluginHost`: loads plugins, checks `inject` **before** `apply`, registers declared tools, rolls back partial registration on failure. A broken plugin is contained, never fatal. |
-| `tools-registry.ts` | Tool registration + validation + execution. Rejects duplicate and non-snake_case names (silent overwrite would make behaviour depend on plugin order). Converts Zod schemas to JSON Schema by hand. |
-| `path-guard.ts` | Lexical, I/O-free path containment. Containment is authoritative: a path outside the roots is refused whether it got there via `..` or directly. |
-| `permission.ts` | The only place "may this run?" is answered. Evaluation order: session allowlist → deny rules → allow rules → `alwaysAsk` → `alwaysAskRisks` → `riskModes` → `defaultMode`. |
-| `agent.ts` | The loop. Streaming call, tool-call aggregation, permission gate, tool execution, transcript, stop conditions. |
-| `provider/*` | `BaseProvider` (stream → single message, plus the SSE parser) and `OpenAiCompatibleProvider`. |
-| `store.ts` | `ConversationStore` over any `KeyValueStore`, so the app can use SQLite and tests can use memory. |
+| `context.ts` | 服务容器 + logger + 每插件 store。子 context 通过其祖先解析服务，因此插件能看到 host 发布的内容。 |
+| `events.ts` | 类型化的事件总线。**要新增事件的 host 必须以类型别名声明它们**，而不是接口——TypeScript 只给类型别名隐式索引签名，而这正是 `extends EventMap` 所需要的。 |
+| `plugin.ts` | `PluginHost`：加载插件，在 `apply` **之前**检查 `inject`，注册已声明的工具，在失败时回滚部分注册。出故障的插件会被隔离，绝不会致命。 |
+| `tools-registry.ts` | 工具的注册 + 校验 + 执行。拒绝重名和非 snake_case 名称（静默覆盖会让行为取决于插件顺序）。手工把 Zod schema 转换成 JSON Schema。 |
+| `path-guard.ts` | 纯词法、不做 I/O 的路径包含检查。包含关系是权威判定：根目录之外的路径，无论它是经由 `..` 还是直接到达，一律拒绝。 |
+| `permission.ts` | 唯一回答「这段能不能跑？」的地方。判定顺序：session 允许列表 → deny 规则 → allow 规则 → `alwaysAsk` → `alwaysAskRisks` → `riskModes` → `defaultMode`。 |
+| `agent.ts` | 主循环。流式调用、tool call 聚合、权限门、工具执行、transcript、停止条件。 |
+| `provider/*` | `BaseProvider`（stream → 单条消息，外加 SSE 解析器）和 `OpenAiCompatibleProvider`。 |
+| `store.ts` | 基于任意 `KeyValueStore` 的 `ConversationStore`，因此应用可以用 SQLite，测试可以用内存实现。 |
 
-### 2. Capabilities (`packages/capabilities`)
+### 2. 能力层（`packages/capabilities`）
 
-`GuardedFileSystem` implements `FileSystemService` on top of a small `FsDriver` port. **Tools never
-resolve paths themselves** — every model-supplied path goes through the guard inside the filesystem
-service, which is the single chokepoint for containment.
+`GuardedFileSystem` 在一个小巧的 `FsDriver` 端口之上实现 `FileSystemService`。**工具从不自行解析路径**——
+模型给出的每一条路径都会经过文件系统服务内部的守卫，这里是包含检查的唯一卡点。
 
-Drivers:
+驱动：
 
-- `ExpoFsDriver` (mobile, in `apps/mobile`) over `expo-file-system`'s `File`/`Directory` API.
-- `NodeFsDriver` (`@mobileclaw/capabilities/node`) over `fs/promises`, for tests and a future CLI.
+- `ExpoFsDriver`（移动端，位于 `apps/mobile`），基于 `expo-file-system` 的 `File`/`Directory` API。
+- `NodeFsDriver`（`@mobileclaw/capabilities/node`），基于 `fs/promises`，用于测试和未来的 CLI。
 
-Tools are grouped into six plugins so a user can disable, say, shell execution without losing file
-management. The bundles are created by `capabilityPlugins(deps)`; the host publishes the platform
-services *before* loading them, which is what lets `inject` be validated up front.
+工具被归入六个插件，这样用户可以禁用比如 shell 执行，而不失去文件管理能力。这些包由
+`capabilityPlugins(deps)` 创建；host 会在加载它们*之前*发布平台服务，这正是 `inject` 得以提前校验的原因。
 
-### 3. App (`apps/mobile`)
+### 3. 应用（`apps/mobile`）
 
-- `src/runtime/runtime.ts` — `MobileClawRuntime`: the facade the UI talks to. Owns the context,
-  plugin host, registry, permission gate and agent; rebuilds provider/agent when config changes.
-- `src/runtime/services/*` — the platform adapters (file system, HTTP, shell, system automation,
-  SecureStore, SQLite key/value).
-- `src/ui/*` — React: runtime provider, approval sheet, tool card, theme.
-- `app/*` — Expo Router screens: chat, settings, permissions.
+- `src/runtime/runtime.ts` — `MobileClawRuntime`：UI 与之对话的门面。持有 context、
+  plugin host、registry、权限门和 agent；配置变化时重建 provider/agent。
+- `src/runtime/services/*` — 各平台适配器（文件系统、HTTP、shell、系统自动化、
+  SecureStore、SQLite 键值存储）。
+- `src/ui/*` — React：runtime provider、授权面板、工具卡片、主题。
+- `app/*` — Expo Router 页面：对话、设置、权限。
 
-## Request lifecycle
+## 请求生命周期
 
 ```
 user taps Run
@@ -83,31 +81,31 @@ user taps Run
    └─ events stream to React          text deltas render live; tool cards update in place
 ```
 
-Every tool call gets exactly one tool message — an unanswered call makes the next request invalid, so
-cancellation still writes a `[E_CANCELLED]` result before returning.
+每次 tool call 恰好得到一条 tool message——未应答的调用会让下一次请求非法，因此
+即使发生取消，也会在返回前写入一条 `[E_CANCELLED]` 结果。
 
-## Invariants worth preserving
+## 值得坚守的不变量
 
-1. **`packages/core` imports nothing platform-specific.** If you need a capability there, it belongs
-   in an interface.
-2. **Every model-supplied path passes the guard.** No exceptions, no "just this once" shortcuts.
-3. **A tool failure is data, not an exception.** Errors reach the model as `[E_*]` strings so it can
-   adapt; only programmer errors throw past the loop.
-4. **One tool call → one tool result.** Even on denial and cancellation.
-5. **Non-zero exit codes never throw.** `shell_run` returns `exitCode` so the model can read stderr.
-6. **`[DONE]` does not erase `finish_reason`.** `BaseProvider` keeps the first reported reason.
-7. **Transport is injected, providers are derived.** The provider is a projection of the config; the
-   *fetch* implementation is what tests and hosts replace.
-8. **Capabilities degrade with an explanation.** `python_status`, `shell_which` and `shizuku_status`
-   exist so the model can discover what is missing and tell the user how to enable it.
+1. **`packages/core` 不导入任何平台相关的东西。** 如果你在那里需要某项能力，它应当属于
+   某个接口。
+2. **模型给出的每一条路径都要过守卫。** 没有例外，没有"就这一次"的捷径。
+3. **工具失败是数据，不是异常。** 错误以 `[E_*]` 字符串的形式到达模型，让它能自行
+   调整；只有程序员的编码错误才会抛出主循环之外。
+4. **一次 tool call → 一条 tool result。** 即便被拒绝、被取消也一样。
+5. **非零退出码永不抛出异常。** `shell_run` 返回 `exitCode`，让模型能读取 stderr。
+6. **`[DONE]` 不会抹掉 `finish_reason`。** `BaseProvider` 保留最先上报的 reason。
+7. **传输是注入的，provider 是派生出来的。** provider 是配置的投影；
+   测试和 host 真正替换的是 *fetch* 实现。
+8. **能力缺失要给出解释。** `python_status`、`shell_which` 和 `shizuku_status`
+   的存在，就是为了让模型能发现缺了什么，并告诉用户如何启用。
 
-## Testing strategy
+## 测试策略
 
-| Suite | What it locks down |
+| 测试套件 | 它锁定了什么 |
 | --- | --- |
-| `packages/core/test` (56) | Event bus semantics, service resolution, path containment, permission evaluation, Zod→JSON Schema, SSE chunk splitting, agent loop (tool use, denial, step limit, cancellation, persistence). |
-| `packages/capabilities/test` (34) | Guarded filesystem on real temp dirs, glob/grep, edits, dry runs, shell stdout/exit codes/timeout/kill, Python and Shizuku degradation, HTML sanitising. |
-| `apps/mobile/test` (24) | The push→pull streaming bridge, approval broker, config merge, storage adapters, and a full turn through the **real** OpenAI provider against a fake streaming `fetch`. |
+| `packages/core/test`（56） | 事件总线语义、服务解析、路径包含、权限判定、Zod→JSON Schema、SSE 分块、agent loop（工具使用、拒绝、步数上限、取消、持久化）。 |
+| `packages/capabilities/test`（34） | 真实临时目录上的受守卫文件系统、glob/grep、编辑、dry run、shell 的 stdout/退出码/超时/kill、Python 与 Shizuku 的降级表现、HTML 清洗。 |
+| `apps/mobile/test`（24） | push→pull 流式桥、授权 broker、配置合并、存储适配器，以及在伪流式 `fetch` 上跑通**真实** OpenAI provider 的完整一轮对话。 |
 
-`pnpm check` runs typecheck (all three packages) plus all suites. A device build is only needed for
-things that genuinely need a device: Expo native modules, intents, and the Kotlin bridge.
+`pnpm check` 会运行类型检查（三个包）以及全部测试套件。只有确实需要真机的功能才需要构建设备版本：
+Expo 原生模块、intents，以及 Kotlin 桥。
