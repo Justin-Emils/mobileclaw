@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MobileClaw 线框图 · 2026-10-10</title>
+<style>
+/* ============================================================
+   MobileClaw 线框图（Wireframe）· 2026-10-10
+   灰阶结构稿：只表达布局 / 信息层级 / 入口位置，不做视觉设计
+   ============================================================ */
+:root{
+  --ink:#1f2937;         /* 主文字 */
+  --sub:#667085;         /* 次文字 */
+  --line:#c2cad4;        /* 实线框（静态元素） */
+  --line-strong:#98a2b3; /* 强调边框 */
+  --fill:#eef1f5;        /* 占位填充 */
+  --fill-2:#e2e7ee;      /* 占位填充（深） */
+  --dash:#98a2b3;        /* 虚线框（动态 / 条件内容） */
+  --anno:#1e63d6;        /* 标注 */
+  --warn:#b54708;        /* 风险提示（线框图内仅作语义提示） */
+  --paper:#ffffff;
+  --canvas:#f3f5f8;
+  --mono:"JetBrains Mono",Consolas,monospace;
+  --sans:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--sans);background:var(--canvas);color:var(--ink);padding:34px 30px 60px}
+
+/* ---------- 页头 ---------- */
+.board-head{max-width:1560px;margin:0 auto 26px}
+.board-head h1{font-size:25px;letter-spacing:.3px}
+.board-head h1 span{color:var(--sub);font-weight:400;font-size:16px;margin-left:10px}
+.board-head p{margin-top:8px;font-size:13px;color:var(--sub);line-height:1.75;max-width:1000px}
+.legend{display:flex;flex-wrap:wrap;gap:18px;margin-top:16px;padding:13px 16px;background:var(--paper);border:1px solid var(--line);border-radius:10px;font-size:12px;color:var(--sub)}
+.legend i{font-style:normal;display:inline-flex;align-items:center;gap:7px}
+.sw{width:26px;height:14px;border-radius:3px;display:inline-block;flex-shrink:0}
+.sw.solid{border:1px solid var(--line);background:#fff}
+.sw.dash{border:1px dashed var(--dash);background:#fff}
+.sw.bar{background:var(--fill);height:8px;border-radius:2px;width:38px}
+.sw.anno{background:var(--anno);border-radius:50%;width:15px;height:15px}
+
+/* ---------- 画板网格 ---------- */
+.board{max-width:1560px;margin:0 auto;display:flex;flex-wrap:wrap;gap:34px;align-items:flex-start}
+.frame{width:436px}
+.frame.wide{width:100%}
+.frame h2{font-size:14.5px;font-weight:600;display:flex;align-items:baseline;gap:9px;margin-bottom:4px}
+.frame h2 .no{font-family:var(--mono);font-size:12px;color:#fff;background:var(--ink);border-radius:5px;padding:2px 7px}
+.frame h2 .req{font-family:var(--mono);font-size:10.5px;color:var(--sub);font-weight:400}
+.frame h2 .title-en{font-size:10.5px;color:var(--sub);font-family:var(--mono);font-weight:400}
+.frame .desc{font-size:11.5px;color:var(--sub);margin:4px 0 10px;line-height:1.6}
+
+/* ---------- 设备外框 ---------- */
+.dev{
+  width:434px;background:var(--paper);border:1.5px solid var(--line-strong);border-radius:16px;padding:12px;
+  background-image:radial-gradient(rgba(152,162,179,.28) 1px, transparent 1px);background-size:12px 12px;
+}
+.dev-inner{background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.status{display:flex;justify-content:space-between;font-size:10.5px;color:var(--sub);padding:7px 12px;border-bottom:1px dashed var(--line);font-family:var(--mono)}
+
+/* ---------- 通用线框元件 ---------- */
+.bar{height:8px;border-radius:2px;background:var(--fill);display:block}
+.bar.d{background:var(--fill-2)}
+.bar.t{height:10px;border-radius:3px}
+.bar.w95{width:95%}.bar.w85{width:85%}.bar.w75{width:75%}.bar.w65{width:65%}.bar.w55{width:55%}.bar.w45{width:45%}.bar.w35{width:35%}.bar.w25{width:25%}
+.row{display:flex;gap:8px;align-items:center}
+.col{display:flex;flex-direction:column;gap:6px}
+.grow{flex:1}
+.ph-line{display:flex;flex-direction:column;gap:5px}
+.ph-line .bar:nth-child(2){width:92%}
+.ph-line .bar:nth-child(3){width:74%}
+
+.box{border:1px solid var(--line);border-radius:7px;padding:9px 10px;background:#fff}
+.box.dashed{border:1px dashed var(--dash);background:transparent}
+.box.fill{background:var(--fill);border-color:var(--fill-2)}
+.btn-w{border:1.4px solid var(--ink);border-radius:6px;padding:6px 12px;font-size:11px;text-align:center;background:#fff;white-space:nowrap}
+.btn-w.solid{background:var(--ink);color:#fff}
+.btn-w.sm{padding:4px 8px;font-size:10px;border-width:1px}
+.btn-w.ghost{border-color:var(--line-strong);color:var(--sub)}
+.icon-sq{width:26px;height:26px;border:1px solid var(--line);border-radius:7px;background:var(--fill);flex-shrink:0}
+.icon-sq.round{border-radius:50%}
+.av{width:28px;height:28px;border-radius:7px;background:var(--fill-2);border:1px solid var(--line);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9.5px;color:var(--sub)}
+.av.round{border-radius:50%}
+.tag{border:1px solid var(--line-strong);border-radius:20px;padding:2px 8px;font-size:9.5px;color:var(--sub);white-space:nowrap;display:inline-block}
+.tag.dark{border-color:var(--ink);color:var(--ink)}
+.tag.tier{font-family:var(--mono);border-radius:4px;padding:1px 5px;font-weight:700;color:var(--ink);border-color:var(--ink)}
+.tag.tier.risk{border-style:dashed;color:var(--warn)}
+.chip-row{display:flex;gap:6px;align-items:center}
+.divider{height:1px;background:var(--line);margin:8px 0}
+.dash-divider{height:1px;border-top:1px dashed var(--line);margin:8px 0}
+.sect{font-size:10px;letter-spacing:1.2px;color:var(--sub);margin:10px 0 6px;font-weight:600}
+.appbar-w{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line)}
+.appbar-w .h-title{font-size:13px;font-weight:600}
+.body{padding:10px 12px 12px}
+.list-item{display:flex;gap:9px;align-items:center;border:1px solid var(--line);border-radius:7px;padding:8px 9px}
+.list-item+.list-item{margin-top:6px}
+.stat3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.stat3 .s{border:1px solid var(--line);border-radius:7px;padding:9px 6px;text-align:center}
+.stat3 .s .n{font-size:15px;font-weight:700;font-family:var(--mono)}
+.stat3 .s .l{font-size:9px;color:var(--sub);margin-top:3px}
+.meter{height:8px;border:1px solid var(--line);border-radius:4px;overflow:hidden;background:#fff}
+.meter i{display:block;height:100%;background:var(--fill-2)}
+.meter.split i:first-child{background:var(--fill-2)}
+.meter.split i:last-child{background:#fff;border-left:1px solid var(--line)}
+.tabbar-w{display:flex;border-top:1px solid var(--line)}
+.tabbar-w .tb{flex:1;text-align:center;padding:8px 0 6px;font-size:9px;color:var(--sub)}
+.tabbar-w .tb.on{color:var(--ink);font-weight:600;border-top:2px solid var(--ink);margin-top:-1px}
+.tabbar-w .tb .ic{width:14px;height:14px;border:1px solid currentColor;border-radius:4px;margin:0 auto 3px}
+.input-w{display:flex;gap:7px;align-items:center;padding:9px 12px;border-top:1px solid var(--line)}
+.input-w .fld{flex:1;border:1px solid var(--line-strong);border-radius:20px;padding:8px 12px;font-size:10.5px;color:var(--sub);display:flex;align-items:center;gap:6px}
+.input-w .snd{width:30px;height:30px;border-radius:50%;background:var(--ink);flex-shrink:0}
+.bubble{border:1px solid var(--line);border-radius:12px;padding:8px 10px;font-size:10.5px;line-height:1.65;max-width:88%}
+.bubble.me{margin-left:auto;background:var(--fill);border-radius:12px 12px 4px 12px}
+.bubble.ai{border-radius:12px 12px 12px 4px}
+.src-note{font-size:9px;color:var(--sub);font-family:var(--mono);padding:0 3px 3px}
+.tl{display:flex;gap:9px}
+.tl .dot{width:18px;height:18px;border-radius:50%;border:1.4px solid var(--ink);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px}
+.tl .dot.warn{border-style:dashed;border-color:var(--warn);color:var(--warn)}
+.tl-line{width:1px;background:var(--line);flex:1;margin:2px auto 0}
+.fact{font-family:var(--mono);font-size:9.5px;color:var(--sub);border:1px dashed var(--dash);border-radius:5px;padding:6px 8px;line-height:1.7;margin-top:6px;word-break:break-all;background:#fbfcfd}
+.barchart{display:flex;flex-direction:column;gap:7px}
+.barchart .brow{display:flex;align-items:center;gap:8px;font-size:9.5px;color:var(--sub)}
+.barchart .brow .bl{width:78px;flex-shrink:0}
+.barchart .brow .bt{flex:1;height:8px;border:1px solid var(--line);border-radius:3px;overflow:hidden}
+.barchart .brow .bt i{display:block;height:100%;background:var(--fill-2)}
+.barchart .brow .bv{width:34px;text-align:right;font-family:var(--mono);color:var(--ink)}
+.sheet-dim{background:repeating-linear-gradient(45deg,#f5f7fa,#f5f7fa 6px,#eef1f5 6px,#eef1f5 12px);border-bottom:1px dashed var(--line);height:150px;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--sub)}
+.sheet{background:#fff;padding:10px 12px 12px}
+.sheet .grab{width:34px;height:3px;border-radius:3px;background:var(--line-strong);margin:0 auto 9px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;text-align:center;margin-top:9px}
+.grid4 .gi .ic{width:36px;height:36px;border:1px solid var(--line-strong);border-radius:10px;margin:0 auto 4px;background:var(--fill)}
+.grid4 .gi .ic.hl{border-width:2px;border-color:var(--ink);background:#fff}
+.grid4 .gi .nm{font-size:9px;color:var(--sub)}
+.grid4 .gi .nm.hl{color:var(--ink);font-weight:700}
+
+/* 标注 */
+.anno{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--anno);color:#fff;font-size:9px;font-family:var(--mono);font-weight:700;margin-right:4px;flex-shrink:0}
+.specs{list-style:none;margin-top:10px;display:flex;flex-direction:column;gap:5px}
+.specs li{font-size:11px;color:var(--sub);line-height:1.6;display:flex;gap:7px}
+.specs li .anno{margin-top:1px}
+.specs li b{color:var(--ink);font-weight:600}
+.inline-anno{position:relative}
+.flow{display:flex;flex-wrap:wrap;gap:14px;align-items:stretch}
+.flow-col{display:flex;flex-direction:column;gap:9px;flex:1;min-width:190px}
+.flow-box{border:1.4px solid var(--ink);border-radius:8px;padding:9px 11px;font-size:11.5px;background:#fff}
+.flow-box.dash{border-style:dashed;border-color:var(--warn);color:var(--warn)}
+.flow-box .t{font-weight:600;margin-bottom:3px}
+.flow-box .d{font-size:9.5px;color:var(--sub);line-height:1.55}
+.flow-box.dash .d{color:var(--warn);opacity:.85}
+.flow-arrow{display:flex;align-items:center;color:var(--line-strong);font-size:16px;font-weight:700}
+.zone{border:1px dashed var(--dash);border-radius:10px;padding:12px;flex:1;min-width:280px}
+.zone .zt{font-size:11px;font-weight:700;margin-bottom:9px;display:flex;align-items:center;gap:8px}
+.zone.safe .zt .dot{width:9px;height:9px;border-radius:50%;background:#fff;border:2px solid var(--ink)}
+.zone.risk{border-color:var(--warn)}
+.zone.risk .zt{color:var(--warn)}
+.zone.risk .zt .dot{width:9px;height:9px;border-radius:50%;background:#fff;border:2px dashed var(--warn)}
+.foot{margin-top:22px;font-size:11px;color:var(--sub);text-align:center}
+</style>
+</head>
+<body>
+
+<div class="board-head">
+  <h1>MobileClaw 线框图 <span>Wireframe · 2026-10-10</span></h1>
+  <p>依据 PRD（<code>deliverables/product-strategy/prd-mobileclaw-2026-10-10.md</code>）绘制的<b>灰阶结构稿</b>：只表达布局、信息层级、入口位置与状态分支，不含视觉设计。设备基准宽 390pt，与交互原型逐屏对应。每屏下方标注对应 PRD 需求编号（REQ）与用户故事（US）。</p>
+  <div class="legend">
+    <i><span class="sw solid"></span>实线框 · 静态元素</i>
+    <i><span class="sw dash"></span>虚线框 · 动态 / 条件内容（可能不可读、可能失败）</i>
+    <i><span class="sw bar"></span>灰条 · 文本占位（长度示意层级）</i>
+    <i><span class="sw anno"></span>编号 · 结构说明，见屏下清单</i>
+    <i><span class="tag tier">1</span> 通道层级 1–6（虚线 = 5/6 层，进阶包）</i>
+  </div>
+</div>
+
+<div class="board">
+
+  <!-- ================= 00 · 信息架构与主流程 ================= -->
+  <div class="frame wide">
+    <h2><span class="no">00</span> 信息架构与主流程 <span class="title-en">IA &amp; Core Flow</span> <span class="req">PRD §7.2 / §7.3 / §6.3</span></h2>
+    <div class="desc">三条「进来」的门并列，全部投进对话主干；出口只有三种。通道 1–4 为主体验，5–6 仅侧载进阶包。</div>
+    <div class="dev" style="width:100%">
+      <div class="dev-inner" style="padding:14px">
+        <div class="flow">
+          <div class="flow-col" style="max-width:210px">
+            <div class="flow-box"><div class="t">① 分享 <span class="tag tier">2</span></div><div class="d">ACTION_SEND(_MULTIPLE)｜文件 / 图片 / 文字 / 多选｜68 App 覆盖</div></div>
+            <div class="flow-box"><div class="t">② 选中文字 <span class="tag tier">2</span></div><div class="d">ACTION_PROCESS_TEXT｜一段文本｜实测 12 App 已注册</div></div>
+            <div class="flow-box"><div class="t">③ 深链 <span class="tag tier">2</span></div><div class="d">Intent｜一句话跳目标页｜188 有依据 / 93 待实测</div></div>
+          </div>
+          <div class="flow-arrow">▶</div>
+          <div class="flow-col">
+            <div class="flow-box" style="border-width:2px"><div class="t">对话主干（唯一容器）</div><div class="d">三条门的内容都落到对话上下文，携带来源包名；类型嗅探分流：文件 / 文本 / 图片 / 链接 / 混合。<b>不另起独立向导</b></div></div>
+            <div class="flow-box"><div class="t">intent_parse 意图解析</div><div class="d">解析出子任务与目标 App</div></div>
+            <div class="flow-box dash"><div class="t">PathGuard 词法拦截</div><div class="d">越权指令 → 直接拒绝 + 给理由，<b>不进审批</b></div></div>
+          </div>
+          <div class="flow-arrow">▶</div>
+          <div class="flow-col">
+            <div class="flow-box" style="border-width:2px"><div class="t">confirm_plan 任务复述</div><div class="d">编排类任务在此<b>一次逻辑确认</b>；拒绝 / 超时 = 零副作用</div></div>
+            <div class="flow-box"><div class="t">执行 · 通道 1–4 优先</div><div class="d">收拢 → 系统标准数据 / 服务层；搬运 → 分享 / 选中文字 / 剪贴板；编排 → 深链 verb 表；写改删 → 一次审批；读写 → 零弹窗</div></div>
+            <div class="flow-box dash"><div class="t">代理 · 通道 5–6（侧载进阶包）</div><div class="d">Shizuku 语义树 + 发送前收件人核对 + 写入后回读｜不进主包承诺</div></div>
+          </div>
+          <div class="flow-arrow">▶</div>
+          <div class="flow-col" style="max-width:200px">
+            <div class="flow-box"><div class="t">出口（三种）</div><div class="d">再分享（系统 chooser）/ 保存到目录 / 复制。<b>严禁承诺「原地改好回原 App」</b></div></div>
+            <div class="flow-box"><div class="t">审计回执</div><div class="d">diff / 决策 / 风险分级可回看；陈述由代码从执行事实生成</div></div>
+          </div>
+        </div>
+
+        <div class="dash-divider" style="margin:16px 0"></div>
+        <div class="row" style="align-items:stretch;gap:14px">
+          <div class="zone safe">
+            <div class="zt"><span class="dot"></span>合法通道 1–4 · 主体验（可上架）</div>
+            <div class="row" style="flex-wrap:wrap;gap:6px">
+              <span class="tag">1 服务层</span><span class="tag">2 官方 Intent / 分享 / 深链</span><span class="tag">3 剪贴板</span><span class="tag">4 通知监听</span>
+            </div>
+            <div class="specs" style="margin-top:8px"><li><span>收拢 / 搬运 / 编排 / 理解 全部落在此层；北向健康度 = 这一层的占比越高越好。</span></li></div>
+          </div>
+          <div class="zone risk">
+            <div class="zt"><span class="dot"></span>通道 5–6 · 侧载进阶包（不可上架）</div>
+            <div class="row" style="flex-wrap:wrap;gap:6px">
+              <span class="tag tier risk">5 无障碍</span><span class="tag tier risk">6 Shizuku</span>
+            </div>
+            <div class="specs" style="margin-top:8px"><li><span>仅「代理」模式下探；代价在开启前明示：封号 + 不可上架 + 每次重启重授权。</span></li></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>三条门并列、无优先级</b>：分享 / 选中文字 / 深链都只投进对话，不各自开分支流程（PRD §7.2）。</span></li>
+      <li><span class="anno">2</span><span><b>对话是唯一容器</b>：取消独立向导页，降低"两条平行路径"的实现与认知成本。</span></li>
+      <li><span class="anno">3</span><span><b>回程受平台限制</b>：ACTION_SEND 只给 URI + 临时读权 → 出口缩为三种，界面文案不得暗示可回写来源 App。</span></li>
+      <li><span class="anno">4</span><span><b>5–6 层可视化隔离</b>：进阶包在设置内单独入口，主流程不出现无障碍/Shizuku 字样。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 01 · 对话主页 ================= -->
+  <div class="frame">
+    <h2><span class="no">01</span> 对话主页（主干） <span class="req">US-C1~C4 · REQ-02/03/04</span></h2>
+    <div class="desc">默认落点。三条门状态条常驻，快捷场景卡替代空白页说教。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w">
+        <span class="h-title">MobileClaw</span>
+        <span class="tag dark">模型 chip ▾</span>
+        <span class="grow"></span>
+        <span class="icon-sq"></span><span class="icon-sq"></span>
+      </div>
+      <div class="body" style="padding-bottom:6px">
+        <div class="chip-row" style="overflow:hidden">
+          <span class="tag">三条门已开启</span><span class="tag">分享 · 68 App</span><span class="tag">选中文字 · 12</span><span class="tag">深链 · 188</span>
+        </div>
+        <div class="sect">空状态 · 品牌语</div>
+        <div class="bar t" style="width:62%;background:var(--fill-2)"></div>
+        <div class="ph-line" style="margin-top:8px">
+          <span class="bar w85"></span><span class="bar w65"></span>
+        </div>
+        <div class="sect">快捷场景卡 ×4（可点，替代示例文案）</div>
+        <div class="list-item"><span class="icon-sq" style="border-radius:9px"></span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w75"></span></div><span class="tag">›</span></div>
+        <div class="list-item"><span class="icon-sq" style="border-radius:9px"></span><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w85"></span></div><span class="tag">›</span></div>
+        <div class="list-item"><span class="icon-sq" style="border-radius:9px"></span><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w75"></span></div><span class="tag">›</span></div>
+        <div class="list-item"><span class="icon-sq" style="border-radius:9px"></span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w65"></span></div><span class="tag">›</span></div>
+      </div>
+      <div class="input-w"><div class="fld">让 MobileClaw 做点什么…</div><span class="snd"></span></div>
+      <div class="tabbar-w"><div class="tb on"><span class="ic"></span>对话</div><div class="tb"><span class="ic"></span>能力</div><div class="tb"><span class="ic"></span>审计</div><div class="tb"><span class="ic"></span>设置</div></div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>三条门状态条</b>：一行 Chip，横向可滚动；让用户先知道"能怎么进来"，再谈能力（REQ-02/03/04）。</span></li>
+      <li><span class="anno">2</span><span><b>空状态 = 4 张场景卡</b>：收拢 / 编排 / 分享模拟 / 文件动作，各自指向一条可演示路径，替代说明书式文案。</span></li>
+      <li><span class="anno">3</span><span><b>输入栏常驻</b>：对话是唯一容器，任何流程都回到这里继续。</span></li>
+      <li><span class="anno">4</span><span><b>底部 Tab 四项</b>：对话 / 能力 / 审计 / 设置；审计与能力是差异化卖点的常驻入口。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 02 · 收拢汇总 ================= -->
+  <div class="frame">
+    <h2><span class="no">02</span> 收拢汇总 <span class="req">US-C1 · REQ-05 · 通道1/2/4</span></h2>
+    <div class="desc">"今天谁找过我"。可读来源逐条可跳回；不可读来源单独分区、如实标注。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">今天的收拢汇总</span><span class="grow"></span><span class="tag">通道 1·2·4</span></div>
+      <div class="body">
+        <div class="stat3">
+          <div class="s"><div class="n">6</div><div class="l">可读来源</div></div>
+          <div class="s"><div class="n">3</div><div class="l">不可读·已标注</div></div>
+          <div class="s"><div class="n">2</div><div class="l">待办事项</div></div>
+        </div>
+        <div class="sect">① 分组：找人 / 找事</div>
+        <div class="list-item"><span class="av">图标</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w85"></span></div><span class="btn-w sm ghost">跳转</span></div>
+        <div class="list-item"><span class="av">图标</span><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w75"></span></div><span class="btn-w sm ghost">跳转</span></div>
+        <div class="list-item"><span class="av">图标</span><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w85"></span></div><span class="btn-w sm ghost">跳转</span></div>
+        <div class="sect">② 系统标准数据（日历 / 联系人 / 媒体）</div>
+        <div class="list-item"><span class="av">图标</span><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w75"></span></div><span class="btn-w sm ghost">打开</span></div>
+        <div class="sect">③ 不可读来源 · 虚线框（读不到 ≠ 没有）</div>
+        <div class="list-item" style="border-style:dashed"><span class="av" style="opacity:.6">图标</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w85" style="background:repeating-linear-gradient(90deg,#e2e7ee,#e2e7ee 5px,#fff 5px,#fff 10px)"></span></div><span class="btn-w sm ghost">跳转</span></div>
+        <div class="list-item" style="border-style:dashed"><span class="av" style="opacity:.6">图标</span><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w75" style="background:repeating-linear-gradient(90deg,#e2e7ee,#e2e7ee 5px,#fff 5px,#fff 10px)"></span></div><span class="btn-w sm ghost">跳转</span></div>
+        <div class="box dashed" style="margin-top:10px"><div class="ph-line"><span class="bar w95"></span><span class="bar w65"></span></div></div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>三条统计给结论</b>：可读 / 不可读 / 待办；不可读数量前置暴露，建立"不伪造"的信任预期。</span></li>
+      <li><span class="anno">2</span><span><b>每条附通道来源</b>：通知监听（通道4）· 系统日历（通道1）· 服务层（通道1）——把"合法通道"变成用户看得见的标签。</span></li>
+      <li><span class="anno">3</span><span><b>不可读用虚线 + 斜纹占位</b>：视觉上就不像"有内容"，配合文案"该来源不可读，不推测"。</span></li>
+      <li><span class="anno">4</span><span><b>每行都有跳转</b>：收拢不替代原 App，只做导航入口，规避"读取其他 App 数据"承诺。</span></li>
+      <li><span class="anno">5</span><span><b>底部合规说明条</b>：一句话讲清本次只用了通道 1–4。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 03 · 编排确认 ================= -->
+  <div class="frame">
+    <h2><span class="no">03</span> 编排确认 confirm_plan <span class="req">US-C3 · REQ-06 / 10</span></h2>
+    <div class="desc">一次逻辑确认：任务复述 + 步数预算 + 每步通道与风险分级，确认后中间不再打断。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">任务复述</span><span class="grow"></span><span class="tag dark">一次逻辑确认</span></div>
+      <div class="body">
+        <div class="bar t" style="width:52%;background:var(--fill-2)"></div>
+        <div class="bubble ai" style="margin-top:9px;max-width:100%"><div class="ph-line"><span class="bar w95"></span><span class="bar w75"></span></div></div>
+
+        <div class="box" style="margin-top:10px">
+          <div class="row"><span class="tag">② 步数预算</span><span class="grow"></span><span class="tag">优化 7 / 预算 12</span></div>
+          <div class="meter split" style="margin-top:7px"><i style="width:58%"></i><i style="width:42%"></i></div>
+          <div class="bar w65" style="margin-top:6px"></div>
+        </div>
+
+        <div class="sect">③ 子任务列表（每步标注通道 + 风险分级）</div>
+        <div class="list-item"><span class="av">1</span><div class="grow ph-line"><span class="bar w75 d"></span><span class="bar w95"></span></div><div class="col" style="gap:3px"><span class="tag tier">1</span><span class="tag">写入</span></div></div>
+        <div class="list-item"><span class="av">2</span><div class="grow ph-line"><span class="bar w65 d"></span><span class="bar w95"></span></div><div class="col" style="gap:3px"><span class="tag tier">2</span><span class="tag">只读</span></div></div>
+        <div class="list-item"><span class="av">3</span><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w85"></span></div><div class="col" style="gap:3px"><span class="tag tier">1</span><span class="tag">写入</span></div></div>
+        <div class="list-item"><span class="av">4</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w75"></span></div><div class="col" style="gap:3px"><span class="tag tier">1</span><span class="tag">写入</span></div></div>
+
+        <div class="box dashed" style="margin-top:10px"><div class="ph-line"><span class="bar w95"></span><span class="bar w85"></span><span class="bar w55"></span></div></div>
+        <div class="row" style="margin-top:11px">
+          <span class="btn-w ghost" style="flex:1">取消</span>
+          <span class="btn-w solid" style="flex:2">④ 确认执行（1 次确认）</span>
+        </div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>顶部先复述再执行</b>：一句话讲清"要做几件事、预计几步、哪些已合并"，替代逐步弹窗（REQ-10）。</span></li>
+      <li><span class="anno">2</span><span><b>步数预算可视化</b>：默认 12 步 vs 跨应用任务 11–16 步的现实冲突必须让用户看见；超预算要有明确状态而非"跑到一半停住"（REQ-06）。</span></li>
+      <li><span class="anno">3</span><span><b>每步两个标签</b>：通道层级（1/2）+ 风险分级（只读 / 写入 / 执行 / 系统）。只读步骤零弹窗，写入类才进审批。</span></li>
+      <li><span class="anno">4</span><span><b>单一主按钮</b>：只有一个"确认执行"，取消为次按钮；不可逆动作在真正发生前再确认一次。</span></li>
+      <li><span class="anno">5</span><span><b>拒绝 / 超时 = 零副作用</b>，已执行的保留且可回滚（对应 PRD §2.3 中途取消）。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 04 · 执行结果 ================= -->
+  <div class="frame">
+    <h2><span class="no">04</span> 执行结果 <span class="req">REQ-06 / 12 · US-C3</span></h2>
+    <div class="desc">时间线逐条给出结果与证据；失败如实回退、可单独重试，绝不伪造成功。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">正在执行</span><span class="grow"></span><span class="tag">步数 7/12</span></div>
+      <div class="body">
+        <div class="tl"><div class="col" style="align-items:center;gap:0"><span class="dot">✓</span><span class="tl-line"></span></div><div class="grow" style="padding-bottom:10px"><div class="ph-line"><span class="bar w65 d"></span><span class="bar w95"></span></div><div class="fact">re-read → assert ✓</div></div></div>
+        <div class="tl"><div class="col" style="align-items:center;gap:0"><span class="dot">✓</span><span class="tl-line"></span></div><div class="grow" style="padding-bottom:10px"><div class="ph-line"><span class="bar w55 d"></span><span class="bar w85"></span></div><div class="fact">deeplink resolved · param_ok</div></div></div>
+        <div class="tl"><div class="col" style="align-items:center;gap:0"><span class="dot warn">!</span><span class="tl-line"></span></div><div class="grow" style="padding-bottom:10px"><div class="ph-line"><span class="bar w45 d"></span><span class="bar w95"></span></div><div class="fact">re-read 首次断言失败 → 自动修复 → 二次通过</div></div></div>
+        <div class="tl"><div class="col" style="align-items:center;gap:0"><span class="dot">✓</span><span class="tl-line"></span></div><div class="grow" style="padding-bottom:10px"><div class="ph-line"><span class="bar w35 d"></span><span class="bar w65"></span></div></div></div>
+        <div class="tl"><div class="col" style="align-items:center;gap:0"><span class="dot warn">!</span></div><div class="grow"><div class="ph-line"><span class="bar w45 d"></span><span class="bar w85"></span></div><div class="fact">deeplink 未命中（93 条待实测）→ fallback web_search</div><div class="row" style="margin-top:6px"><span class="btn-w sm">② 单独重试</span></div></div></div>
+
+        <div class="box fill" style="margin-top:12px">
+          <div class="row"><span class="tag dark">③ 任务完成 · 4 成功 / 1 回退</span></div>
+          <div class="ph-line" style="margin-top:7px"><span class="bar w95"></span><span class="bar w75"></span></div>
+          <div class="row" style="margin-top:10px"><span class="btn-w ghost" style="flex:1">返回对话</span><span class="btn-w solid" style="flex:2">④ 查看审计回执 ›</span></div>
+        </div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>每步带证据行</b>（等宽字体的 <code>re-read</code> / <code>deeplink</code> 断言结果）：兑现"陈述由代码从执行事实生成"（REQ-12）。</span></li>
+      <li><span class="anno">2</span><span><b>失败不是终点</b>：单独重试按钮只作用于该步，不影响已完成步骤。</span></li>
+      <li><span class="anno">3</span><span><b>汇总用"成功 / 回退"计数</b>，不用"全部成功"话术——回退必须计入结果。</span></li>
+      <li><span class="anno">4</span><span><b>结果页的出口指向审计</b>：把"可审计"变成常规路径而非隐藏功能（REQ-09）。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 05 · 分享进来 ================= -->
+  <div class="frame">
+    <h2><span class="no">05</span> 分享进来（系统 chooser） <span class="req">REQ-02 · US-C2</span></h2>
+    <div class="desc">不自建分享菜单（AEP 强制系统 chooser）；选中 MobileClaw 后内容直接落到对话。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="sheet-dim">① 背景 = 来源 App（微信），做降透明度处理</div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <div class="bar w55" style="margin:0 auto 9px"></div>
+        <div class="box fill"><div class="ph-line"><span class="bar w35 d"></span><span class="bar w95"></span><span class="bar w85"></span></div></div>
+        <div class="sect" style="text-align:center">② 系统 chooser 应用网格</div>
+        <div class="grid4">
+          <div class="gi"><div class="ic"></div><div class="nm">备忘录</div></div>
+          <div class="gi"><div class="ic"></div><div class="nm">Notion</div></div>
+          <div class="gi"><div class="ic hl"></div><div class="nm hl">MobileClaw</div></div>
+          <div class="gi"><div class="ic"></div><div class="nm">复制</div></div>
+        </div>
+        <div class="dash-divider" style="margin:12px 0 8px"></div>
+        <div class="sect">③ 落地后：内容进入对话上下文</div>
+        <div class="row"><span class="tag">来源：微信 · ACTION_SEND</span><span class="grow"></span><span class="tag tier">2</span></div>
+        <div class="bubble ai" style="margin-top:7px"><div class="ph-line"><span class="bar w95"></span><span class="bar w75"></span></div></div>
+        <div class="sect">④ 出口三件套（无回写）</div>
+        <div class="row"><span class="btn-w ghost" style="flex:1">再分享</span><span class="btn-w ghost" style="flex:1">保存</span><span class="btn-w ghost" style="flex:1">复制</span></div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>背景不做遮罩黑，用斜纹示意</b>：线框阶段只表达"来源 App 被压到下层"的层级关系。</span></li>
+      <li><span class="anno">2</span><span><b>MobileClaw 在 chooser 中的位置</b>需要与同类 App 同屏竞争（实测 12 个 AI 类 App 已注册 PROCESS_TEXT）→ 图标与命名要一眼可辨。</span></li>
+      <li><span class="anno">3</span><span><b>携带来源包名</b>：对话里必须显示"来自微信"，这是收拢/搬运可信度的基础（REQ-02）。</span></li>
+      <li><span class="anno">4</span><span><b>出口只有三种</b>：再分享 / 保存 / 复制。UI 上不出现"发回微信"之类暗示回写的入口（PRD §7.1）。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 06 · 文件批处理 ================= -->
+  <div class="frame">
+    <h2><span class="no">06</span> 文件批量重命名 <span class="req">US1 / US-C5 · SAF 通道2</span></h2>
+    <div class="desc">预览 = 结果；同类动作一次确认；重名加序号绝不静默覆盖；执行后可回滚。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">批量重命名 · 预览</span><span class="grow"></span><span class="tag">SAF · 通道2</span></div>
+      <div class="body">
+        <div class="bubble me" style="max-width:100%"><div class="ph-line"><span class="bar w85"></span></div></div>
+        <div class="sect">① 逐项 diff：原名 → 新名</div>
+        <div class="box" style="padding:4px 10px">
+          <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><span class="av" style="width:22px;height:22px;font-size:8px">PDF</span><span class="bar w45 d"></span><span class="tag">→</span><span class="bar w35"></span></div>
+          <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><span class="av" style="width:22px;height:22px;font-size:8px">PDF</span><span class="bar w55 d"></span><span class="tag">→</span><span class="bar w35"></span></div>
+          <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><span class="av" style="width:22px;height:22px;font-size:8px">PPT</span><span class="bar w45 d"></span><span class="tag">→</span><span class="bar w35"></span></div>
+          <div class="row" style="padding:7px 0;border-bottom:1px solid var(--line)"><span class="av" style="width:22px;height:22px;font-size:8px">DOC</span><span class="bar w35 d"></span><span class="tag">→</span><span class="bar w35"></span></div>
+          <div class="row" style="padding:7px 0"><span class="av" style="width:22px;height:22px;font-size:8px">PDF</span><span class="bar w45 d"></span><span class="tag" style="border-style:dashed">② 重名 → 加序号</span></div>
+        </div>
+        <div class="box dashed" style="margin-top:9px"><div class="ph-line"><span class="bar w95"></span><span class="bar w65"></span></div></div>
+        <div class="sect">③ 进度（批量 200 文件 = 分批 + 虚拟列表 + 可取消）</div>
+        <div class="meter"><i style="width:64%"></i></div>
+        <div class="row" style="margin-top:5px"><span class="bar w35 d"></span><span class="grow"></span><span class="bar w25 d"></span></div>
+        <div class="box fill" style="margin-top:10px"><div class="row"><span class="tag">④ 已重命名 ✓ 回读核对通过</span><span class="grow"></span><span class="btn-w sm">回滚</span></div></div>
+        <div class="row" style="margin-top:11px"><span class="btn-w ghost" style="flex:1">取消</span><span class="btn-w solid" style="flex:2">确认执行（1 次确认）</span></div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>逐项 diff 而非文件列表</b>：每行都必须看得见"原名 → 新名"，这是"预览 = 结果"承诺的唯一凭据。</span></li>
+      <li><span class="anno">2</span><span><b>冲突行内提示</b>：重名默认加序号，虚线标签提示决策，绝不静默覆盖（PRD §2.3）。</span></li>
+      <li><span class="anno">3</span><span><b>长任务状态</b>：200 文件时的分批、进度、可取消；部分失败给逐项清单，成功保留、失败可重试。</span></li>
+      <li><span class="anno">4</span><span><b>回滚常驻在结果条里</b>：不藏进二级菜单，因为这是文件动作的核心信任点。</span></li>
+      <li><span class="anno">5</span><span><b>同类动作只确认一次</b>：7 个文件与 200 个文件都是同一个确认按钮（REQ-10）。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 07 · 能力目录 ================= -->
+  <div class="frame">
+    <h2><span class="no">07</span> 能力目录 <span class="req">REQ-01 · PRD §6.3</span></h2>
+    <div class="desc">把"这台手机谁能干什么"变成可回看的清单；通道分级与 tier5–6 占比作为北向健康度。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">能力目录 · 这台手机</span><span class="grow"></span><span class="icon-sq"><span style="font-size:10px">↻</span></span></div>
+      <div class="body">
+        <div class="stat3">
+          <div class="s"><div class="n">234</div><div class="l">已安装 App</div></div>
+          <div class="s"><div class="n">89</div><div class="l">至少能对外干一件事</div></div>
+          <div class="s"><div class="n">281</div><div class="l">深链协议（188 有依据）</div></div>
+        </div>
+        <div class="sect">① 通道分级阶梯（1–4 实线 / 5–6 虚线）</div>
+        <div class="list-item" style="padding:6px 9px"><span class="tag tier">1</span><div class="grow ph-line"><span class="bar w45 d"></span></div><span class="tag">可上架</span></div>
+        <div class="list-item" style="padding:6px 9px"><span class="tag tier">2</span><div class="grow ph-line"><span class="bar w55 d"></span></div><span class="tag">可上架</span></div>
+        <div class="list-item" style="padding:6px 9px"><span class="tag tier">3</span><div class="grow ph-line"><span class="bar w35 d"></span></div><span class="tag">可上架</span></div>
+        <div class="list-item" style="padding:6px 9px"><span class="tag tier">4</span><div class="grow ph-line"><span class="bar w45 d"></span></div><span class="tag">可上架</span></div>
+        <div class="list-item" style="padding:6px 9px;border-style:dashed"><span class="tag tier risk">5</span><div class="grow ph-line"><span class="bar w45 d"></span></div><span class="tag">不可上架</span></div>
+        <div class="list-item" style="padding:6px 9px;border-style:dashed"><span class="tag tier risk">6</span><div class="grow ph-line"><span class="bar w35 d"></span></div><span class="tag">不可上架</span></div>
+        <div class="box" style="margin-top:10px">
+          <div class="row"><span class="tag dark">② 北向健康度 96.8%</span><span class="grow"></span><span class="tag">tier5–6 占 3.2%</span></div>
+          <div class="meter" style="margin-top:7px"><i style="width:96.8%"></i></div>
+        </div>
+        <div class="sect">③ 能力覆盖（接收分享家族 · 同一 ACTION_SEND 门）</div>
+        <div class="barchart">
+          <div class="brow"><span class="bl">任意文件</span><span class="bt"><i style="width:100%"></i></span><span class="bv">68</span></div>
+          <div class="brow"><span class="bl">图片</span><span class="bt"><i style="width:87%"></i></span><span class="bv">59</span></div>
+          <div class="brow"><span class="bl">文字</span><span class="bt"><i style="width:71%"></i></span><span class="bv">48</span></div>
+          <div class="brow"><span class="bl">选中文字</span><span class="bt"><i style="width:18%"></i></span><span class="bv">12</span></div>
+          <div class="brow"><span class="bl">发出去/代理</span><span class="bt"><i style="width:2%"></i></span><span class="bv">≈0</span></div>
+        </div>
+        <div class="bar w75" style="margin-top:9px"></div>
+      </div>
+      <div class="tabbar-w"><div class="tb"><span class="ic"></span>对话</div><div class="tb on"><span class="ic"></span>能力</div><div class="tb"><span class="ic"></span>审计</div><div class="tb"><span class="ic"></span>设置</div></div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>阶梯用实线 / 虚线区分可上架性</b>：线框阶段就固定"安全层 vs 风险层"的表达，避免后续视觉设计把 5/6 层画得同样普通。</span></li>
+      <li><span class="anno">2</span><span><b>健康度前置</b>：tier5–6 占比 3.2% 是本产品可观测的北向指标，应该给用户看见（也提醒团队不越界）。</span></li>
+      <li><span class="anno">3</span><span><b>覆盖条形图带两极对比</b>：接收分享家族很高、"发出去/代理 ≈ 0"——这张图直接解释为什么代理只能进进阶包。</span></li>
+      <li><span class="anno">4</span><span><b>目录只读</b>：页面右上仅"刷新"，无任何"执行/发送"动作，保证能力发现不触发跨 App 副作用（REQ-01）。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 08 · 审计回执 ================= -->
+  <div class="frame">
+    <h2><span class="no">08</span> 审计回执 <span class="req">REQ-09 · 差异化一等公民</span></h2>
+    <div class="desc">一次连接的 diff / 决策 / 风险分级可回看；陈述必须由代码从执行事实生成。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">审计回执</span><span class="grow"></span><span class="tag">会话 chip</span></div>
+      <div class="body">
+        <div class="box fill" style="padding:7px 10px"><div class="row"><span class="tag">✓</span><span class="grow ph-line"><span class="bar w85"></span></span></div></div>
+        <div class="sect">① 逐条动作（通道 + 标题 + 时间戳）</div>
+        <div class="box"><div class="row"><span class="tag tier">1</span><span class="grow ph-line"><span class="bar w55 d"></span></span><span class="tag">16:53:02</span></div><div class="fact">insert events(title=…, dtstart=…) / re-read → _id 找到 ✓</div><div class="ph-line" style="margin-top:6px"><span class="bar w75"></span></div></div>
+        <div class="box" style="margin-top:7px"><div class="row"><span class="tag tier">2</span><span class="grow ph-line"><span class="bar w45 d"></span></span><span class="tag">16:53:09</span></div><div class="fact">deeplink → resolved ✓ · param_ok ✓</div><div class="ph-line" style="margin-top:6px"><span class="bar w65"></span></div></div>
+        <div class="box" style="margin-top:7px"><div class="row"><span class="tag tier">1</span><span class="grow ph-line"><span class="bar w35 d"></span></span><span class="tag">16:53:14</span></div><div class="fact">update note: "" → "上海市…" / re-read 首次 ✗ → 修复后 ✓</div><div class="ph-line" style="margin-top:6px"><span class="bar w85"></span></div></div>
+        <div class="box" style="margin-top:7px;border-style:dashed"><div class="row"><span class="tag tier risk">2</span><span class="grow ph-line"><span class="bar w45 d"></span></span><span class="tag">16:53:21</span></div><div class="fact">deeplink 未命中 → fallback web_search ✓（未伪造）</div></div>
+        <div class="box dashed" style="margin-top:10px"><div class="ph-line"><span class="bar w95"></span><span class="bar w55"></span></div></div>
+      </div>
+      <div class="tabbar-w"><div class="tb"><span class="ic"></span>对话</div><div class="tb"><span class="ic"></span>能力</div><div class="tb on"><span class="ic"></span>审计</div><div class="tb"><span class="ic"></span>设置</div></div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>每条 = 通道 + 动作 + 时间戳 + 事实块</b>：事实块用等宽字体与虚线边框，与"模型叙述"在视觉上不可混淆。</span></li>
+      <li><span class="anno">2</span><span><b>风险分级必须出现</b>：只读 / 写入 / 执行 / 系统，四级与 theme 的风险色一一对应。</span></li>
+      <li><span class="anno">3</span><span><b>失败也留记录</b>：回退与首次断言失败都进审计，不因"不好看"而隐藏。</span></li>
+      <li><span class="anno">4</span><span><b>本地存储提示</b>：底部说明 90 天滚动删除 + 可导出/删除，支撑"数据不出机"。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 09 · 设置 / BYOK ================= -->
+  <div class="frame">
+    <h2><span class="no">09</span> 设置 · BYOK <span class="req">REQ-07 / 08 · §10.5</span></h2>
+    <div class="desc">模型可换 + 数据不出机两条筛选轴，必须在设置页一屏内被看见。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">设置</span><span class="grow"></span><span class="tag dark">BYOK · 反锁定</span></div>
+      <div class="body">
+        <div class="sect">① 模型可换（单选）</div>
+        <div class="list-item" style="border-width:1.6px;border-color:var(--ink)"><span class="av">DS</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w75"></span></div><span class="av round" style="width:16px;height:16px"></span></div>
+        <div class="list-item"><span class="av">Ki</span><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w65"></span></div><span class="av round" style="width:16px;height:16px"></span></div>
+        <div class="list-item"><span class="av">端</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w85"></span></div><span class="av round" style="width:16px;height:16px"></span></div>
+        <div class="row" style="margin-top:8px"><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w85"></span></div><span class="tag">Key 已存 SecureStore</span></div>
+
+        <div class="sect">② 隐私（数据不出机）</div>
+        <div class="box" style="padding:0">
+          <div class="row" style="padding:9px 10px;border-bottom:1px solid var(--line)"><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w85"></span></div><span class="av round" style="width:30px;height:17px;border-radius:20px"></span></div>
+          <div class="row" style="padding:9px 10px;border-bottom:1px solid var(--line)"><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w95"></span></div><span class="av round" style="width:30px;height:17px;border-radius:20px;background:var(--ink);border-color:var(--ink)"></span></div>
+          <div class="row" style="padding:9px 10px"><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w75"></span></div><span class="btn-w sm ghost">导出</span></div>
+        </div>
+
+        <div class="sect">③ 进阶能力（独立入口，不在主流程出现）</div>
+        <div class="list-item" style="border-style:dashed"><span class="av" style="border-style:dashed">⚠</span><div class="grow ph-line"><span class="bar w55 d"></span><span class="bar w85"></span></div><span class="tag">›</span></div>
+        <div class="bar w75" style="margin-top:10px"></div>
+      </div>
+      <div class="tabbar-w"><div class="tb"><span class="ic"></span>对话</div><div class="tb"><span class="ic"></span>能力</div><div class="tb"><span class="ic"></span>审计</div><div class="tb on"><span class="ic"></span>设置</div></div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>模型选项是单选列表</b>，含"端侧窄域模型"一项——端侧路由（REQ-07）与 BYOK（REQ-08）在同一屏内表达，因为它们是同一件事的两端。</span></li>
+      <li><span class="anno">2</span><span><b>遥测默认关</b>：开关默认在关闭位；文案写明"本地聚合 · 禁上传文件名/路径/对话文本"。</span></li>
+      <li><span class="anno">3</span><span><b>进阶能力用虚线分隔</b>：与主包能力在视觉上分属两层，进去前有代价页（见 10）。</span></li>
+      <li><span class="anno">4</span><span><b>Key 状态回显</b>："已存 SecureStore"是承诺，需在界面长期可见。</span></li>
+    </ol>
+  </div>
+
+  <!-- ================= 10 · 代理进阶包 ================= -->
+  <div class="frame">
+    <h2><span class="no">10</span> 代理进阶包 <span class="req">REQ-16 / 11 · 通道 5–6</span></h2>
+    <div class="desc">能力项零删除，但必须"代价前置 + 用户自选"；发送前核对与写入后回读是硬前置。</div>
+    <div class="dev"><div class="dev-inner">
+      <div class="status"><span>16:53</span><span>▮▮▮ ▮</span></div>
+      <div class="appbar-w"><span class="icon-sq" style="border-radius:50%">‹</span><span class="h-title">代理模式 · 进阶包</span><span class="grow"></span><span class="tag tier risk">通道 5–6</span></div>
+      <div class="body">
+        <div class="box dashed" style="border-width:1.6px">
+          <div class="row"><span class="tag tier risk">⚠</span><span class="grow ph-line"><span class="bar w55 d"></span></span></div>
+          <div class="ph-line" style="margin-top:8px"><span class="bar w95"></span><span class="bar w85"></span><span class="bar w75"></span></div>
+        </div>
+        <div class="sect">① 代价三条（开启前必读）</div>
+        <div class="ph-line"><span class="bar w85"></span><span class="bar w75"></span><span class="bar w65"></span></div>
+
+        <div class="sect">② 发送前收件人核对（安全前置，不经模型自觉）</div>
+        <div class="box">
+          <div class="list-item" style="border-color:var(--line-strong)"><span class="av round">张</span><div class="grow ph-line"><span class="bar w35 d"></span><span class="bar w55"></span></div><span class="tag">相似 ①</span></div>
+          <div class="list-item" style="margin-top:5px"><span class="av round">张</span><div class="grow ph-line"><span class="bar w45 d"></span><span class="bar w55"></span></div><span class="tag dark">已选中</span></div>
+          <div class="fact">assert conv.title == "张伟-客户" → ✗ → 拒绝发送</div>
+        </div>
+
+        <div class="sect">③ 写入后回读（写 → 读 → 断言）</div>
+        <div class="box" style="padding:0">
+          <div class="row" style="padding:8px 10px;border-bottom:1px solid var(--line)"><span class="bar w35 d"></span><span class="grow"></span><span class="tag">只读作用域</span></div>
+          <div style="padding:8px 10px"><div class="ph-line"><span class="bar w85"></span><span class="bar w65"></span></div><div class="fact">write → re-read → assert ✓</div></div>
+        </div>
+
+        <div class="row" style="margin-top:11px"><span class="btn-w ghost" style="flex:1">暂不开启</span><span class="btn-w solid" style="flex:1.6">我已了解代价，开启</span></div>
+      </div>
+    </div></div>
+    <ol class="specs">
+      <li><span class="anno">1</span><span><b>代价页先于开关</b>：三条代价（封号 / 不可上架 / 重启重授权）用虚线警示框承载，不做成一笔带过的说明文字。</span></li>
+      <li><span class="anno">2</span><span><b>收件人核对是界面元素</b>：把 <code>assert</code> 的结果直接画进 UI，让"发送前核对"可被用户在演示中看见（REQ-11）。</span></li>
+      <li><span class="anno">3</span><span><b>只读作用域标签</b>：任务级只读是安全边界，应在界面上持续可见（REQ-16）。</span></li>
+      <li><span class="anno">4</span><span><b>主按钮为危险色语义</b>（线框中用实心墨黑表示"重"），且文案含"我已了解代价"以形成显式同意。</span></li>
+    </ol>
+  </div>
+
+</div>
+
+<div class="foot">MobileClaw 线框图 · 2026-10-10 · 10 屏 + 1 张 IA/主流程 · 与 <code>mobileclaw-prototype-2026-10-10.html</code> 逐屏对应</div>
+
+</body>
+</html>
