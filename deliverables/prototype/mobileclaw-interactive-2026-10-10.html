@@ -77,8 +77,20 @@
   <h1>MobileClaw 跨 App 连接层</h1>
   <div class="sub">手机本地的 AI agent — 收拢、搬运、编排。只读零弹窗；写入/执行一次逻辑确认；不可逆动作发送/删除前再确认。全程可回看。</div>
 
+  <div class="flow" style="border-color:rgba(76,141,255,.45)">
+    <h3><span class="n">◆</span>P0 骨架 · 多步计划（REQ-18）</h3>
+    <p>屏8：「下周三去上海」拆成 4 步有依赖的跨 App 计划，每步四标注（目标 App / 通道层级 / 可逆性 / 失败回退），步数预算与计划一体；执行前恰一次逻辑确认。</p>
+    <div class="tags"><span class="tag b">REQ-18</span><span class="tag b">P0 核心</span><span class="tag">约 7 步 / 预算 12</span></div>
+  </div>
+
+  <div class="flow" style="border-color:rgba(76,141,255,.45)">
+    <h3><span class="n">◆</span>P0 骨架 · 执行期改道（REQ-19）</h3>
+    <p>屏9：第 2 步服务层失败 → 错误分类「深链参数不匹配」→ 预设策略改道 web_search 降级 → 已执行/未执行清单 + 改道记录可回看，绝不幻觉填充。</p>
+    <div class="tags"><span class="tag b">REQ-19</span><span class="tag b">P0 核心</span><span class="tag r">绝不伪造</span><span class="tag g">可回看</span></div>
+  </div>
+
   <div class="flow">
-    <h3><span class="n">1</span>分享进门 → 对话接住</h3>
+    <h3><span class="n">1</span>分享进门 → 对话接住（P1 入口）</h3>
     <p>屏1：微信分享一段客户地址进 MobileClaw，通道 2 标注可见，直接落进对话。</p>
     <div class="tags"><span class="tag b">REQ-02</span><span class="tag">通道 2 · 分享</span><span class="tag g">只读零弹窗</span></div>
   </div>
@@ -120,17 +132,17 @@
   </div>
 
   <div class="hint">
-    <b>试玩路径</b>：屏1 点绿色建议条「存联系人并导航」→ 屏2 点「确认执行」→ 屏3；
-    底部 Tab 可随时切到 能力 / 收拢 / 审计；屏1 右上模型胶囊进 设置。<br>
-    <b>快捷键</b>：H 显示热点区域，数字键 1–7 直达对应屏。
+    <b>试玩路径</b>：屏8（P0 计划面板）点「确认执行」→ 屏9（改道演示）→ 底部 Tab 随时切；
+    屏1 点绿色建议条「存联系人并导航」→ 屏2 → 屏3；右上模型胶囊进 设置。<br>
+    <b>快捷键</b>：H 显示热点区域，数字键 1–9 直达对应屏。
   </div>
 </div>
 
 <div class="phone-wrap">
   <div class="phone" id="phone">
-    <div class="crumb" id="crumb"><b>屏1</b><span>对话主干</span></div>
+    <div class="crumb" id="crumb"><b>屏8</b><span>多步计划面板</span></div>
 
-    <div class="screen active" data-name="屏1 · 对话主干" data-num="1" id="scr1">
+    <div class="screen" data-name="屏1 · 对话主干" data-num="1" id="scr1">
       <img src="ardot-screens/s1-chat.png" alt="对话主干">
       <div class="hs" style="left:17%;top:56.5%;width:16%;height:5%" data-label="存联系人并导航 → 屏2" onclick="go(2)"></div>
       <div class="hs" style="left:36%;top:56.5%;width:13%;height:5%" data-label="只存联系人" onclick="go(1)"></div>
@@ -138,6 +150,20 @@
       <div class="hs" style="left:37.5%;top:90.5%;width:25%;height:8%" data-label="能力 → 屏4" onclick="go(4)"></div>
       <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="收拢 → 屏7" onclick="go(7)"></div>
       <div class="hs" style="left:62%;top:6.5%;width:34%;height:4.5%" data-label="模型设置 → 屏6" onclick="go(6)"></div>
+    </div>
+
+    <div class="screen" data-name="屏9 · 执行期改道" data-num="9" id="scr9">
+      <img src="ardot-screens/s9-replan.png" alt="执行期改道">
+      <div class="hs" style="left:2%;top:6%;width:10%;height:5%" data-label="返回 → 屏8" onclick="go(8)"></div>
+      <div class="hs" style="left:38%;top:81.5%;width:58%;height:6.5%" data-label="按改道继续执行 → 屏3" onclick="go(3)"></div>
+      <div class="hs" style="left:4%;top:81.5%;width:32%;height:6.5%" data-label="六条改道策略" onclick="go(5)"></div>
+    </div>
+
+    <div class="screen active" data-name="屏8 · 多步计划面板" data-num="8" id="scr8">
+      <img src="ardot-screens/s8-plan.png" alt="多步计划面板">
+      <div class="hs" style="left:2%;top:6%;width:10%;height:5%" data-label="返回 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:31%;top:92.5%;width:65%;height:6.5%" data-label="确认执行 → 屏9" onclick="go(9)"></div>
+      <div class="hs" style="left:4%;top:92.5%;width:25%;height:6.5%" data-label="拒绝 → 屏1" onclick="go(1)"></div>
     </div>
 
     <div class="screen" data-name="屏7 · 收拢汇总" data-num="7" id="scr7">
@@ -190,7 +216,7 @@
 </div>
 
 <script>
-  const names = {"1":["屏1","对话主干"],"2":["屏2","任务复述确认"],"3":["屏3","执行与出口"],"4":["屏4","能力目录"],"5":["屏5","审计面板"],"6":["屏6","设置与模型"],"7":["屏7","收拢汇总"]};
+  const names = {"1":["屏1","对话主干"],"2":["屏2","任务复述确认"],"3":["屏3","执行与出口"],"4":["屏4","能力目录"],"5":["屏5","审计面板"],"6":["屏6","设置与模型"],"7":["屏7","收拢汇总"],"8":["屏8","多步计划面板"],"9":["屏9","执行期改道"]};
   function go(n){
     document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
     const s = document.getElementById('scr'+n); if(s) s.classList.add('active');
@@ -198,7 +224,7 @@
     c.innerHTML = '<b>'+names[n][0]+'</b><span>'+names[n][1]+'</span>';
   }
   document.addEventListener('keydown',e=>{
-    if(e.key>='1'&&e.key<='7') go(+e.key);
+    if(e.key>='1'&&e.key<='9') go(+e.key);
     if(e.key==='h'||e.key==='H') document.body.classList.toggle('show-hs');
   });
 </script>

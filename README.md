@@ -1,163 +1,163 @@
 # MobileClaw
 
-A mobile-first **local AI agent** — a phone-native take on DeepSeek Harness / OpenClaw. The model is
-not a chat bubble: it gets real hands (files, shell, scripts, cross-app actions) and every action
-passes through a permission gate that you control.
+一个**手机原生的本地 AI 智能体** —— DeepSeek Harness / OpenClaw 的手机版思路。模型不是一个聊天
+气泡：它长着手脚（文件、shell、脚本、跨应用操作），而它的每一个动作都要经过一道你自己控制的权限门。
 
-Target: **Android first**, iOS kept working by degradation (the same code path reports what the
-sandbox forbids instead of pretending). Brain: any **OpenAI-compatible** endpoint (DeepSeek, OpenAI,
-OpenRouter, Ollama on your LAN, vLLM…).
+目标平台：**Android 优先**，iOS 以「优雅降级」保持可用（同一段代码会如实报告沙箱禁止了什么，而不是
+假装成功）。大脑：任何**兼容 OpenAI 协议**的端点（DeepSeek、OpenAI、OpenRouter、局域网里的 Ollama、
+vLLM……）。
 
 ```
-┌────────────────────────── Expo app (apps/mobile) ───────────────────────────┐
-│  Chat UI · approval sheet · tool cards · settings · permission matrix       │
+┌────────────────────────── Expo 应用 (apps/mobile) ──────────────────────────┐
+│  聊天界面 · 授权面板 · 工具卡片 · 设置 · 权限矩阵                            │
 │                                                                             │
-│  MobileClawRuntime  ── plugin host ── capability plugins (fs/shell/web/…)   │
+│  MobileClawRuntime  ── 插件宿主 ── 能力插件 (fs/shell/web/…)                │
 │         │                    │                                              │
 │         │              PermissionGate ── PathGuard                          │
 │         ▼                                                                   │
-│  Agent loop ── streaming provider (SSE) ── conversation store               │
+│  智能体循环 ── 流式模型接口 (SSE) ── 会话存储                                │
 └──────────────────────────────┬──────────────────────────────────────────────┘
-                               │  platform services (injected)
+                               │  平台服务（注入式）
       ┌────────────────────────┼────────────────────────┬─────────────────┐
       ▼                        ▼                        ▼                 ▼
- expo-file-system        shell backend            expo intents       SecureStore
- (+ guard, SAF/all-files) (Termux/Shizuku)      clipboard/share    SQLite (history)
+ expo-file-system         shell 后端               expo intents       SecureStore
+ (+ guard, SAF/所有文件)  (Termux/Shizuku)        剪贴板/分享        SQLite（历史）
 ```
 
-## Why it is built this way
+## 为什么这样设计
 
-The kernel (`packages/core`) is **pure TypeScript with no platform imports**. Everything the agent
-can do arrives as an injected service behind an interface, so:
+内核（`packages/core`）是**纯 TypeScript，不导入任何平台模块**。智能体能做的一切都以「注入的服务 +
+接口」的形式抵达，因此：
 
-- the whole agent loop is unit-testable on Node (no emulator, no device);
-- the phone swaps in Expo/native implementations without touching agent behaviour;
-- a future CLI or desktop host reuses the same kernel unchanged.
+- 整个智能体循环可以在 Node 上做单元测试（不需要模拟器、不需要真机）；
+- 手机侧换成 Expo/原生实现时，不必改动智能体行为；
+- 将来的 CLI 或桌面宿主可以原样复用同一个内核。
 
-Plugin style follows Cordis: a plugin is a function plus metadata, it receives a context, registers
-services/tools/listeners on it, and declares its dependencies via `inject` so a missing capability is
-reported precisely instead of failing mid-conversation.
+插件风格沿用 Cordis：插件 = 一个函数 + 元数据；它接收一个 context，在上面注册服务/工具/监听器，
+并通过 `inject` 声明依赖 —— 这样缺了某个能力会被精确报出来，而不是在对话中途神秘失败。
 
-## Repository layout
+## 仓库结构
 
-| Path | What it is |
+| 路径 | 说明 |
 | --- | --- |
-| `packages/core` | Kernel: context, event bus, plugin host, tool registry, permission gate, path guard, agent loop, providers, conversation store. **No `node:*`, no RN.** |
-| `packages/capabilities` | Guarded filesystem + the tools: `fs_*`, `shell_*`, `web_fetch`, `system_*`, `python_*`, `shizuku_*`, `screen_*`. `./node` subpath holds the Node-only backends. |
-| `apps/mobile` | Expo app (SDK 57): runtime wiring, chat UI, approval sheet, settings, permission matrix, EAS config. |
-| `docs/android-capabilities.md` | Hard-won detail on what Android actually allows, and the native-module plan. |
-| `docs/architecture.md` | How the pieces fit, the request lifecycle, and the invariants. |
-| `docs/dev-environment.md` | **Read this before building anything.** How the Android toolchain is resolved (`eng/toolchain.cjs` / `eng/setup-toolchain.ps1`), why the SDK's outdated ninja blocked local native builds (and the two fixes), and fourteen environment-specific traps with symptoms and fixes. Shared across projects. |
-| `docs/worklog/project-status.md` | **Where the project is right now**: the product goals, what works and what does not, the gap between the plan and the code, and what to write next. |
-| `docs/worklog/shizuku-screen-automation.md` | The screen-automation work stream in full — decisions, evidence, and the traps that cost time. |
+| `packages/core` | 内核：context、事件总线、插件宿主、工具注册表、权限门、路径守卫、智能体循环、模型接口、会话存储。**不含 `node:*`，不含 RN。** |
+| `packages/capabilities` | 受守卫的文件系统 + 全部工具：`fs_*`、`shell_*`、`web_fetch`、`system_*`、`python_*`、`shizuku_*`、`screen_*`。`./node` 子路径放仅限 Node 的后端实现。 |
+| `apps/mobile` | Expo 应用（SDK 57）：运行时装配、聊天界面、授权面板、设置、权限矩阵、EAS 配置。 |
+| `docs/setup-for-teammates.md` | **换一台机器或第一次构建，先看这份。** 从零到能构建的完整步骤，以及六个已修掉的坑各自的症状。 |
+| `docs/android-capabilities.md` | Android 实际允许什么的踩坑记录，以及原生模块的规划。 |
+| `docs/architecture.md` | 各模块如何拼合、一次请求的生命周期、以及不变式。 |
+| `docs/dev-environment.md` | **动手构建之前先读这份。** Android 工具链如何解析（`eng/toolchain.cjs` / `eng/setup-toolchain.ps1`）、SDK 自带的旧版 ninja 为何曾挡住本地原生构建（以及两种修法），外加十四个环境相关的坑及其症状与修法。 |
+| `docs/device-verification.md` | 真机上**实际验证过**什么，以及**没验证**什么。 |
+| `docs/worklog/project-status.md` | **项目当前状态**：产品目标、哪些能用哪些不能、计划与代码之间的差距、接下来写什么。 |
+| `docs/worklog/shizuku-screen-automation.md` | 屏幕自动化这条线的完整记录 —— 决策、证据、以及耗费了时间的那些坑。 |
 
-> **Repository location:** anywhere. The build resolves its toolchain at run time instead of
-> hardcoding it (`eng/toolchain.cjs`); on a fresh machine `eng/setup-toolchain.ps1` installs a JDK
-> and the Android SDK into a git-ignored `.toolchain/` beside the repo. See `docs/dev-environment.md`.
+> **仓库位置**：放哪都行。构建在运行时会解析工具链，而不是写死路径（`eng/toolchain.cjs`）；
+> 在新机器上，`eng/setup-toolchain.ps1` 会把 JDK 和 Android SDK 装到仓库旁、已被 git 忽略的
+> `.toolchain/` 里。详见 `docs/setup-for-teammates.md`。
 
-## Quick start
+> **⚠️ 不要用 JDK 24 构建。** 它会让 `react-native-worklets` 的 CMake 配置中止，而报错完全
+> 不提 Java。用 `.toolchain/.config` 把 JDK 钉在 21 —— 见 `eng/BUILD.md`。
+
+## 快速开始
 
 ```bash
 pnpm install
-pnpm check            # typecheck + 370 tests (core 102 / capabilities 74 / mobile 194) + a real Metro bundle
-pnpm doctor           # expo-doctor: dependency/SDK consistency (21 checks)
-pnpm mobile           # Metro for a dev build (needs a dev client installed)
+pnpm check            # 类型检查 + 576 个测试（core 149 / capabilities 233 / mobile 194）+ 一次真实的 Metro 打包
+pnpm doctor           # expo-doctor：依赖/SDK 一致性检查
+pnpm mobile           # 起 Metro（需要先装 dev client）
 ```
 
-`pnpm check` deliberately includes **`pnpm bundle`** (`expo export --platform android`). Type
-checking and unit tests both resolve the `@/*` aliases and `.ts` sources themselves, so they cannot
-catch the two failures that actually block a device build: Metro not reading tsconfig `paths`, and
-`.js` suffixes on extensionless TypeScript imports. Only a real bundle does.
+`pnpm check` 里刻意包含 **`pnpm bundle`**（`expo export --platform android`）。类型检查和单元测试
+各自都能解析 `@/*` 别名和 `.ts` 源码，因此它们**抓不到**真正会挡住设备构建的两类失败：Metro 不读
+tsconfig 的 `paths`，以及无扩展名的 TS 导入后面被加上 `.js`。只有真正打一次包才能发现。
 
-Building an installable APK.
+构建可安装的 APK。
 
-**Locally** (resolves a JDK + Android SDK + Gradle through `eng/toolchain.cjs`; run
-`eng/setup-toolchain.ps1` once on a fresh machine if none is present — see
-`docs/dev-environment.md`). The machine's execution policy refuses unsigned scripts, hence the
-explicit host:
+**本地构建**（通过 `eng/toolchain.cjs` 解析 JDK + Android SDK + Gradle；新机器上先跑一次
+`eng/setup-toolchain.ps1` —— 见 `docs/setup-for-teammates.md`）。这台机器的执行策略会拒绝未签名
+脚本，所以需要显式指定宿主：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File eng\build-local.ps1 -Variant debug
 # -> artifacts\mobileclaw-local-debug.apk
 ```
 
-**In the cloud**, with no Android SDK on your machine:
+> **必须用这个脚本构建。** 直接跑 `gradle assembleRelease` 不等价：Gradle 不把 `packages/*` 当作
+> JS 打包任务的输入，所以改了 core/capabilities 之后它会显示 UP-TO-DATE，**APK 里装的是上一版
+> JS** —— 构建「成功」，代码是旧的。脚本会在打包前后各校验一次。
+
+**云端构建**，本机无需 Android SDK：
 
 ```bash
 npx eas-cli login
-cd apps/mobile && npx eas-cli init          # writes the projectId
-pnpm apk                                    # preview profile → installable .apk
-pnpm apk:dev                                # development client for Metro
+cd apps/mobile && npx eas-cli init          # 写入 projectId
+pnpm apk                                    # preview 配置 → 可安装的 .apk
+pnpm apk:dev                                # 供 Metro 使用的 development client
 ```
 
-The default `production` profile builds an `.aab` for stores; `preview` and `development` are set to
-`buildType: "apk"` in `apps/mobile/eas.json`, which is what makes the artifact installable.
+默认的 `production` 配置产出用于应用商店的 `.aab`；`preview` 和 `development` 在
+`apps/mobile/eas.json` 里被设为 `buildType: "apk"`，正是这一点让产物可以直接安装。
 
-Then, in the app: **Settings → pick a provider preset → paste an API key → Test connection**.
-The key is written to `expo-secure-store`.
+装好之后，在应用里：**设置 → 选择服务商预设 → 粘贴 API 密钥 → 测试连接**。密钥写入
+`expo-secure-store`；若该设备的加密存储不可用，会降级到应用私有存储并**明确告知你未加密**。
 
-### Two rules to keep the bundle green
+### 两条保持打包正常的铁律
 
-1. **Never pin an Expo package version by hand.** SDK 57 versions them all as `~57.x`; guessing from
-   an older SDK era produces a bundle that installs but breaks. Add dependencies with
-   `npx expo install <pkg>` and re-check with `pnpm doctor`.
-2. **No file extensions on relative or aliased imports.** Use `from "./foo"`, not `from "./foo.js"` —
-   Metro cannot map `./foo.js` onto `foo.ts`, while `tsc` and vitest happily can, so the mistake is
-   invisible until you bundle.
+1. **绝不要手写 Expo 包的版本号。** SDK 57 统一把它们定为 `~57.x`；按旧版 SDK 的习惯猜一个版本，
+> 打出来的包能装但会崩。用 `npx expo install <包名>` 加依赖，再用 `pnpm doctor` 复查。
+2. **相对导入或别名导入不要带扩展名。** 写 `from "./foo"`，不要写 `from "./foo.js"` —— Metro
+> 无法把 `./foo.js` 映射到 `foo.ts`，而 `tsc` 和 vitest 却完全接受，所以这个错误直到打包才暴露。
 
-## What the agent can do today
+## 智能体现在能做什么
 
-| Bundle | Tools | Notes |
+| 能力包 | 工具 | 说明 |
 | --- | --- | --- |
-| `cap-files` | `fs_list` `fs_read` `fs_write` `fs_edit` `fs_search` `fs_info` `fs_organize` | `fs_search` does glob **and** regex content search — the workhorse for "organise my downloads". `fs_organize` always asks. |
-| `cap-shell` | `shell_run` `shell_which` | Needs Termux or Shizuku; says so plainly when neither is set up. |
-| `cap-web` | `web_fetch` | Returns sanitised text and tags the result as untrusted data. |
-| `cap-system` | `system_open` `system_apps` `system_clipboard` `system_share` `system_notify` `system_calendar` | Intents / clipboard / share sheet / calendar writes. |
-| `cap-python` | `python_run` `python_script` `python_status` | Reaches an interpreter through the shell backend (Termux, or Chaquopy later). Code goes over **stdin**, so quoting never breaks it. |
-| `cap-shizuku` | `shizuku_status` `shizuku_request` `shizuku_run` | Privileged execution with shell identity (uid 2000), not root. |
-| `cap-automation` | `screen_read` `screen_tap_element` `screen_current` `screen_capture` `screen_tap` `screen_scroll` `screen_type` `screen_wait` | **Reads** the current screen as text, then acts on it, through Shizuku. `screen_read` is the workhorse: it returns every readable or pressable element with its real pixel bounds, so `screen_tap_element` can press by the `#` number printed in the reading — no human in the loop, and no `AccessibilityService` (shell identity already sees the tree). `screen_capture` + `screen_tap` remain for what the tree cannot express, where the *user* places the point on the picture. Each screen-changing tool declares `neverRemember`, so "always allow" can never cover the next press, and returns a screenshot as evidence. **The native side has never been compiled**, so on a device every one of these still reports "unavailable" — the contract, the reader and the safety machinery are what exist. |
+| `cap-files` | `fs_list` `fs_read` `fs_write` `fs_edit` `fs_search` `fs_info` `fs_organize` | `fs_search` 同时支持 glob **和** 正则内容搜索——「整理我的下载目录」的主力。`fs_organize` 永远会征求确认。 |
+| `cap-shell` | `shell_run` `shell_which` | 需要 Termux 或 Shizuku；两者都没配好时会明说。 |
+| `cap-web` | `web_fetch` | 返回净化后的文本，并把结果标记为不可信数据。 |
+| `cap-system` | `system_open` `system_apps` `system_clipboard` `system_share` `system_notify` `system_calendar` | Intent / 剪贴板 / 分享面板 / 日历写入。 |
+| `cap-python` | `python_run` `python_script` `python_status` | 经由 shell 后端触达解释器（Termux，将来是 Chaquopy）。代码通过 **stdin** 传入，所以引号永远不会破坏它。 |
+| `cap-shizuku` | `shizuku_status` `shizuku_request` `shizuku_run` | 以 shell 身份（uid 2000）执行特权命令，不是 root。 |
+| `cap-automation` | `screen_current` `screen_capture` `screen_tap` `screen_scroll` `screen_type` `screen_wait` | 通过 Shizuku **看**屏幕并操作它。坐标由**人**在截图上点选（授权面板里出图，用户落点），而不是让模型自己编一个——因为一个编出来的坐标会点到你没打算点的地方。每个会改变屏幕状态的工具都声明了 `neverRemember`，所以「总是允许」永远不能覆盖下一次点击，并且每次都会返回截图作为存证。 |
 
-Safety model, in one line: **containment is lexical and absolute** (every model-supplied path goes
-through `PathGuard`, which refuses anything outside the configured roots), and **capability is
-granted by risk class** (`read`/`network` auto-allow; `write`/`execute`/`system` prompt, with
-per-session "always allow" that expires).
+安全模型一句话：**边界是词法的、绝对的**（模型给的每一个路径都要过 `PathGuard`，配置的根目录之外
+一律拒绝）；**能力按风险等级授予**（`read`/`network` 自动放行；`write`/`execute`/`system` 会弹确认，
+可「本次会话内总是允许」，且会过期）。
 
-## Deliberate limits (read these before filing a bug)
+## 有意为之的限制（提 issue 前请先读）
 
-- **Google Play will not accept this app with all-files access.** `MANAGE_EXTERNAL_STORAGE` is not in
-  a permitted category for an AI agent, so the intended channels are sideload, F-Droid and GitHub
-  releases. `MOBILECLAW_PLAY_SAFE=1 pnpm prebuild` builds without it (agent sees app-private storage
-  and SAF-granted trees only).
-- **Android 10+ forbids executing files from app storage.** Any bundled tool must ship inside the
-  APK as `jniLibs/<abi>/lib*.so`; you cannot download a binary and run it.
-- **The privileged native module is written but has never been compiled.** The storage one works and was
-  verified on a device: `MobileClawFilesModule` is inline Kotlin in `apps/mobile/app.config.ts`, written
-  out by the `withMobileClawFiles` config plugin at prebuild time (there is deliberately no `.kt` file on
-  disk). The Shizuku one is *real Kotlin and AIDL* under `apps/mobile/android-native/shizuku/`, copied
-  into the generated project by three config plugins — but no Android toolchain has ever been present on
-  the development machine, so it is a blind spot until a device build says otherwise. What still degrades
-  honestly is the *backend*: with no Shizuku paired, `screen_*` and `shizuku_*` report exactly what is
-  missing. Termux and the storage-access prompt remain specified and stubbed
-  (`apps/mobile/src/runtime/bootstrap.ts`). See `docs/android-capabilities.md` for the detail.
-- **The Expo FileSystem adapter is the one unverified seam.** It is written against the SDK 57
-  `File`/`Directory`/`Paths` API and is the single place to fix if Expo renames a member
-  (`apps/mobile/src/runtime/services/expo-file-system.ts`).
-- **Skill-style automation via AccessibilityService is out of scope** — but not for the reason usually
-  given. This app already ships without Play (`MANAGE_EXTERNAL_STORAGE` is not in a permitted category),
-  so "Play rejects automation tools" excludes nothing here, and Android 17's Advanced Protection Mode
-  blocks the Accessibility API for non-accessibility apps whether or not Shizuku is involved. The real
-  reason is narrower and stronger: **shell identity already reads another app's accessibility tree**
-  (`screen_read`), so declaring an `AccessibilityService` would buy a second permission and a second
-  system-settings visit for a view we already have.
+- **Google Play 不会接受带「所有文件访问」的这个应用。** `MANAGE_EXTERNAL_STORAGE` 不属于 AI 智能体
+  可用的许可类别，所以预期的分发渠道是侧载、F-Droid 和 GitHub Release。
+  `MOBILECLAW_PLAY_SAFE=1 pnpm prebuild` 可以在不带该权限的情况下构建（智能体只能看到应用私有存储
+  和经 SAF 授权的目录树）。
+- **Android 10+ 禁止执行应用存储里的文件。** 任何随包工具都必须作为 `jniLibs/<abi>/lib*.so` 打进
+  APK；你无法下载一个二进制再运行它。
+- **存储用的原生模块已在真机上验证**：`MobileClawFilesModule` 是内联在
+  `apps/mobile/app.config.ts` 里的 Kotlin，由 `withMobileClawFiles` 配置插件在 prebuild 时写出
+  （磁盘上刻意没有 `.kt` 文件）。**Shizuku 那个是真实存在的 Kotlin 与 AIDL**，位于
+  `apps/mobile/android-native/shizuku/`，由三个配置插件复制进生成的原生工程。
+  **注意**：AIDL 与 Kotlin 能编译通过（已在 `compileReleaseAidl` 与 Kotlin 编译中验证），但
+  **运行时行为尚未在真机上验证过** —— 装了 Shizuku 的设备上的实际表现是个未知数。
+  没有配对 Shizuku 时，`screen_*` 和 `shizuku_*` 会如实报告缺了什么。Termux 与存储权限提示仍是
+  已规划、待实现的状态（`apps/mobile/src/runtime/bootstrap.ts`）。细节见
+  `docs/android-capabilities.md`。
+- **`expo-file-system` 的适配层是唯一未经验证的接缝。** 它是照着 SDK 57 的
+  `File`/`Directory`/`Paths` API 写的，如果 Expo 改了成员名，这里是唯一需要改的地方
+  （`apps/mobile/src/runtime/services/expo-file-system.ts`）。另外，该模块的权限预检用
+  `File.canRead()`/`canWrite()` 判断，对共享存储里属于其他 uid 的文件永远返回假 —— 这正是
+  `fs_write` 必须绕开它、走自建原生模块的原因。
+- **基于 AccessibilityService 的技能式自动化不在范围内** —— 但理由和常见的说法不同。这个应用本来就
+  不通过 Play 分发（`MANAGE_EXTERNAL_STORAGE` 不在许可类别内），所以「Play 拒绝自动化工具」在这里
+  排除不了任何东西；而 Android 17 的 Advanced Protection Mode 会禁止非无障碍类应用使用无障碍 API，
+  与是否使用 Shizuku 无关。真正的理由更窄也更强：**shell 身份本来就能读到别的应用的无障碍树**，
+  所以再声明一个 `AccessibilityService` 只会为「已经拿到的视图」多要一个权限、多跑一次系统设置。
 
-## Roadmap
+## 路线图
 
-1. **Native module** (`modules/mobileclaw-native`): Shizuku UserService, Termux `RUN_COMMAND`,
-   all-files access prompt, installed-app list. Unlocks `shell_run`, `python_*`, `shizuku_*`.
-2. **Background runs**: a foreground service with a declared type so long jobs survive the app being
-   backgrounded (`dataSync` / `specialUse`), plus a notification when a run completes.
-3. **SAF onboarding**: a folder picker that stores persisted tree URIs, so the agent works without
-   all-files access.
-4. **Chaquopy Python**: a real in-app interpreter, behind the same `python_*` tools.
-5. **Skill packages**: installable plugin bundles (the plugin host already supports runtime
-   load/unload and reports failures per plugin).
+1. **补完原生模块**：Termux 的 `RUN_COMMAND`、所有文件访问的引导、已安装应用列表（已实现部分见
+   `system_apps`）。解锁 `shell_run`、`python_*`、`shizuku_*` 的完整能力。
+2. **后台运行**：带声明类型的前台服务，让长任务在应用切到后台后仍能继续（`dataSync` /
+   `specialUse`），并在任务完成时发一条通知。
+3. **SAF 引导**：一个文件夹选择器，持久化目录树 URI，这样不用「所有文件访问」也能工作。
+4. **Chaquopy Python**：真正的应用内解释器，藏在同一套 `python_*` 工具后面。
+5. **技能包**：可安装的插件包（插件宿主已支持运行时加载/卸载，并能按插件报告失败）。
