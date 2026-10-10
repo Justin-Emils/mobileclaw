@@ -23,6 +23,7 @@ import {
 import { createWebSearchService } from "@mobileclaw/capabilities";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
 import { createNativeDriver, listInstalledApps, loadNativeFiles } from "./services/native-files";
+import { openAppByPackageId } from "./services/app-launch";
 import {
   createAutomationService,
   createPrivilegedService,
@@ -425,12 +426,11 @@ function createSystemPorts(
   };
 
   if (Platform.OS === "android") {
-    ports.openApp = async (packageId: string) => {
-      await IntentLauncher.startActivityAsync("android.intent.action.MAIN", {
-        packageName: packageId,
-        category: "android.intent.category.LAUNCHER",
-      });
-    };
+    // The reasoning lives in `./services/app-launch`, which is unit-tested: the previous
+    // implementation used `startActivityAsync` with a `packageName` that Expo silently ignores
+    // (it is only read alongside a `className`), so launches were not pinned to the package at
+    // all and could land in an unrelated app.
+    ports.openApp = async (packageId: string) => openAppByPackageId(packageId, IntentLauncher);
 
     // `system_apps` was declared but never wired, so it always failed with "not supported on
     // this platform" -- which surfaced to the user as a bare 失败 in the tool card, with no

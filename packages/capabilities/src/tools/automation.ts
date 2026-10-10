@@ -201,7 +201,7 @@ export function createAutomationTools(deps: {
   const screenCapture = {
     name: "screen_capture",
     description:
-      "Screenshot the device through the privileged backend and save the picture into this conversation. Take one before screen_tap so the user can choose the point on the picture. Windows that set FLAG_SECURE (banking apps, some password fields) come back black — the result says so, and that content cannot be read this way.",
+      "Screenshot the device through the privileged backend and save the picture into this conversation. Take one before screen_tap so the user can choose the point on the picture. This is a fallback, not a starting point: prefer screen_read when you only need to know what is on screen (you cannot read a picture), and prefer system_open / a deep link when the app offers a real way in. Windows that set FLAG_SECURE (banking apps, some password fields) come back black — the result says so, and that content cannot be read this way.",
     input: z.object({
       maxWidth: z.number().int().min(240).max(4096).optional(),
       quality: z.number().int().min(10).max(100).optional(),

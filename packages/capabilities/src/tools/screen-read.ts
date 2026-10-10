@@ -159,7 +159,7 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
   const screenRead = {
     name: "screen_read",
     description:
-      "Read the current screen as text through the privileged backend: each element with its label, its kind, its state, and the pixel point to press. Prefer this over screen_capture whenever you need to know what is on screen — a picture cannot be read by you, and this returns the same window as text. It reads the accessibility tree, so it sees only what an app publishes: a canvas, a game or a video may return little or nothing, and an app that hides its contents (FLAG_SECURE, banking) returns nothing at all. When the reading is thin, say so instead of assuming the screen is empty.",
+      "Read the current screen as text through the privileged backend: each element with its label, its kind, its state, and the pixel point to press. Prefer this over screen_capture whenever you need to know what is on screen — a picture cannot be read by you, and this returns the same window as text. Reach for it as a fallback, though, not as the first move: if the job can be done with system_open (an app or a URL), a deep link, or a purpose-built tool, do that instead — this path depends on the current layout, breaks on animation, and every action it enables is a real tap the user did not ask for. It reads the accessibility tree, so it sees only what an app publishes: a canvas, a game or a video may return little or nothing, and an app that hides its contents (FLAG_SECURE, banking) returns nothing at all. When the reading is thin, say so instead of assuming the screen is empty.",
     input: z.object({
       maxTextLength: z
         .number()
