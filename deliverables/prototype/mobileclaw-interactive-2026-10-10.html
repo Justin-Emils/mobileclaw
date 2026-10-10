@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MobileClaw 交互原型 · 2026-10-10</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#121822; --panel2:#182130; --border:#22303f;
+    --text:#e8eef6; --muted:#93a4b8; --faint:#64748b;
+    --accent:#4c8dff; --danger:#ef5d6b; --success:#3fc78a; --warning:#f0b429;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:#070a0e; color:var(--text);
+    font-family:"Noto Sans SC","Inter",system-ui,sans-serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center;
+    gap:48px; padding:40px 24px;
+  }
+  /* ---------- 左侧信息面板 ---------- */
+  .side{width:300px}
+  .side h1{font-size:22px;font-weight:700;margin-bottom:6px}
+  .side .sub{font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:22px}
+  .flow{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:10px}
+  .flow h3{font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+  .flow h3 .n{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:6px;background:var(--accent);color:#fff;font-size:10px;font-weight:700;flex:none}
+  .flow p{font-size:11.5px;color:var(--muted);line-height:1.7}
+  .flow .tags{margin-top:8px;display:flex;flex-wrap:wrap;gap:5px}
+  .tag{font-size:9.5px;padding:2px 7px;border-radius:8px;background:var(--panel2);color:var(--muted);border:1px solid var(--border)}
+  .tag.g{color:var(--success);border-color:rgba(63,199,138,.35)}
+  .tag.r{color:var(--danger);border-color:rgba(239,93,107,.35)}
+  .tag.b{color:var(--accent);border-color:rgba(76,141,255,.35)}
+  .hint{font-size:11px;color:var(--faint);line-height:1.8;margin-top:14px}
+  .hint b{color:var(--muted)}
+  /* ---------- 手机 ---------- */
+  .phone{
+    width:400px;height:860px;border-radius:40px;overflow:hidden;position:relative;
+    box-shadow:0 40px 100px rgba(0,0,0,.6),0 0 0 1px #1a2532;
+    background:var(--bg); flex:none;
+  }
+  .screen{position:absolute;inset:0;opacity:0;pointer-events:none;transition:opacity .25s ease}
+  .screen.active{opacity:1;pointer-events:auto}
+  .screen img{width:100%;height:100%;display:block;user-select:none;-webkit-user-drag:none}
+  /* 热点 */
+  .hs{position:absolute;border-radius:10px;cursor:pointer;z-index:5}
+  .hs:hover{background:rgba(76,141,255,.14);outline:1px solid rgba(76,141,255,.5)}
+  body.show-hs .hs{background:rgba(76,141,255,.10);outline:1px dashed rgba(76,141,255,.55)}
+  body.show-hs .hs::after{
+    content:attr(data-label);position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    font-size:10px;color:#9cc3ff;background:rgba(10,20,35,.85);padding:2px 6px;border-radius:6px;white-space:nowrap;
+  }
+  .crumb{
+    position:absolute;top:-34px;left:0;font-size:12px;color:var(--muted);display:flex;gap:8px;align-items:center;
+  }
+  .crumb b{color:var(--text)}
+  .phone-wrap{position:relative}
+  .topbar{
+    position:fixed;top:0;left:0;right:0;display:flex;align-items:center;justify-content:space-between;
+    padding:12px 24px;background:rgba(7,10,14,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);z-index:99;
+  }
+  .topbar .t{font-size:13px;font-weight:600}
+  .topbar button{
+    background:var(--panel2);border:1px solid var(--border);color:var(--muted);font-size:11.5px;
+    padding:6px 14px;border-radius:16px;cursor:pointer;font-family:inherit;
+  }
+  .topbar button:hover{color:var(--text);border-color:var(--accent)}
+  body{padding-top:70px}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="t">MobileClaw · 可点击交互原型 — 点按屏幕上的高亮区域跳转</div>
+  <button onclick="document.body.classList.toggle('show-hs')">显示/隐藏热点 (H)</button>
+</div>
+
+<div class="side">
+  <h1>MobileClaw 跨 App 连接层</h1>
+  <div class="sub">手机本地的 AI agent — 收拢、搬运、编排。只读零弹窗；写入/执行一次逻辑确认；不可逆动作发送/删除前再确认。全程可回看。</div>
+
+  <div class="flow">
+    <h3><span class="n">1</span>分享进门 → 对话接住</h3>
+    <p>屏1：微信分享一段客户地址进 MobileClaw，通道 2 标注可见，直接落进对话。</p>
+    <div class="tags"><span class="tag b">REQ-02</span><span class="tag">通道 2 · 分享</span><span class="tag g">只读零弹窗</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">★</span>收拢汇总</h3>
+    <p>屏7：「今天谁找过我？」——通知监听 + 系统日历 + 服务层把散在 N 个 App 的信息汇到一处；每条带通道徽章、可跳回原 App；读不到的来源如实标注。</p>
+    <div class="tags"><span class="tag b">US-C1</span><span class="tag b">REQ-05</span><span class="tag">通道 1·2·4</span><span class="tag g">只读零弹窗</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">2</span>任务复述 · 一次确认</h3>
+    <p>屏2：确认前复述 4 件事 7 步，步数预算可见；每步标注通道层级与风险（写入/只读）。</p>
+    <div class="tags"><span class="tag b">REQ-06</span><span class="tag b">REQ-11</span><span class="tag">maxSteps = 12</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">3</span>执行与出口</h3>
+    <p>屏3：写入后回读核对（事件 id 2847），深链打开 12306 屏幕读取有命中；完成后可再分享/存目录。</p>
+    <div class="tags"><span class="tag b">REQ-12</span><span class="tag g">回读核对</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">4</span>能力目录</h3>
+    <p>屏4：234 App 只读枚举，89 可调起 / 281 深链 / 188 有依据 93 待实测；QQ 缺口如实标注。</p>
+    <div class="tags"><span class="tag b">REQ-01</span><span class="tag">只读扫描</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">5</span>审计面板</h3>
+    <p>屏5：每次任务的 diff 陈述由代码生成；收件人核对拦截记录可回看；支持导出审计包。</p>
+    <div class="tags"><span class="tag b">REQ-09</span><span class="tag r">已拦截 1 次</span></div>
+  </div>
+
+  <div class="flow">
+    <h3><span class="n">6</span>设置 · 模型与隐私</h3>
+    <p>屏6：本地优先模型 / BYOK；云推理逐条列出上传内容；侧载高级包（通道 5–6）明确风险标注。</p>
+    <div class="tags"><span class="tag">BYOK</span><span class="tag r">通道 5–6 · 封号风险</span></div>
+  </div>
+
+  <div class="hint">
+    <b>试玩路径</b>：屏1 点绿色建议条「存联系人并导航」→ 屏2 点「确认执行」→ 屏3；
+    底部 Tab 可随时切到 能力 / 收拢 / 审计；屏1 右上模型胶囊进 设置。<br>
+    <b>快捷键</b>：H 显示热点区域，数字键 1–7 直达对应屏。
+  </div>
+</div>
+
+<div class="phone-wrap">
+  <div class="phone" id="phone">
+    <div class="crumb" id="crumb"><b>屏1</b><span>对话主干</span></div>
+
+    <div class="screen active" data-name="屏1 · 对话主干" data-num="1" id="scr1">
+      <img src="ardot-screens/s1-chat.png" alt="对话主干">
+      <div class="hs" style="left:17%;top:56.5%;width:16%;height:5%" data-label="存联系人并导航 → 屏2" onclick="go(2)"></div>
+      <div class="hs" style="left:36%;top:56.5%;width:13%;height:5%" data-label="只存联系人" onclick="go(1)"></div>
+      <div class="hs" style="left:56%;top:56.5%;width:18%;height:5%" data-label="先看这条路" onclick="go(1)"></div>
+      <div class="hs" style="left:37.5%;top:90.5%;width:25%;height:8%" data-label="能力 → 屏4" onclick="go(4)"></div>
+      <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="收拢 → 屏7" onclick="go(7)"></div>
+      <div class="hs" style="left:62%;top:6.5%;width:34%;height:4.5%" data-label="模型设置 → 屏6" onclick="go(6)"></div>
+    </div>
+
+    <div class="screen" data-name="屏7 · 收拢汇总" data-num="7" id="scr7">
+      <img src="ardot-screens/s7-gather.png" alt="收拢汇总">
+      <div class="hs" style="left:2%;top:6%;width:10%;height:5%" data-label="返回 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:12.5%;top:90.5%;width:25%;height:8%" data-label="对话 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:37.5%;top:90.5%;width:25%;height:8%" data-label="能力 → 屏4" onclick="go(4)"></div>
+      <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="审计 → 屏5" onclick="go(5)"></div>
+    </div>
+
+    <div class="screen" data-name="屏2 · 任务复述确认" data-num="2" id="scr2">
+      <img src="ardot-screens/s2-confirm.png" alt="任务复述确认">
+      <div class="hs" style="left:2%;top:6%;width:10%;height:5%" data-label="返回 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:35%;top:83.5%;width:60%;height:7%" data-label="确认执行 → 屏3" onclick="go(3)"></div>
+      <div class="hs" style="left:5%;top:83.5%;width:25%;height:7%" data-label="拒绝 → 屏1" onclick="go(1)"></div>
+    </div>
+
+    <div class="screen" data-name="屏3 · 执行与出口" data-num="3" id="scr3">
+      <img src="ardot-screens/s3-execute.png" alt="执行与出口">
+      <div class="hs" style="left:2%;top:6%;width:10%;height:5%" data-label="返回 → 屏2" onclick="go(2)"></div>
+      <div class="hs" style="left:84%;top:6%;width:12%;height:4.5%" data-label="停止 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:4%;top:56%;width:29%;height:8%" data-label="再分享" onclick="go(5)"></div>
+      <div class="hs" style="left:35.5%;top:56%;width:29%;height:8%" data-label="保存到目录 → 屏4" onclick="go(4)"></div>
+      <div class="hs" style="left:67%;top:56%;width:29%;height:8%" data-label="复制" onclick="go(5)"></div>
+    </div>
+
+    <div class="screen" data-name="屏4 · 能力目录" data-num="4" id="scr4">
+      <img src="ardot-screens/s4-catalog.png" alt="能力目录">
+      <div class="hs" style="left:12.5%;top:90.5%;width:25%;height:8%" data-label="对话 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="收拢 → 屏7" onclick="go(7)"></div>
+      <div class="hs" style="left:70%;top:5.8%;width:26%;height:4.5%" data-label="重新扫描" onclick="go(4)"></div>
+    </div>
+
+    <div class="screen" data-name="屏5 · 审计面板" data-num="5" id="scr5">
+      <img src="ardot-screens/s5-audit.png" alt="审计面板">
+      <div class="hs" style="left:12.5%;top:90.5%;width:25%;height:8%" data-label="对话 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:37.5%;top:90.5%;width:25%;height:8%" data-label="能力 → 屏4" onclick="go(4)"></div>
+      <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="收拢 → 屏7" onclick="go(7)"></div>
+      <div class="hs" style="left:4%;top:72.5%;width:92%;height:6.5%" data-label="导出审计包" onclick="go(6)"></div>
+    </div>
+
+    <div class="screen" data-name="屏6 · 设置与模型" data-num="6" id="scr6">
+      <img src="ardot-screens/s6-settings.png" alt="设置与模型">
+      <div class="hs" style="left:12.5%;top:90.5%;width:25%;height:8%" data-label="对话 → 屏1" onclick="go(1)"></div>
+      <div class="hs" style="left:37.5%;top:90.5%;width:25%;height:8%" data-label="能力 → 屏4" onclick="go(4)"></div>
+      <div class="hs" style="left:62.5%;top:90.5%;width:25%;height:8%" data-label="收拢 → 屏7" onclick="go(7)"></div>
+      <div class="hs" style="left:4%;top:34%;width:92%;height:7%" data-label="BYOK" onclick="go(6)"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const names = {"1":["屏1","对话主干"],"2":["屏2","任务复述确认"],"3":["屏3","执行与出口"],"4":["屏4","能力目录"],"5":["屏5","审计面板"],"6":["屏6","设置与模型"],"7":["屏7","收拢汇总"]};
+  function go(n){
+    document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+    const s = document.getElementById('scr'+n); if(s) s.classList.add('active');
+    const c = document.getElementById('crumb');
+    c.innerHTML = '<b>'+names[n][0]+'</b><span>'+names[n][1]+'</span>';
+  }
+  document.addEventListener('keydown',e=>{
+    if(e.key>='1'&&e.key<='7') go(+e.key);
+    if(e.key==='h'||e.key==='H') document.body.classList.toggle('show-hs');
+  });
+</script>
+</body>
+</html>
