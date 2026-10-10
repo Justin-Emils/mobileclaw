@@ -698,14 +698,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     assetBundlePatterns: ["**/*"],
     android: {
       package: "dev.mobileclaw.app",
+      // Android decides "is this an upgrade" from versionCode, not versionName, and the
+      // Expo template defaults it to 1 for every build. Keep it in step with `version`:
+      // 0.2.0 ships as code 2.
+      versionCode: 2,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
       permissions: [
-        // Android decides "is this an upgrade" from versionCode, not versionName, and the
-        // template default is 1 for every build. Bumping it alongside `version` keeps the two
-        // in step; 0.2.0 ships as code 2.
-        versionCode: 2,
         "INTERNET",
         "READ_MEDIA_IMAGES",
         "READ_MEDIA_VIDEO",
