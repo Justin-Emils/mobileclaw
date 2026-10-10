@@ -14,10 +14,14 @@ import { createPythonTools } from "./tools/python";
 import { createShizukuTools } from "./tools/shizuku";
 import { createAutomationTools } from "./tools/automation";
 import { createScreenReadTools } from "./tools/screen-read";
+import { createOpenTools } from "./tools/screen-open";
+import { createSendTools } from "./tools/screen-send";
 import { createPlanTools } from "./tools/plan";
 import { createEnrichTools } from "./tools/enrich";
 
 export * from "./availability";
+export * from "./screen-match";
+export * from "./foreground";
 export * from "./ui-dump";
 export * from "./android-ui-dump";
 export * from "./tools/filesystem";
@@ -28,6 +32,8 @@ export * from "./tools/python";
 export * from "./tools/shizuku";
 export * from "./tools/automation";
 export * from "./tools/screen-read";
+export * from "./tools/screen-open";
+export * from "./tools/screen-send";
 export * from "./tools/plan";
 export * from "./tools/enrich";
 /**
@@ -47,6 +53,16 @@ export interface CapabilityDeps {
    * obscurely, which keeps "no search" distinguishable from "search found nothing".
    */
   search?: WebSearchService;
+  /**
+   * Where the host wants screenshots kept, and how to sweep the expired ones.
+   *
+   * Both optional and both the host's business: the directory is a platform path, and the
+   * retention window is the user's setting. This package only knows that a screenshot is evidence
+   * and that the directory must not be the conversation workspace — pictures of other people's
+   * conversations do not belong wherever a workspace root happens to point.
+   */
+  screenshotDir?: string;
+  pruneScreenshots?: () => Promise<{ deleted: number; kept: number } | undefined>;
 }
 
 /**
@@ -144,8 +160,17 @@ export function capabilityPlugins(deps: CapabilityDeps): Plugin[] {
       version: "0.1.0",
       inject: ["system"],
       tools: [
-        ...createAutomationTools({ system: deps.system }),
+        ...createAutomationTools({
+          system: deps.system,
+          ...(deps.screenshotDir ? { screenshotDir: deps.screenshotDir } : {}),
+          ...(deps.pruneScreenshots ? { prune: deps.pruneScreenshots } : {}),
+        }),
         ...createScreenReadTools({ system: deps.system }),
+        // Opening a named item lives with the other screen actions: it presses something, and the
+        // reason it exists is that pressing the wrong thing here sends a message to a stranger.
+        ...createOpenTools({ system: deps.system }),
+        // The send itself. Last in the bundle because it is the last thing that should ever run.
+        ...createSendTools({ system: deps.system }),
       ],
       apply: () => {},
     }),

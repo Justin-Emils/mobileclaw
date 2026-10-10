@@ -186,7 +186,22 @@ describe("buildSystemPrompt", () => {
     expect(prompt).toContain("`expect`");
   });
 
-  it("honours a system prompt override", async () => {    const prompt = await buildAgent({ systemPrompt: "自定义提示词" }).buildSystemPrompt();
+  it("tells the model never to send on the strength of an unverified tap", async () => {
+    // The highest-consequence instruction in the prompt. A search for a name returns several
+    // people and a message cannot be recalled, so the tool that refuses to guess is named here —
+    // and the consequence is stated, because "verify first" without a reason gets optimised away.
+    const prompt = await buildAgent({}).buildSystemPrompt();
+    expect(prompt).toContain("`screen_open_item`");
+    expect(prompt).toMatch(/cannot be recalled/);
+    expect(prompt).toMatch(/do not type or send anything/i);
+    // And the send itself, which is a separate tool with a separate promise: it refuses rather
+    // than guesses, and a refusal means nothing was pressed.
+    expect(prompt).toContain("`screen_send_message`");
+    expect(prompt).toMatch(/nothing was pressed/);
+  });
+
+  it("honours a system prompt override", async () => {
+    const prompt = await buildAgent({ systemPrompt: "自定义提示词" }).buildSystemPrompt();
     expect(prompt).toContain("自定义提示词");
     // The tool inventory is still appended; an override replaces the persona, not the facts.
     expect(prompt).toContain("## Available tools");

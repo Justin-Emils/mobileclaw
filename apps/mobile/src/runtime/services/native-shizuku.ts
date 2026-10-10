@@ -56,6 +56,27 @@ export interface NativeShizukuModule {
   ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }>;
   /** Downscales on the shell side and writes the picture where the app can render it. */
   screenshot(options: { maxWidth: number; quality: number; destDir?: string }): Promise<ScreenCapture>;
+  /**
+   * The app-internal directory screenshots are written to.
+   *
+   * Asked for rather than assumed: the path is a platform fact owned by the Kotlin, and a second
+   * guess at it here would be a second thing to keep correct. Everything that lists, shows or
+   * prunes screenshots starts by asking for this.
+   *
+   * Optional because a native module older than this JavaScript simply will not have it, and a
+   * missing method must degrade to "no directory known" rather than failing the whole module —
+   * a hard requirement here would take screen reading down with it over a folder name.
+   */
+  screenshotDir?(): Promise<string>;
+  /**
+   * Holds the display awake while a run is in progress.
+   *
+   * The screen is the thing being automated, so a display that sleeps ends the run for a reason
+   * that has nothing to do with the task — and it does so silently, mid-step. Optional for the
+   * same reason as `screenshotDir`: a native module older than this JavaScript should degrade to
+   * "the display is not held", not fail to load.
+   */
+  keepScreenOn?(on: boolean): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

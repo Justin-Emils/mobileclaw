@@ -92,6 +92,24 @@ const failingTool = {
 };
 
 /**
+ * A tool that navigates without changing anything, like `screen_scroll`.
+ *
+ * `mutates: false` is exactly what a confirmed read-only plan relaxes, so this is the tool that
+ * reveals whether such a scope is still open when it should have closed.
+ */
+const navigateTool = {
+  name: "screen_scroll",
+  description: "move through the content",
+  input: z.object({}),
+  risk: "system" as const,
+  alwaysAsk: true,
+  mutates: false,
+  async execute() {
+    return { ok: true };
+  },
+};
+
+/**
  * The plan-confirmation tool, by the name the loop watches for.
  *
  * The literal is used rather than importing the constant: this test exists to pin the loop's
@@ -655,8 +673,50 @@ describe("Agent", () => {
     expect(events).toContain("budget");
   });
 
-  it("does not raise the budget when no plan was confirmed", async () => {
-    // The default path must be untouched: an unlimited run by omission would be worse than a
+  /**
+   * The read-only scope must not outlive the task that earned it.
+   *
+   * The gate is built once by the runtime and reused across runs, while `beginReadOnlyTask` is
+   * per-task state — so a scope left open by one run would silently cover the next, and the user
+   * would never have confirmed anything for it. The prompt relaxation is small (only tools that
+   * declare `mutates: false`), but it is still a permission the user did not give, and a
+   * relaxation that depends on which exit path a run happened to take is not a relaxation that
+   * can be reasoned about.
+   */
+  it("does not let one run's read-only scope cover the next run", async () => {
+    const approval = vi.fn().mockResolvedValue({ approved: true });
+    const { agent } = buildAgent({
+      turns: [
+        // Run one: confirm a plan that changes nothing, then use the relaxed tool.
+        { toolCalls: [{ id: "p1", name: "confirm_plan", input: { restatement: "just look", steps: ["scroll"] } }] },
+        { toolCalls: [{ id: "s1", name: "screen_scroll", input: {} }] },
+        "looked",
+        // Run two: no plan at all, and the same tool.
+        { toolCalls: [{ id: "s2", name: "screen_scroll", input: {} }] },
+        "done",
+      ],
+      tools: [planTool, navigateTool],
+      permissions: { defaultMode: "ask" },
+      approval,
+      maxSteps: 6,
+    });
+
+    const first = await run(agent, "read my playlist");
+    // The plan was approved, and inside its scope the non-mutating tool was not asked about.
+    expect(approval).toHaveBeenCalledTimes(1);
+
+    // The *same* conversation, deliberately. An id the store has never seen would be replaced by
+    // a generated one, and a scope keyed on the old id would fail to match for the wrong reason —
+    // the test would pass while the leak was still there. That is exactly what the first version
+    // of this test did, and a mutation check is what caught it.
+    await run(agent, "and another thing", { conversationId: first.conversationId });
+
+    // The second run has no confirmed plan, so the same tool must be asked about again. Without
+    // the scope being cleared, this count would stay at 1 and the prompt would be skipped.
+    expect(approval).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not raise the budget when no plan was confirmed", async () => {    // The default path must be untouched: an unlimited run by omission would be worse than a
     // low default, because nothing would warn the user.
     const looping = new MockProvider({
       turns: [{ toolCalls: [{ name: "fs_read", input: { path: "/sdcard/Download/notes.txt" } }] }],
@@ -740,9 +800,33 @@ describe("Agent", () => {
     });
     await run(scoped, "hi");
     const request = provider.requests[0];
-    expect(request?.tools?.map((tool) => tool.name)).toEqual(["fs_read"]);
+    // `catalog` is always offered, selection or not: it is how the model finds out what the
+    // selection left it with. Excluding it would be self-defeating — the inventory line tells the
+    // model to call it, and a selected run is exactly when it needs to.
+    expect(request?.tools?.map((tool) => tool.name)).toEqual(["fs_read", "catalog"]);
     expect(request?.messages[0]?.content).toContain("Be terse.");
     expect(request?.messages[0]?.content).not.toContain("fs_write");
+  });
+
+  it("sends the catalogue's own arguments, not just its name", async () => {
+    // The bug this pins: `toolSchemas()` used to read from the registry, and the catalogue is not
+    // registered — the agent builds it. So the prompt told the model to call `catalog` while the
+    // request carried no arguments for it, making the one tool the instructions point at the one
+    // tool that could not be called.
+    const provider = new MockProvider({ turns: ["ok"] });
+    const agent = new Agent({
+      provider,
+      registry: new ToolRegistry().register(readTool),
+      permissions: new PermissionGate({ defaultMode: "allow" }),
+      store: new KeyValueConversationStore(new MemoryKeyValueStore()),
+    });
+    await run(agent, "hi");
+
+    const catalogSchema = provider.requests[0]?.tools?.find((tool) => tool.name === "catalog");
+    expect(catalogSchema).toBeDefined();
+    const properties = (catalogSchema?.parameters as { properties?: Record<string, unknown> })
+      ?.properties;
+    expect(Object.keys(properties ?? {}).sort()).toEqual(["category", "query", "tool"]);
   });
 
   it("appends the environment block supplied by the host", async () => {

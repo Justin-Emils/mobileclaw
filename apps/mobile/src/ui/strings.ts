@@ -325,6 +325,34 @@ export const strings = {
     settleNote: "每个应用打开后会等 2 秒再读，否则会把「还在启动」记成「读不到」。",
   },
 
+  shots: {
+    title: "截图",
+    intro:
+      "我操作别的应用时会截图留证。这些图存在应用专属目录里，系统相册看不到，别的应用也读不到 —— 代价是只有这里能看，过期清理也只能由这个应用负责。",
+    needDir: "这个构建没有可用的截图目录（原生模块可能过期），所以既没有图可看，也无处清理。",
+    empty: "还没有截图。",
+    usage: (count: number, size: string) => `当前保留 ${count} 张，占用 ${size}`,
+    retentionTitle: "自动清理",
+    retentionHint:
+      "过期的图会在每次启动和每次截图后自动删除，不需要确认 —— 这是你设的规则。你自己点删除时才会问一次，因为那种删除无法撤销。",
+    retentionForever: "永久保留（不自动删）",
+    retentionDays: (days: number) => `保留 ${days} 天`,
+    expiredNote: (count: number) => `其中 ${count} 张已过期，下次截图或启动时会被自动删除`,
+    deleteOne: "删除",
+    clearAll: "全部清空",
+    confirmTitle: "确认删除",
+    confirmOne: (name: string) => `删除这张截图？\n\n${name}\n\n删除后无法恢复。`,
+    confirmAll: (count: number) =>
+      `清空全部 ${count} 张截图？\n\n这些图是我操作别的应用时留下的证据，删掉就无法再核对当时屏幕上是什么了。此操作无法撤销。`,
+    confirmDelete: "删除",
+    confirmClear: "清空",
+    cancel: "取消",
+    deleted: (count: number, size: string) => `已删除 ${count} 张，释放 ${size}`,
+    cleared: (count: number, size: string) => `已清空 ${count} 张，释放 ${size}`,
+    failed: (reason: string) => `没删成：${reason}`,
+    timeUnknown: "时间未知",
+  },
+
   risk: {
     read: "读取",
     write: "写入",

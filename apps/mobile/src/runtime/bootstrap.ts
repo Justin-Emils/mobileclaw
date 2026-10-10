@@ -1,4 +1,4 @@
-import { Platform } from "react-native";
+import { AppState, Platform } from "react-native";
 import { Directory, File, Paths } from "expo-file-system";
 import * as SecureStore from "expo-secure-store";
 import { openDatabaseAsync } from "expo-sqlite";
@@ -30,6 +30,14 @@ import {
 } from "./services/native-shizuku";
 import { MobileClawRuntime } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
+import {
+  createExpoScreenshotStore,
+  createScreenshotRetention,
+  resolveScreenshotDir,
+  retentionMs,
+  DEFAULT_RETENTION_DAYS,
+} from "./screenshots";
+import { createRunKeepAwake } from "./foreground";
 import type {
   AutomationService,
   FileSystemService,
@@ -171,6 +179,15 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     `[mobileclaw] privileged backend = ${nativeShizuku ? "shizuku (MobileClawShizuku)" : "none"}`,
   );
 
+  // --- staying alive while a run is in progress -----------------------------
+  // The agent loop is JavaScript in this app, so the run only progresses while the process does.
+  // The one part of that this app can influence is the display: the screen is the thing being
+  // automated, so a display that sleeps ends a run for a reason unrelated to the task.
+  //
+  // What this deliberately does *not* do any more is watch `AppState` and abort. That guard had the
+  // question backwards — see the note on `onRunForegroundLoss` below.
+  const keepAwake = createRunKeepAwake(nativeShizuku);
+
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend(privileged);
 
@@ -185,6 +202,25 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     ...(config.searxngBaseUrl ? { searxngBaseUrl: config.searxngBaseUrl } : {}),
   });
   console.log(`[mobileclaw] web search backend = ${search.kind}`);
+
+  // --- screenshots ---------------------------------------------------------
+  // Kept app-internal, so the phone's gallery never indexes them and no other app can read
+  // them — which is also why nothing else will ever tidy them up. Retention is therefore ours
+  // to enforce: `pruneScreenshots` runs at launch and after every capture, and reports what it
+  // removed so the fact reaches the transcript instead of being invented or omitted.
+  const screenshotDir = await resolveScreenshotDir(nativeShizuku);
+  const retention = createScreenshotRetention(
+    createExpoScreenshotStore(expoFsModule(), () => screenshotDir()),
+  );  const pruneScreenshots = () =>
+    retention.prune(retentionMs(config.screenshotRetentionDays ?? DEFAULT_RETENTION_DAYS));
+  if (screenshotDir()) {
+    // Sweep once at launch: a phone that keeps the app resident for days would otherwise never
+    // reach this path, and the pile only grows while a run is in progress.
+    const swept = await pruneScreenshots();
+    if (swept.deleted > 0) {
+      console.log(`[mobileclaw] screenshots: removed ${swept.deleted} expired, kept ${swept.kept}`);
+    }
+  }
 
   // --- system automation ---------------------------------------------------
   const system = new ExpoSystemService(
@@ -207,6 +243,28 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),
+    // Deliberately not the workspace: see `RuntimeDeps.screenshotDir`.
+    screenshotDir: screenshotDir(),
+    pruneScreenshots,
+    screenshots: retention,
+    // Holding the display awake is still wanted, and for the same reason as before: the screen is
+    // the thing being automated, so a display that sleeps ends a run for a reason unrelated to the
+    // task. It is unrelated to the app's foreground state, which nothing here consults any more.
+    keepAwake,
+    // No `onRunForegroundLoss`. An earlier version aborted the run the moment the app left the
+    // foreground, and it was wrong for a reason worth keeping written down: **this app is meant to
+    // be behind the app it is operating.** A phone shows one app at a time, so the state that guard
+    // treated as failure is the normal working state — and its only visible effect was cancelling a
+    // run as soon as the user switched to the conversation they had just asked the agent to open.
+    //
+    // What actually protects the irreversible step is the package check in `screen_send_message`:
+    // the final reading must have come from the app the caller named. That is decided from the
+    // screen, at the moment of pressing, instead of from our own process's state.
+    //
+    // The risk the guard was reaching for is real but is not solved by stopping: a backgrounded
+    // process may later be frozen or killed under memory pressure, at a moment nobody can predict,
+    // leaving a run silently unfinished either way. The fix for that is a foreground service, which
+    // is written up as a fallback in `docs/runtime-prerequisites.md` and deliberately not built yet.
     onConfigChange: async (next) => {
       await kv.set(CONFIG_KEY, JSON.stringify(next));
     },

@@ -10,6 +10,19 @@ import {
 } from "@mobileclaw/core";
 import { available, requireAvailable, unavailable } from "../availability";
 import { formatScreenReading } from "../ui-dump";
+/**
+ * The matching vocabulary, from the shared module.
+ *
+ * These used to live here privately. A second caller appeared — `screen_open_item`, which has to
+ * decide whether a name is unambiguous *before* it presses anyone — so they moved to
+ * `../screen-match`. The alternative was a copy, and a copy of this logic stays in step right up
+ * until the day one of them learns about content descriptions and the other does not, at which
+ * point a tool silently stops finding icon-only controls.
+ */
+import { MATCH_MODES, labelOf, matches, type MatchMode } from "../screen-match";
+
+/** Re-exported so existing callers of this file (and its tests) keep working. */
+export { MATCH_MODES, labelOf, matches, type MatchMode } from "../screen-match";
 
 /**
  * Screen access through the privileged backend, in three postures.
@@ -70,48 +83,6 @@ const READ_LIMITS = {
    */
   defaultFindAction: "find",
 } as const;
-
-/** How a query is matched against what an element says. */
-const MATCH_MODES = ["contains", "exact", "regex"] as const;
-type MatchMode = (typeof MATCH_MODES)[number];
-
-/** The text an element offers: what it shows, then what it is called. */
-function labelOf(node: ScreenNode): string {
-  return node.text ?? node.description ?? "";
-}
-
-/**
- * Does this element answer the query?
- *
- * `description` is searched as well as `text` because an icon-only control carries its
- * only label in `content-desc` — a magnifier button has no text at all, so a search
- * that ignored descriptions could never find one.
- */
-function matches(node: ScreenNode, query: string, mode: MatchMode): boolean {
-  const haystacks = [node.text, node.description].filter(
-    (value): value is string => typeof value === "string" && value !== "",
-  );
-  if (haystacks.length === 0) return false;
-
-  if (mode === "exact") {
-    return haystacks.some((value) => value.trim() === query.trim());
-  }
-  if (mode === "regex") {
-    // A caller-supplied pattern is untrusted input like any other, so a malformed one is
-    // reported as a bad query rather than thrown as a syntax error from deep inside.
-    let pattern: RegExp;
-    try {
-      pattern = new RegExp(query, "i");
-    } catch (error) {
-      throw new CoreError("E_TOOL_INPUT", `not a usable regular expression: ${query}`, {
-        hint: `The pattern failed to compile (${error instanceof Error ? error.message : String(error)}). Use mode "contains" to search for literal text.`,
-      });
-    }
-    return haystacks.some((value) => pattern.test(value));
-  }
-  const needle = query.trim().toLowerCase();
-  return haystacks.some((value) => value.toLowerCase().includes(needle));
-}
 
 /**
  * Pick the element a query most likely means.

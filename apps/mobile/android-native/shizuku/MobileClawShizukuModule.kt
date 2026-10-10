@@ -1,10 +1,12 @@
 package dev.mobileclaw.app.shizuku
 
+import android.app.Activity
 import android.content.ComponentName
 import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.IBinder
 import android.util.Base64
+import android.view.WindowManager
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -177,8 +179,12 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
             val json = JSONObject(awaitService().screenshot(maxWidth.toInt(), quality.toInt()))
             if (json.has("error")) throw IllegalStateException(json.getString("error"))
 
-            val directory =
-                destDir?.takeIf { it.isNotBlank() }?.let { File(it) } ?: reactContext.cacheDir
+            // Screenshots of other apps routinely contain private conversations, so the default
+            // destination is app-internal: the system gallery never indexes it, no other app can
+            // read it, and no storage permission is involved. `filesDir` rather than `cacheDir`
+            // because these are evidence — the system may purge a cache at any moment, and a
+            // screenshot that quietly disappears cannot witness anything.
+            val directory = destDir?.takeIf { it.isNotBlank() }?.let { File(it) } ?: screenshotDir()
             check(directory.isDirectory || directory.mkdirs()) {
                 "could not create the destination directory: ${directory.absolutePath}"
             }
@@ -196,6 +202,64 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
             }
         }
     }
+
+    /**
+     * Keeps the display on while a run is in progress.
+     *
+     * The screen is the thing being automated, so a display that sleeps ends a run for a reason
+     * that has nothing to do with the task — and it does so silently, mid-step. `FLAG_KEEP_SCREEN_ON`
+     * needs no permission and lets the system release it when the app leaves the foreground, which
+     * is the behaviour this wants: a run stops being meaningful then anyway.
+     *
+     * Applied on the current Activity, so it is a no-op rather than an error when there is none —
+     * a headless moment must not take the run down.
+     */
+    @ReactMethod
+    fun keepScreenOn(on: Boolean, promise: Promise) {
+        run(promise) {
+            val activity = currentActivity
+            check(activity != null) { "no current activity to hold the display with" }
+            activity.runOnUiThread {
+                if (on) {
+                    activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            }
+            on
+        }
+    }
+
+    /** The Activity this module is attached to, when there is one. */
+    private val currentActivity: Activity?
+        get() = (reactContext.currentActivity as? Activity)
+
+    /**
+     * Where screenshots live, so JavaScript can list, show and prune them.
+     *
+     * Exposed rather than derived on the JavaScript side: this is a platform path, and a second
+     * guess at it in TypeScript would be a second thing to keep correct. The Kotlin side owns the
+     * location; everything else asks for it.
+     */
+    @ReactMethod
+    fun screenshotDir(promise: Promise) {
+        run(promise) {
+            val directory = screenshotDir()
+            check(directory.isDirectory || directory.mkdirs()) {
+                "could not create the screenshot directory: ${directory.absolutePath}"
+            }
+            directory.absolutePath
+        }
+    }
+
+    /**
+     * The app-internal screenshot directory.
+     *
+     * Inside the app's private `files` directory, which is what keeps these pictures out of the
+     * system gallery and away from every other app, with no permission asked for. Not `cacheDir`:
+     * a screenshot the system may purge cannot serve as evidence.
+     */
+    private fun screenshotDir(): File = File(reactContext.filesDir, "screenshots")
 
     /** True when the Shizuku manager app is present at all, which "not running" hides. */
     private fun isManagerInstalled(): Boolean =

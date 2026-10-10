@@ -226,6 +226,39 @@ Gradle 不把 `packages/*` 当作 JS 打包任务的输入，所以改了 core/c
 
 > **因此：请通过 `eng/build-local.ps1` 构建，不要直接跑 `gradle assembleRelease`。** 两者不等价。
 
+### 7. `pnpm run check` 在 Hermes 打包那一步失败
+
+症状很长，**真正的错误只有两行**，前面三十多条 warning 全是噪音：
+
+```
+Failed to generate Hermes bytecode for: ...\apps\mobile\index.ts
+  warning: the variable "Promise" was not declared in anonymous function
+  warning: the variable "URL" was not declared in anonymous arrow function
+  ...（约 35 条同类 warning）...
+Failed to open file C:\Users\<你>\AppData\Local\Temp\expo-bundler-<n>\index.hbc.<hex>: permission denied
+hermesc.exe ... -emit-binary -out ... exited with non-zero code: 6
+```
+
+**那些 `the variable X was not declared` 是 Hermes 编译 React Native 的常规输出**（RN 在启动时注入这些全局），不是错误，看到不必管。
+
+**真正的原因**：`hermesc.exe`（`hermes-compiler` 附带）**没有代码签名**，而这台机器上的代码完整性策略**只允许未签名程序在项目目录内创建文件**。可复现的证据：
+
+| 命令 | 结果 |
+|---|---|
+| `hermesc -out <仓库内>\a.hbc a.js` | ✅ exit 0，文件写出 |
+| `hermesc -out C:\Temp\b.hbc a.js` | ❌ exit 6，permission denied |
+| **同一份源码、同一个进程，只有输出路径不同** | |
+| `icacls C:\Temp` | 没有 Deny 项，PowerShell 在那里随便写 |
+| 把 `node.exe` 复制到 `C:\Temp` 让它写文件 | ✅ 成功（签名：OpenJS Foundation） |
+| `Get-AuthenticodeSignature hermesc.exe` | **NotSigned** |
+
+`expo export` 的中间产物在 `%TEMP%\expo-bundler-*`，所以字节码那一步必然失败。
+
+**现在**：`apps/mobile` 的 `bundle` 脚本改为走 `eng/export-bundle.cjs`，它在启动 export 前把 `TMPDIR`/`TEMP`/`TMP` 指向
+`apps/mobile/node_modules/.cache/mobileclaw-bundler`（**仓库内**且已被 `node_modules/` 忽略）。输出产物完全一样。
+
+**机器上没有这个策略时，这一层是多余的但无害**——`expo export` 照常使用系统临时目录。
+
 ---
 
 ## 常用命令速查

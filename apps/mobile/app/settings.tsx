@@ -415,6 +415,13 @@ export default function SettingsScreen() {
             <Text style={styles.buttonGhostText}>{strings.probe.title}</Text>
           </Pressable>
         </Link>
+        {/* Screenshots are app-internal, so the gallery cannot show them and nothing else on the
+            phone will ever clean them up. This entry is the only way to see or clear them. */}
+        <Link href="/screenshots" asChild>
+          <Pressable style={styles.buttonGhost}>
+            <Text style={styles.buttonGhostText}>{strings.shots.title}</Text>
+          </Pressable>
+        </Link>
         <Text style={styles.hint}>
           {strings.settings.capabilitySummary(
             tools.length,

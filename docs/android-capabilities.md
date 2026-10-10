@@ -194,7 +194,7 @@ What each plugin does:
 | `withShizukuManifest` | `<provider android:name="rikka.shizuku.ShizukuProvider">` with `authorities="${applicationId}.shizuku"` and `permission=android.permission.INTERACT_ACROSS_USERS_FULL` |
 | `withShizukuGradle` | `implementation("dev.rikka.shizuku:api:13.1.5")` and `:provider`, plus `buildFeatures { aidl true }` |
 
-**The interface is deliberately tiny** — `exec`, `screenshot`, `destroy`. Taps, scrolls, `dumpsys`
+**The interface is deliberately tiny** — `exec` and `screenshot`. Taps, scrolls, `dumpsys`
 parsing and text entry are composed as `input …` command lines on the JS side
 (`apps/mobile/src/runtime/services/native-shizuku.ts`). The Kotlin cannot be compiled on a development
 machine without the Android toolchain, so every line of it is a blind spot until a device build says
@@ -202,9 +202,15 @@ otherwise — and the JS has tests. Each additional native method is another unv
 
 Notes that will save a debugging session:
 
-- The `.aidl` declares `destroy() = 16777114`, while Shizuku's documentation gives the transaction
-  code as `16777115`. The implementation accepts either: getting it wrong leaks a shell process on
-  every reconnect, and there was no device to see which one arrives. See `onTransact`.
+- **`destroy` is deliberately absent from the `.aidl`.** It used to be declared as
+  `void destroy() = 16777114;`, which AIDL rejects outright — a file may give ids to all methods or
+  to none, and Shizuku wants a reserved code rather than the next sequential one:
+  `ERROR: ...aidl:35.9-17: You must either assign id's to all methods or to none of them.`
+  That error only appeared once a full build first ran, because the file was written on a machine
+  with no toolchain. Declaring it was also dead weight: the resolved transaction code for the
+  teardown is **16777115** while the documented AIDL constant is **16777114**, and `onTransact`
+  accepts either — so the call is handled in Kotlin, and an AIDL method would never have reached it.
+  Getting this wrong leaks a shell process on every reconnect.
 - The UserService process is **not a valid Android application process**. A `Context` may exist but
   `getContentResolver` and `registerReceiver` do not work. Nothing in it reaches for one.
 - uid 2000 cannot write into the app's private directory, and the app cannot read

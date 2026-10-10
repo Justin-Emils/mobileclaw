@@ -253,8 +253,12 @@ describe("Automation tools", () => {
     },
   });
 
-  const toolNamed = (system: SystemService, name: string) => {
-    const tool = createAutomationTools({ system }).find((entry) => entry.name === name);
+  const toolNamed = (
+    system: SystemService,
+    name: string,
+    deps: { screenshotDir?: string; prune?: () => Promise<{ deleted: number; kept: number } | undefined> } = {},
+  ) => {
+    const tool = createAutomationTools({ system, ...deps }).find((entry) => entry.name === name);
     if (!tool) throw new Error(`no automation tool named ${name}`);
     return tool;
   };
@@ -444,7 +448,11 @@ describe("Automation tools", () => {
     expect(result.evidence.height).toBe(shot.height);
   });
 
-  it("saves the capture into the conversation workspace when there is one", async () => {
+  it("saves the capture into the app's screenshot directory, not the conversation workspace", async () => {
+    // Pinned deliberately. These pictures routinely contain other people's conversations, and the
+    // workspace root is the one path a user may reasonably point at shared storage — at which
+    // point the phone's gallery starts indexing them. A capture that lands in the workspace is
+    // not merely untidy, it is a disclosure, so the destination is asserted rather than assumed.
     let seen: string | undefined;
     const system = screen({
       async captureScreen(options) {
@@ -452,11 +460,59 @@ describe("Automation tools", () => {
         return { path: "file:///w/shot.jpg", width: 720, height: 1600 };
       },
     });
-    await toolNamed(system, "screen_capture").execute(
+    await toolNamed(system, "screen_capture", { screenshotDir: "/data/screenshots" }).execute(
       { maxWidth: 720, quality: 70 } as never,
+      // A workspace is offered and must be ignored.
       { ...call, workspace: "/data/ws/conv_1" } as never,
     );
-    expect(seen).toBe("/data/ws/conv_1");
+    expect(seen).toBe("/data/screenshots");
+  });
+
+  it("leaves the destination to the backend when the host has not supplied one", async () => {
+    // The capability stays platform-free: with no directory configured the backend picks, which
+    // on Android is its own app-internal folder. Filling in a guess here would put files
+    // somewhere nobody chose.
+    let seen: string | undefined = "unset";
+    const system = screen({
+      async captureScreen(options) {
+        seen = options?.destDir;
+        return { path: "file:///w/shot.jpg", width: 720, height: 1600 };
+      },
+    });
+    await toolNamed(system, "screen_capture").execute({} as never, { ...call } as never);
+    expect(seen).toBeUndefined();
+  });
+
+  it("sweeps the expired screenshots after a capture and reports the count", async () => {
+    // A run is exactly when the pile grows, so the sweep happens here as well as at launch —
+    // a phone that keeps the app resident for days would otherwise never reach the launch path.
+    // The count is surfaced because deleting the user's files is a fact about the device: the
+    // model is told, rather than left to guess or stay silent.
+    let swept = 0;
+    const system = screen();
+    const result = (await toolNamed(system, "screen_capture", {
+      screenshotDir: "/data/screenshots",
+      prune: async () => {
+        swept += 1;
+        return { deleted: 2, kept: 5 };
+      },
+    }).execute({} as never, { ...call } as never)) as Record<string, unknown>;
+
+    expect(swept).toBe(1);
+    expect(String(result["retention"])).toMatch(/removed 2 expired/);
+    // The capture itself is still reported as evidence.
+    expect(result["evidence"]).toBeDefined();
+  });
+
+  it("says nothing about retention when nothing expired", async () => {
+    // A line that appears on every capture becomes noise the model learns to skip.
+    const system = screen();
+    const result = (await toolNamed(system, "screen_capture", {
+      screenshotDir: "/data/screenshots",
+      prune: async () => ({ deleted: 0, kept: 3 }),
+    }).execute({} as never, { ...call } as never)) as Record<string, unknown>;
+
+    expect(result["retention"]).toBeUndefined();
   });
 
   describe("defaults are decided in one place", () => {

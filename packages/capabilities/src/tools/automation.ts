@@ -8,6 +8,7 @@ import {
   type SystemService,
 } from "@mobileclaw/core";
 import { available, requireAvailable, unavailable } from "../availability";
+import { packageMatches, screenActionAllowed } from "../foreground";
 
 /** How often `screen_wait` re-reads the foreground app, and how long it waits by default. */
 const WAIT_POLL_MS = 400;
@@ -90,7 +91,31 @@ async function verifyExpectation(
  * Descriptions and hints are English because everything the model reads in this
  * package is; the wording a person sees is added in the app layer.
  */
-export function createAutomationTools(deps: { system: SystemService }): AnyToolDefinition[] {
+export function createAutomationTools(deps: {
+  system: SystemService;
+  /**
+   * Where screenshots go, when the host has an opinion.
+   *
+   * Passed in rather than derived from the conversation workspace. These pictures routinely
+   * contain other people's conversations, so the destination is fixed to an app-internal
+   * directory: aimed at the workspace they land wherever the workspace root happens to be —
+   * app-private today, but shared storage the moment a custom workspace directory is allowed,
+   * at which point the phone's gallery begins indexing them. A fixed destination makes that a
+   * decision rather than a coincidence, and it is what keeps the system gallery untouched.
+   *
+   * Optional so the capability itself stays platform-free: with no directory supplied, the
+   * backend chooses, which on Android is its own app-internal folder.
+   */
+  screenshotDir?: string;
+  /**
+   * Deletes screenshots that have aged past the retention window, and reports what it did.
+   *
+   * A callback rather than a retention policy, because the policy belongs to the app that owns
+   * the directory (and the user's setting) while this package stays platform-free. Absent means
+   * nothing is swept, which is the behaviour a host that has not opted in should get.
+   */
+  prune?: () => Promise<{ deleted: number; kept: number } | undefined>;
+}): AnyToolDefinition[] {
   const backend = (): AutomationService | undefined => deps.system.automation;
 
   async function requireScreen(kind: string): Promise<AutomationService> {
@@ -120,12 +145,11 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
    */
   async function evidence(
     automation: AutomationService,
-    ctx: { workspace?: string },
-  ): Promise<{ evidence?: ScreenCapture; evidenceNote?: string }> {
+    ): Promise<{ evidence?: ScreenCapture; evidenceNote?: string }> {
     try {
       const shot = await automation.captureScreen({
         quality: SCREEN_DEFAULTS.evidenceQuality,
-        ...(ctx.workspace ? { destDir: ctx.workspace } : {}),
+        ...(deps.screenshotDir ? { destDir: deps.screenshotDir } : {}),
       });
       return {
         evidence: {
@@ -188,17 +212,32 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
     alwaysAsk: true,
     neverRemember: true,
     summarize: () => "screen capture",
-    async execute(input: { maxWidth?: number; quality?: number }, ctx: { workspace?: string }) {
+    async execute(input: { maxWidth?: number; quality?: number }) {
       const automation = await requireScreen("screen capture");
       const shot = await automation.captureScreen({
         ...(input.maxWidth !== undefined ? { maxWidth: input.maxWidth } : {}),
         ...(input.quality !== undefined ? { quality: input.quality } : {}),
-        ...(ctx.workspace ? { destDir: ctx.workspace } : {}),
+        ...(deps.screenshotDir ? { destDir: deps.screenshotDir } : {}),
       });
+
+      // Sweep the expired ones now, and say so.
+      //
+      // Here rather than only at launch because a run is exactly when the pile grows, and a phone
+      // that keeps the app resident for days would otherwise never reach the launch path. The
+      // count is reported because deleting the user's files is a fact about the device: the model
+      // is told it happened, and cannot invent a different number or stay silent about it.
+      const swept = await deps.prune?.();
+
       // The capture *is* the evidence here. The transcript only picks up an explicit
       // `evidence` key, so without this the picture would never reach the very card
       // that exists to show it — which is the whole point of taking it.
-      return { ...shot, evidence: shot };
+      return {
+        ...shot,
+        evidence: shot,
+        ...(swept && swept.deleted > 0
+          ? { retention: `removed ${swept.deleted} expired screenshot(s), kept ${swept.kept}` }
+          : {}),
+      };
     },
   } satisfies AnyToolDefinition;
 
@@ -227,7 +266,6 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
     summarize: (input: { target: string }) => `tap ${input.target}`,
     async execute(
       input: { target: string; x?: number; y?: number; screenshotPath?: string },
-      ctx: { workspace?: string },
     ) {
       if (input.x === undefined || input.y === undefined) {
         throw new CoreError("E_TOOL_FAILED", "no point was chosen for this tap", {
@@ -241,7 +279,7 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
         x: input.x,
         y: input.y,
         ...(input.screenshotPath ? { screenshotPath: input.screenshotPath } : {}),
-        ...(await evidence(automation, ctx)),
+        ...(await evidence(automation)),
       };
     },
   } satisfies AnyToolDefinition;
@@ -281,7 +319,7 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
     ) {
       const automation = await requireScreen("screen scrolling");
       await automation.scroll(input.direction, input.amount);
-      return { direction: input.direction, ...(await evidence(automation, ctx)) };
+      return { direction: input.direction, ...(await evidence(automation)) };
     },
   } satisfies AnyToolDefinition;
 
@@ -300,6 +338,14 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
         .describe(
           "Text that should now be present on screen, checked by reading the screen back after typing. Use the distinctive part of what you typed. The tool reports whether it was found; if it was not, the typing did not take effect and you must not report it as done.",
         ),
+      expectedPackage: z
+        .string()
+        .min(1)
+        .max(120)
+        .optional()
+        .describe(
+          "The app whose field is meant to receive this text, e.g. com.tencent.mm. Pass it when you know it: the text goes to whatever holds focus, so this is what stops it landing in a different app. Get it from screen_current or a previous screen_read.",
+        ),
     }),
     risk: "system",
     category: "screen-act",
@@ -309,8 +355,30 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
     // Length, not the text. Whatever is typed already lands on the transcript entry,
     // and this summary is a second copy in the UI — the wrong place for a password.
     summarize: (input: { text: string }) => `type ${input.text.length} characters`,
-    async execute(input: { text: string; expect?: string }, ctx: { workspace?: string }) {
+    async execute(input: { text: string; expect?: string; expectedPackage?: string }, ctx: { signal?: AbortSignal }) {
       const automation = await requireScreen("screen typing");
+      // Cancellation only. The destination of a keystroke cannot be decided from our own process's
+      // state — our app is *supposed* to be behind the field being typed into. `expectedPackage`
+      // below is what actually names the destination, and it is checked against a reading.
+      const allowed = screenActionAllowed({ signal: ctx.signal });
+      if (!allowed.ok) {
+        return { typed: false, detail: allowed.reason ?? "nothing was typed" };
+      }
+
+      // Refuse when the screen has moved on to a different app since the caller looked. A reading
+      // is only meaningful relative to the app that published it, and `input text` plus the
+      // clipboard paste path deliver to whatever window currently holds focus — so this is the only
+      // place the destination can be questioned before the text leaves.
+      if (input.expectedPackage) {
+        const current = await automation.readScreen({ maxNodes: 1, maxChars: 1 });
+        if (!packageMatches(current.package, input.expectedPackage)) {
+          return {
+            typed: false,
+            detail: `the screen is showing ${current.package}, not ${input.expectedPackage}, so nothing was typed. The intended app is not in front.`,
+          };
+        }
+      }
+
       const result = await automation.typeText(input.text);
 
       const verification =
@@ -320,7 +388,7 @@ export function createAutomationTools(deps: { system: SystemService }): AnyToolD
         method: result.method,
         length: input.text.length,
         ...(verification ?? {}),
-        ...(await evidence(automation, ctx)),
+        ...(await evidence(automation)),
       };
     },
   } satisfies AnyToolDefinition;

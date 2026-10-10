@@ -1,11 +1,11 @@
 import { createId } from "./store";
-import { describeInput, ToolRegistry } from "./tools-registry";
+import { describeInput, toToolSchema, ToolRegistry } from "./tools-registry";
 import { CoreError, safeStringify, toCoreError } from "./errors";
 import { PermissionGate } from "./permission";
 import { CONFIRM_PLAN_TOOL } from "./plan";
 import { renderCatalogue } from "./catalog";
 import { createCatalogTool } from "./tool-catalog";
-import type { AnyToolDefinition } from "./tool";
+import type { AnyToolDefinition, ToolSchema } from "./tool";
 import type {
   ChatMessage,
   Conversation,
@@ -108,15 +108,17 @@ export class Agent {
     this.store = options.store;
   }
 
-  /** Tool schemas the model will see on the next turn. */
-  toolSchemas(): ReturnType<ToolRegistry["schemas"]> {
-    return this.resolveTools().length === 0
-      ? []
-      : this.options.registry.schemas(
-          this.options.toolSelection && this.options.toolSelection.length > 0
-            ? this.options.toolSelection
-            : undefined,
-        );
+  /**
+   * Tool schemas the model will see on the next turn.
+   *
+   * Built from `resolveTools()` rather than from the registry directly, because the catalogue is
+   * not a registered tool — it is constructed by the agent from the resolved list. Asking the
+   * registry for schemas would leave the model holding an inventory that says "call `catalog` for
+   * the exact arguments" while providing no arguments for `catalog` itself: the one tool the
+   * instructions tell it to reach for would be the one it cannot call.
+   */
+  toolSchemas(): ToolSchema[] {
+    return this.resolveTools().map(toToolSchema);
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -173,6 +175,13 @@ export class Agent {
 
     let steps = 0;
     let finalText = "";
+
+    // A read-only task scope belongs to *one confirmed task*. The gate outlives a run — it is
+    // built once by the runtime and reused — so a scope left open by a previous run would silently
+    // cover the next one, and the user would never have confirmed anything for it. Cleared up
+    // front as well as in the `finally` below: defence in depth for the one piece of state that
+    // relaxes a prompt.
+    this.options.permissions.endReadOnlyTask();
 
     try {
       for (let step = 1; step <= maxSteps; step += 1) {
@@ -376,10 +385,15 @@ export class Agent {
         toolCalls: toolCallCount,
         error: coreError,
       };
+    } finally {
+      // The scope ends with the task that earned it, on every path out — success, step limit,
+      // cancellation and error alike. It is also cleared at the top of the next run, because a
+      // permission relaxation that can outlive its run is exactly the kind of thing that should
+      // not depend on one line being reached.
+      this.options.permissions.endReadOnlyTask();
     }
   }
 
-  /** Run one tool call through permissions, registry and event reporting. */
   /**
    * Run one tool call through the gate, the registry and the transcript.
    *
@@ -713,6 +727,8 @@ Rules:
 - When a tool returns an error code, adapt: read the error, fix the input, or explain the blocker.
 - The list under "Available tools" is a summary: a name and one sentence each. When you are unsure which tool fits, or you need its exact arguments, call \`catalog\` — with no arguments for the domains, with \`category\` for one domain in full, or with \`query\` to search by keyword. Do not guess a tool's arguments from its name.
 - When a tool writes something into another app, pass its verification argument if it has one (for example \`expect\` on \`screen_type\`). A keystroke that was delivered is not evidence that the text landed, and reporting it as done when the check failed is exactly the kind of claim this agent must not make.
+- Opening a *person* — a chat, a contact, a search result you intend to send to — is done with \`screen_open_item\`, not \`screen_find\` + tap. It refuses to choose between look-alike results and hands you the candidates so you can ask the user which one, and it confirms the page that opened really shows what you said it would. Take its verdict seriously: if it says the result is unverified or ambiguous, **do not type or send anything** — report it and ask. A message to the wrong person cannot be recalled, and a search for a name produces that risk every single time.
+- **Sending** is done with \`screen_send_message\`, never with \`screen_type\` followed by a tap on something that looks like send. It is one action that either happens or does not: it confirms the intended conversation is in front, confirms the text actually landed, and re-reads the recipient one last time immediately before pressing. It needs the send button's label as the user sees it and will refuse rather than guess which control sends. If it returns \`refused\`, **nothing was pressed** — resolve the reason or tell the user; do not call it again unchanged hoping for a different outcome.
 - Keep replies short. Show paths, commands and results; skip filler.
 
 Where to get information:

@@ -29,6 +29,15 @@ export interface AppConfig {
    * which backend actually answered rather than assuming.
    */
   searxngBaseUrl?: string;
+  /**
+   * How many days screenshots are kept before the app deletes them, or `0` to keep them.
+   *
+   * Screenshots of other apps routinely contain private conversations, and they live in an
+   * app-internal directory precisely so the system gallery never shows them — which also means
+   * nothing else on the phone will ever tidy them up. A retention window is the only mechanism
+   * that exists, so this is a setting rather than a constant.
+   */
+  screenshotRetentionDays?: number;
 }
 
 export const DEFAULT_PRESETS: ProviderPreset[] = [
@@ -118,6 +127,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   permissions: DEFAULT_PERMISSIONS,
   roots: [],
   useMockProvider: false,
+  screenshotRetentionDays: 3,
 };
 
 /** Merge a stored config over the defaults, tolerating older shapes. */

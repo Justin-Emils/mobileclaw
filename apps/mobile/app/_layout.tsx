@@ -25,6 +25,7 @@ export default function RootLayout() {
               header read "conversations" on a device until it was registered. */}
           <Stack.Screen name="conversations" options={{ title: strings.conversations.title }} />
           <Stack.Screen name="screen-probe" options={{ title: strings.probe.title }} />
+          <Stack.Screen name="screenshots" options={{ title: strings.shots.title }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>

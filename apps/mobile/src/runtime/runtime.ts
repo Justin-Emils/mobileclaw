@@ -34,6 +34,7 @@ import {
 import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
+import { DEFAULT_RETENTION_DAYS } from "./screenshots";
 import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./services/secrets";
 import { createSelfTestProvider, selfTestPath } from "./services/self-test";
 
@@ -55,6 +56,7 @@ import {
 } from "./services/storage-permissions";
 import { APP_PACKAGE } from "./services/app-info";
 import { describeWorkspace, workspacePath } from "./workspace";
+import type { ScreenshotRetention } from "./screenshots";
 
 export interface RuntimeDeps {
   config: unknown;
@@ -87,8 +89,33 @@ export interface RuntimeDeps {
    * somewhere unintended. The bootstrap passes the platform's documents directory.
    */
   workspaceBaseDir: string;
-  /** Extra lines appended to the system prompt (device facts, roots, date). */
-  environment?: () => string | Promise<string>;
+  /**
+   * Where screenshots are kept, and how to sweep the expired ones.
+   *
+   * Separate from `workspaceBaseDir` on purpose. Screenshots of other apps contain other people's
+   * conversations, and the workspace root is the one path in this app that a user may reasonably
+   * want to point at shared storage — at which point the phone's gallery would begin indexing
+   * those pictures. Keeping the destination a different, app-internal path means that choice is
+   * never made by accident.
+   */
+  screenshotDir?: string;
+  pruneScreenshots?: () => Promise<{ deleted: number; kept: number } | undefined>;
+  /**
+   * The screenshot store, for the screen that shows and clears them.
+   *
+   * Separate from `pruneScreenshots` because that one answers "sweep the expired ones" for the
+   * capture tool, while this answers the user's questions — how many are kept on my behalf, show
+   * me, delete this one. Both end at the same directory.
+   */
+  screenshots?: ScreenshotRetention;
+  /**
+   * Holds the display awake while a run is in progress.
+   *
+   * Owned by the app rather than created here: it is a platform capability, and a runtime that
+   * cannot run without it would be untestable off-device.
+   */
+  keepAwake?: { acquire(): void; release(): void };
+  /** Extra lines appended to the system prompt (device facts, roots, date). */  environment?: () => string | Promise<string>;
   /** Persist config changes made through the UI. */
   onConfigChange?: (config: AppConfig) => Promise<void> | void;
 }
@@ -154,6 +181,8 @@ export class MobileClawRuntime {
       http: this.deps.http,
       system: this.deps.system,
       ...(this.deps.search ? { search: this.deps.search } : {}),
+      ...(this.deps.screenshotDir ? { screenshotDir: this.deps.screenshotDir } : {}),
+      ...(this.deps.pruneScreenshots ? { pruneScreenshots: this.deps.pruneScreenshots } : {}),
     };
     // Publish the platform services first: the host rejects a plugin whose
     // `inject` list is unmet, so they must exist before the bundles load.
@@ -164,6 +193,30 @@ export class MobileClawRuntime {
       system: deps.system,
     });
     await this.host.loadAll(capabilityPlugins(deps));
+  }
+
+  /* ------------------------------------------------------------ screenshots */
+
+  /**
+   * What the screenshot screen needs, in one place.
+   *
+   * Returning `undefined` when no store was wired keeps "this build has no screenshot directory"
+   * distinguishable from "the directory is empty" — the screen says the first, and shows nothing
+   * for the second. Collapsing them would tell a user their screenshots are gone when the truth
+   * is that this build never had a place to put them.
+   */
+  screenshots(): ScreenshotRetention | undefined {
+    return this.deps.screenshots;
+  }
+
+  /**
+   * How many days screenshots are kept. `0` means keep them.
+   *
+   * Read from the config rather than duplicated in the screen, so the number the screen displays
+   * and the number retention actually uses cannot disagree.
+   */
+  screenshotRetentionDays(): number {
+    return this.config.screenshotRetentionDays ?? DEFAULT_RETENTION_DAYS;
   }
 
   /* --------------------------------------------------------------- settings */
@@ -612,6 +665,9 @@ export class MobileClawRuntime {
     const runId = createId("run");
     const controller = new AbortController();
     this.controller.set(runId, controller);
+    // Hold the display awake for the whole run. The screen is the thing being automated, so a
+    // display that sleeps ends the run for a reason that has nothing to do with the task.
+    this.deps.keepAwake?.acquire();
     const onAbort = (): void => {
       controller.abort();
       // Unblock any modal waiting for the user: the run is over.
@@ -655,6 +711,7 @@ export class MobileClawRuntime {
       return result!;
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
+      this.deps.keepAwake?.release();
       this.controller.delete(runId);
     }
   }
