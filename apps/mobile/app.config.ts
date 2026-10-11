@@ -541,9 +541,26 @@ interface ManifestProvider {
  *
  * `authorities` must be `${applicationId}.shizuku`, and the provider is protected by
  * `INTERACT_ACROSS_USERS_FULL` so ordinary apps cannot bind to it. Both come from the
- * official Shizuku-API README — which is also why there is no
- * `moe.shizuku.manager.permission.API_V23` here. That string circulates online; the
- * documentation does not contain it.
+ * official Shizuku-API README.
+ *
+ * This deliberately does **not** declare `moe.shizuku.manager.permission.API_V23`, and the
+ * reason is not that the permission is absent -- it is already in the packaged manifest,
+ * merged in from `androidx.core:core` (which the Shizuku artefacts depend on), so it is
+ * granted at install time and no manual step in Settings is needed. A previous version of
+ * this comment claimed that string "circulates online but is not in the documentation" and
+ * used that as the reason to leave it out. That was wrong twice over: it *is* declared
+ * inside `provider-13.1.5.aar`'s own manifest, and the merge brings it in regardless. The
+ * claim was worth removing because it read as "no permission is needed", which invites
+ * someone to look for a missing grant when something else is actually at fault.
+ *
+ * To re-check it after a prebuild, the packaged result is the authority:
+ *
+ *   apps/mobile/android/app/build/intermediates/packaged_manifests/\
+ *     debug/processDebugManifestForPackage/AndroidManifest.xml
+ *
+ * The `<queries>` entry for `moe.shizuku.privileged.api` is separate and *is* declared
+ * here, in `withPackageQueries` below, because Android 11+ hides other packages from
+ * `queryIntentActivities` without it.
  */
 const withShizukuManifest: ConfigPlugin = (config) =>
   withAndroidManifest(config, (cfg) => {

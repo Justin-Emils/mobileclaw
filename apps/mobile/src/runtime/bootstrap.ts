@@ -295,23 +295,43 @@ function sharedRoots(): string[] {
  *   2. Termux RUN_COMMAND       — cheapest real shell, needs user configuration
  *   3. none                     — a memory backend that explains itself
  */
-async function pickShellBackend(privileged?: PrivilegedService): Promise<ShellService> {
-  if (privileged) {
-    try {
-      if (await privileged.isAvailable()) return new NativeBridgeShell(privileged);
-    } catch {
-      // Fall through to Termux.
-    }
-  }
+export type ShellKind = "shizuku" | "termux" | "memory";
 
-  const termuxInstalled = await isTermuxInstalled();
-  if (termuxInstalled) return new TermuxShellService();
+/**
+ * Decide which shell backend to use, from the only two facts available at bootstrap.
+ *
+ * Split out and exported so it can be tested. It is pure, and it is the function that was wrong:
+ * the previous version took a *liveness* reading here (`await privileged.isAvailable()`), which on
+ * a real device is routinely false in the first moments after launch because Shizuku's binder has
+ * not answered yet. The result was then frozen for the life of the process, so `shell_run` reported
+ * "install Termux (or pair Shizuku)" forever while `shizuku_status` — asking the same question live
+ * — correctly reported the backend available.
+ *
+ * "Do we have a native module?" is answerable at bootstrap; "is Shizuku answering right now?" is
+ * not, and does not need to be. `NativeBridgeShell.available()` re-asks that on every call.
+ */
+export function selectShellKind(input: { hasPrivileged: boolean; termuxInstalled: boolean }): ShellKind {
+  if (input.hasPrivileged) return "shizuku";
+  if (input.termuxInstalled) return "termux";
+  return "memory";
+}
+
+async function pickShellBackend(privileged?: PrivilegedService): Promise<ShellService> {
+  // Termux is only probed when there is no native module, because that probe opens a URL.
+  const termuxInstalled = privileged ? false : await isTermuxInstalled();
+  const kind = selectShellKind({ hasPrivileged: privileged != null, termuxInstalled });
+
+  if (kind === "shizuku") return new NativeBridgeShell(privileged!);
+
+  // Note that the Termux service currently reports itself unavailable (see its `available()`), so
+  // this branch exists for a platform that supplies one later rather than as a working fallback.
+  if (kind === "termux") return new TermuxShellService();
 
   return new MemoryShellService({
     available: false,
     reason: termuxInstalled
       ? "Termux is installed but external command execution is not enabled"
-      : "no shell backend: install Termux (or pair Shizuku) and enable it in Settings",
+      : "no shell backend: this build has no native module, so neither Shizuku nor Termux can be reached",
   });
 }
 

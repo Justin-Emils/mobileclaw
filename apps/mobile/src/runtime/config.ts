@@ -108,11 +108,22 @@ export const DEFAULT_PERMISSIONS: PermissionConfig = {
     execute: "ask",
     system: "ask",
   },
-  rules: [
-    // Never let the model delete outside the sandbox silently; the organize tool
-    // already forces a prompt (alwaysAsk), this is belt and braces.
-    { tool: "shizuku_run", decision: "deny" },
-  ],
+  // No default rules. `shizuku_run` used to be denied here, with a comment about not letting the
+  // model "delete outside the sandbox silently" -- but that comment described a tool that does not
+  // exist (`fs_organize` is the only filesystem tool with teeth, and it carries its own
+  // `alwaysAsk`). What the rule actually did was make a tool permanently unreachable while
+  // changing nothing about safety:
+  //
+  //   * `shizuku_run` sets `alwaysAsk: true` and `risk: "system"`, and `system` maps to `ask`
+  //     above, so it could never run silently in the first place.
+  //   * `shell_run` reaches the same privileged shell through `pickShellBackend` and was never
+  //     denied. Anyone who wants to run a command does not need `shizuku_run` to do it.
+  //
+  // So the rule added no protection and cost real capability -- it blocked read-only diagnostics
+  // that need the shell identity (`dumpsys package` to enumerate an app's deep-link schemes, for
+  // instance), which is exactly the kind of call the tool exists for. The approval model still
+  // applies: each call prompts, and the allowlist can remember it for the conversation.
+  rules: [],
   alwaysAskRisks: ["execute"],
 };
 

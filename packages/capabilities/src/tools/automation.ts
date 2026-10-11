@@ -169,7 +169,13 @@ export function createAutomationTools(deps: {
   const screenCurrent = {
     name: "screen_current",
     description:
-      "Report which app is in the foreground. The values are parsed from Android debug output, so they are best effort: an empty result means 'could not tell', not 'nothing is open'. Check this before screen_tap to be sure the app you mean is actually in front.",
+      "Report which app is in the foreground, and which of its screens (activities) is on top. " +
+      "`package` names the app; `activity` is the screen within it, which is what tells you " +
+      "*where* in an app you actually are -- whether a launch landed on the home screen or resumed " +
+      "an older screen, and whether a tap moved you somewhere new. Use it to verify that a step " +
+      "arrived before acting on what you see. The values are parsed from Android debug output, so " +
+      "they are best effort: a missing field means 'could not tell', not 'nothing is open', and " +
+      "`raw` carries the line they came from so a miss can be diagnosed.",
     input: z.object({}),
     // Reading and reporting. Nothing on the device changes, so nothing is asked.
     risk: "read",
