@@ -138,7 +138,10 @@ function fakeFs() {
     File: class implements LogFileLike {
       uri: string;
       constructor(path: string) {
-        this.uri = path;
+        // The real constructor takes a URI; this fake keys on the plain path so the assertions read
+        // naturally. Stripping here is also what keeps the "hands `File` a URI" test below honest --
+        // that one constructs its own fake and checks the argument it receives.
+        this.uri = path.startsWith("file://") ? path.slice("file://".length) : path;
       }
       get exists() {
         return files.has(this.uri);
@@ -166,7 +169,7 @@ function fakeFs() {
 describe("createFileLogSink", () => {
   it("materialises written lines into the file, one per line", () => {
     const { fs, files } = fakeFs();
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log" });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`  });
     sink.write("one");
     sink.write("two");
     expect(files.get("/logs/event.log")).toBe("one\ntwo\n");
@@ -176,14 +179,14 @@ describe("createFileLogSink", () => {
     // This is the defect the whole-file-rewrite design avoids: the real API reads asynchronously and
     // writes synchronously, so an append that read the file would silently truncate it every time.
     const { fs, files } = fakeFs();
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log" });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`  });
     for (const line of ["a", "b", "c"]) sink.write(line);
     expect(files.get("/logs/event.log")).toBe("a\nb\nc\n");
   });
 
   it("keeps the last N lines once the cap is passed", () => {
     const { fs, files } = fakeFs();
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", maxLines: 2 });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`, maxLines: 2  });
     for (const line of ["a", "b", "c"]) sink.write(line);
     expect(files.get("/logs/event.log")).toBe("b\nc\n");
   });
@@ -192,22 +195,86 @@ describe("createFileLogSink", () => {
     // A launch right after a crash is exactly when the previous run's log matters most.
     const { fs, files } = fakeFs();
     files.set("/logs/event.log", "from the last run\n");
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log" });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`  });
     expect(await sink.read()).toBe("from the last run\n");
   });
 
   it("reads as empty when nothing has been written", async () => {
     const { fs } = fakeFs();
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log" });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`  });
     expect(await sink.read()).toBe("");
   });
 
   it("clears the file", async () => {
     const { fs, files } = fakeFs();
-    const sink = createFileLogSink({ fs, path: () => "/logs/event.log" });
+    const sink = createFileLogSink({ fs, path: () => "/logs/event.log", toUri: (v: string) => `file://${v}`  });
     sink.write("something");
     await sink.clear();
     expect(files.has("/logs/event.log")).toBe(false);
+    expect(await sink.read()).toBe("");
+  });
+
+  it("hands `File` a URI, never a bare path", () => {
+    // The defect this pins down shipped once and was found only on a device. `expo-file-system`'s
+    // `File` constructor takes a **URI**; given a bare path it throws
+    // `IllegalArgumentException: URI is not absolute` on every read. The symptom was a log screen
+    // saying "还没有记录" while lines were being written -- indistinguishable from a genuinely empty
+    // log, which is why the screen also reports its own status now.
+    const seen: string[] = [];
+    const fs: LogFsLike = {
+      File: class implements LogFileLike {
+        uri = "";
+        exists = false;
+        constructor(path: string) {
+          seen.push(path);
+          if (!path.startsWith("file://")) throw new Error("URI is not absolute");
+        }
+        async text() {
+          return "";
+        }
+        write() {}
+        create() {}
+        delete() {}
+      },
+    };
+
+    const sink = createFileLogSink({
+      fs,
+      path: () => "/data/user/0/app/files/mobileclaw-run.log",
+      toUri: (value) => `file://${value}`,
+    });
+
+    expect(() => sink.write("a line")).not.toThrow();
+    expect(seen.length).toBeGreaterThan(0);
+    for (const opened of seen) expect(opened.startsWith("file://")).toBe(true);
+    expect(sink.status().lastError).toBe("");
+  });
+
+  it("reports its own failure instead of looking empty", async () => {
+    // The second half of the same defect: the screen could not tell "nothing recorded" from "could
+    // not record". A diagnostic that cannot report its own failure is worse than none, because it
+    // looks like the thing it was meant to explain simply did not happen.
+    const fs: LogFsLike = {
+      File: class implements LogFileLike {
+        uri = "";
+        exists = false;
+        async text() {
+          return "";
+        }
+        write() {
+          throw new Error("Permission denied");
+        }
+        create() {}
+        delete() {}
+      },
+    };
+    const sink = createFileLogSink({ fs, path: () => "/x/log", toUri: (v) => `file://${v}` });
+
+    sink.write("a line");
+
+    const status = sink.status();
+    expect(status.lastError).toContain("Permission denied");
+    expect(status.lines).toBe(1);
     expect(await sink.read()).toBe("");
   });
 });

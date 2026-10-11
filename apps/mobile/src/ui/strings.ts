@@ -359,9 +359,24 @@ export const strings = {
     hint:
       "这是应用自己记的运行日志，用于排查「在真机上失败了但看不到原因」的情况 —— 发布版不会把日志输出到 adb，所以只能从这里取。分享出去即可。",
     refresh: "刷新",
+    copy: "复制全部",
+    copied: "已复制 ✓",
     share: "分享",
     clear: "清空",
     empty: "还没有记录。运行一次任务后回来看。",
+    /**
+     * 日志文件的位置与健康状况。
+     *
+     * 存在的理由：「没有记录」对**空日志**和**写不进去的日志**是同一句话，而这两种情况的
+     * 诊断价值完全相反。这一行把它们分开。
+     */
+    status: (path: string, exists: boolean, lines: number, bytes: number | undefined, lastError: string) =>
+      [
+        `文件：${path}`,
+        `存在：${exists ? "是" : "否"}`,
+        `本次已写：${lines} 行${bytes === undefined ? "" : `，${bytes} 字节`}`,
+        lastError === "" ? "未出现错误" : `⚠ 错误：${lastError}`,
+      ].join("　"),
     failed: (reason: string) => `读取日志失败：${reason}`,
   },
 

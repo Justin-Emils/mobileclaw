@@ -93,6 +93,13 @@ export interface RuntimeDeps {
    */
   logSink?: { read(): Promise<string>; clear(): Promise<void> };
   /**
+   * Where the log actually is and whether writing it worked.
+   *
+   * A snapshot taken right after the first write. It is here because an empty log and a log that
+   * could not be created look identical on screen, and the difference is the whole diagnosis.
+   */
+  logStatus?: { path: string; exists: boolean; lines: number; bytes?: number; lastError: string };
+  /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
    * still letting tests drive the real request/response mapping offline.
@@ -247,6 +254,23 @@ export class MobileClawRuntime {
       await this.deps.logSink?.clear();
     } catch {
       // Nothing to clear and "cleared" are the same outcome here.
+    }
+  }
+
+  /**
+   * The log's current location and health, read live rather than from the bootstrap snapshot, so a
+   * write that started failing later is visible too.
+   */
+  async runLogStatus(): Promise<
+    { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } | undefined
+  > {
+    const sink = this.deps.logSink as
+      | { status?: () => { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } }
+      | undefined;
+    try {
+      return sink?.status?.() ?? this.deps.logStatus;
+    } catch {
+      return this.deps.logStatus;
     }
   }
 

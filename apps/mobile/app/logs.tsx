@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { useRuntime } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
@@ -24,11 +25,18 @@ export default function LogsScreen() {
   const runtime = useRuntime();
   const [text, setText] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
+  /** Where the log is and whether writing it works, so "empty" can explain itself. */
+  const [status, setStatus] = useState<
+    { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } | undefined
+  >(undefined);
+  /** Set briefly after a copy, so the action is visibly acknowledged. */
+  const [copied, setCopied] = useState(false);
 
   const load = useCallback(async () => {
     if (!runtime) return;
     try {
       setText(await runtime.runLog());
+      setStatus(await runtime.runLogStatus());
       setError(undefined);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
@@ -41,11 +49,35 @@ export default function LogsScreen() {
 
   const onShare = useCallback(async () => {
     try {
-      await Share.share({ message: text ?? "" });
+      // `title` is required on Android's chooser.
+      await Share.share({ message: text ?? "", title: strings.logs.title });
     } catch {
       // The user dismissing the share sheet is not an error worth reporting.
     }
   }, [text]);
+
+  /**
+   * Copy the whole log to the clipboard.
+   *
+   * This exists next to Share because it is the more reliable of the two on a phone where the log
+   * is being read: the share sheet's targets vary by ROM and some of them truncate, while the
+   * clipboard takes the text verbatim and the user can paste it wherever the answer needs to go.
+   * The acknowledgement is deliberately on screen rather than a toast, which is easy to miss.
+   */
+  const onCopy = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(text ?? "");
+      setCopied(true);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    }
+  }, [text]);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2500);
+    return () => clearTimeout(timer);
+  }, [copied]);
 
   const onClear = useCallback(async () => {
     await runtime?.clearRunLog();
@@ -60,8 +92,13 @@ export default function LogsScreen() {
         <Pressable style={styles.button} onPress={() => void load()}>
           <Text style={styles.buttonText}>{strings.logs.refresh}</Text>
         </Pressable>
-        <Pressable style={[styles.button, styles.primary]} onPress={() => void onShare()}>
-          <Text style={[styles.buttonText, styles.primaryText]}>{strings.logs.share}</Text>
+        <Pressable style={[styles.button, styles.primary]} onPress={() => void onCopy()}>
+          <Text style={[styles.buttonText, styles.primaryText]}>
+            {copied ? strings.logs.copied : strings.logs.copy}
+          </Text>
+        </Pressable>
+        <Pressable style={styles.button} onPress={() => void onShare()}>
+          <Text style={styles.buttonText}>{strings.logs.share}</Text>
         </Pressable>
         <Pressable style={styles.button} onPress={() => void onClear()}>
           <Text style={styles.buttonText}>{strings.logs.clear}</Text>
@@ -69,6 +106,14 @@ export default function LogsScreen() {
       </View>
 
       <Text style={styles.hint}>{strings.logs.hint}</Text>
+
+      {/* Shown above the log rather than hidden behind a details toggle: when the log is empty,
+          this line is the entire diagnosis. */}
+      {status ? (
+        <Text style={styles.status}>
+          {strings.logs.status(status.path, status.exists, status.lines, status.bytes, status.lastError)}
+        </Text>
+      ) : null}
 
       {text === undefined ? (
         <ActivityIndicator style={styles.loading} color={theme.colors.accent} />
@@ -111,6 +156,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 8,
     lineHeight: 17,
+  },
+  status: {
+    color: theme.colors.textFaint,
+    fontSize: 11,
+    fontFamily: "monospace",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
   loading: { marginTop: 32 },
   empty: { color: theme.colors.textMuted, textAlign: "center", marginTop: 32, paddingHorizontal: 24 },

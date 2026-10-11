@@ -37,8 +37,17 @@ export interface LogFsLike {
 
 export interface FileLogSinkOptions {
   fs: LogFsLike;
-  /** Absolute path of the log file. */
+  /**
+   * Absolute **path** of the log file.
+   *
+   * Converted with `pathToUri` before it reaches `File`, because `expo-file-system`'s constructor
+   * takes a URI: handing it a bare path makes every `exists` read throw
+   * `IllegalArgumentException: URI is not absolute`. That produced a log which reported "nothing
+   * recorded" on a device while lines were being written — see `toUri` below.
+   */
   path: () => string;
+  /** Converts an absolute path to the `file://` URI `expo-file-system` expects. */
+  toUri: (path: string) => string;
   /**
    * Keep the last N lines. The event log already caps itself; this is the second bound, so the
    * file cannot grow even if the caller is configured with a much larger limit.
@@ -48,28 +57,56 @@ export interface FileLogSinkOptions {
 
 export const DEFAULT_LOG_MAX_LINES = 2000;
 
-export function createFileLogSink(options: FileLogSinkOptions): LogSink {
+export interface LogSinkStatus {
+  /** Absolute path the log is written to. */
+  path: string;
+  /** Whether the file exists right now. */
+  exists: boolean;
+  /** Lines this process has written. */
+  lines: number;
+  /** Size reported by the file system, when it reports one. */
+  bytes?: number;
+  /** The first failure seen, verbatim. Empty when nothing has failed. */
+  lastError: string;
+}
+
+export interface FileLogSink extends LogSink {
+  /**
+   * What actually happened, for the screen.
+   *
+   * Added after the first version of this screen read "还没有记录" on a device while lines had
+   * definitely been written — an empty log and a *failing* log were indistinguishable, because both
+   * the write and the read path swallowed their errors. A diagnostic that cannot report its own
+   * failure is worse than none: it looks like the thing it is meant to explain simply did not happen.
+   */
+  status(): LogSinkStatus;
+}
+
+export function createFileLogSink(options: FileLogSinkOptions): FileLogSink {
   const maxLines = options.maxLines ?? DEFAULT_LOG_MAX_LINES;
   const lines: string[] = [];
   let cleared = false;
+  let lastError = "";
 
-  const file = () => new options.fs.File(options.path());
+  const record = (error: unknown) => {
+    if (lastError !== "") return;
+    lastError = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  };
+
+  const file = () => new options.fs.File(options.toUri(options.path()));
 
   const materialise = () => {
-    const target = file();
-    if (!target.exists) {
-      try {
-        target.create({ intermediates: true, overwrite: true });
-      } catch {
-        // Another writer created it first, or the directory is unavailable. The write below is the
-        // real attempt; a failed `create` on an existing file is not worth reporting.
-      }
-    }
+    // Write directly; do NOT call `create()` first.
+    //
+    // The same rule `GuardedFileSystem` learned on this project: `expo-file-system`'s `write`
+    // creates the file, and a preceding `create()` throws when the file already exists — which
+    // would put a failure in this log's own status line on every write after the first.
     try {
+      const target = file();
       target.write(`${lines.join("\n")}${lines.length > 0 ? "\n" : ""}`);
-    } catch {
-      // The caller (`event-log.ts`) keeps the text queued and retries on the next flush. A log that
-      // cannot be written must never become the failure being investigated.
+    } catch (error) {
+      // The caller (`event-log.ts`) keeps the text queued and retries on the next flush.
+      record(error);
     }
   };
 
@@ -84,12 +121,9 @@ export function createFileLogSink(options: FileLogSinkOptions): LogSink {
       const target = file();
       if (!target.exists) return "";
       try {
-        const text = await target.text();
-        // A file left over from a previous session, before this one has written anything: prefer it
-        // over the empty buffer, so a launch right after a crash still shows the last run.
-        if (lines.length === 0 && !cleared && text.trim() !== "") return text;
-        return text;
-      } catch {
+        return await target.text();
+      } catch (error) {
+        record(error);
         return "";
       }
     },
@@ -100,9 +134,30 @@ export function createFileLogSink(options: FileLogSinkOptions): LogSink {
       const target = file();
       try {
         if (target.exists) target.delete();
-      } catch {
-        // "Nothing to clear" and "cleared" are the same outcome here.
+      } catch (error) {
+        // "Nothing to clear" and "cleared" are the same outcome here -- but a permission failure is
+        // not, so it is recorded rather than assumed away.
+        record(error);
       }
+    },
+
+    status() {
+      let exists = false;
+      let bytes: number | undefined;
+      try {
+        const target = file();
+        exists = target.exists;
+        if (typeof target.size === "number") bytes = target.size;
+      } catch (error) {
+        record(error);
+      }
+      return {
+        path: options.path(),
+        exists,
+        lines: lines.length,
+        ...(bytes === undefined ? {} : { bytes }),
+        lastError,
+      };
     },
   };
 }

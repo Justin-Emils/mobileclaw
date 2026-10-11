@@ -17,6 +17,7 @@ import { MemoryShellService } from "./services/memory-shell";
 import {
   createExpoFileSystem,
   defaultAppRoots,
+  pathToUri,
   uriToPath,
   type ExpoFsLike,
 } from "./services/expo-file-system";
@@ -213,10 +214,19 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // *before* the current launch: an in-memory buffer would be gone by the time anyone reads it.
   const logSink = createFileLogSink({
     fs: expoFsModule(),
-    path: () => `${uriToPath(Paths.document.uri)}/mobileclaw-run.log`,
+    // Built from the directory's *URI* rather than by joining path strings: `Paths.document.uri`
+    // ends in a slash, and the naive `${path}/name` produced `files//mobileclaw-run.log`, which the
+    // file system rejected. `Paths.document.uri` is already a `file://` URI, which is also what
+    // `File` requires — see the note on `FileLogSinkOptions.path`.
+    path: () => uriToPath(`${Paths.document.uri.replace(/\/+$/, "")}/mobileclaw-run.log`),
+    toUri: pathToUri,
   });
   const eventLog = createEventLog({ sink: logSink });
-  eventLog.info("app", "bootstrap start", { platform: Platform.OS });
+  // The first write is the one that proves the path is writable, so its outcome is captured
+  // immediately. Without this the screen can only say "nothing recorded", which is the same
+  // message for an empty log and for one that failed to be created.
+  const logStatus = logSink.status();
+  eventLog.info("app", "bootstrap start", { platform: Platform.OS, logPath: logStatus.path });
 
   const runService = startRunService({
     native: nativeShizuku,
@@ -288,6 +298,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     // to a run that ended with an empty assistant message and no visible reason.
     log: eventLog,
     logSink,
+    logStatus,
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),
