@@ -4,6 +4,7 @@ import {
   DUMP_FILE_PATH,
   formatScreenReading,
   interpretDump,
+  looksLikeHierarchy,
   parseScreenDump,
   projectScreen,
 } from "@mobileclaw/capabilities";
@@ -229,7 +230,8 @@ async function readScreenViaDump(
   let lastError = "uiautomator produced no window hierarchy";
   for (const command of [DUMP_COMMANDS.dump, DUMP_COMMANDS.dumpPlain]) {
     const dumped = await native.runPrivileged(command, timeoutMs);
-    const outcome = interpretDump(dumped);    if (outcome.error !== undefined) {
+    const outcome = interpretDump(dumped);
+    if (outcome.error !== undefined) {
       lastError = outcome.error;
       continue;
     }
@@ -248,28 +250,26 @@ async function readScreenViaDump(
 
     // Read it back, with one retry.
     //
-    // `uiautomator dump` writes the file as a *separate process* and can exit before the write is
-    // visible, so the immediate `cat` sometimes reads an empty or half-written file — which
-    // `interpretDump` correctly reports as "no window hierarchy". On a device that showed up as
-    // every `screen_read` failing while `screen_current` (a different command, no temp file) kept
-    // working: the read path, not the ability to see the screen, was broken. One short wait and a
-    // second read costs 150 ms and removes the race.
-    //
-    // The file is removed only after the retries, so a first read that was merely early still has
-    // something to read on the second attempt.
-    let read = interpretDump(await sh(native, DUMP_COMMANDS.read, timeoutMs));
-    if (read.xml === undefined) {
+    // `uiautomator dump` writes the hierarchy to a file and can exit before the write is visible
+    // to a following `cat`, so an immediate read can come back empty. One short wait and a second
+    // read costs 150 ms and removes that. The file is removed only after both attempts.
+    const firstRead = await sh(native, DUMP_COMMANDS.read, timeoutMs);
+    let xmlText = firstRead.stdout;
+    if (!looksLikeHierarchy(xmlText)) {
       await sleep(DUMP_FLUSH_WAIT_MS);
-      read = interpretDump(await sh(native, DUMP_COMMANDS.read, timeoutMs));
+      xmlText = (await sh(native, DUMP_COMMANDS.read, timeoutMs)).stdout;
     }
     await discardDump(native);
 
-    if (read.xml === undefined) {
-      lastError = read.error ?? lastError;
+    // The command already told us it wrote the hierarchy, so the file's *contents* are what matter
+    // now — not whether they satisfy the marker search that judges a command's own output. A file
+    // that is genuinely empty is still a failure, and is reported as one.
+    if (!looksLikeHierarchy(xmlText)) {
+      lastError = xmlText.trim() === "" ? "the dump file was empty" : `the dump file held no hierarchy: ${xmlText.slice(0, 200)}`;
       continue;
     }
 
-    const dump = parseScreenDump(read.xml);
+    const dump = parseScreenDump(xmlText);
     // The real display size is measured, not inferred from the dump. The dump's own
     // idea of the screen comes from a window rectangle, and a dump that starts at a
     // dialog or a notification shade is smaller than the display — which would make

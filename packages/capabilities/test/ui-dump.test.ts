@@ -4,6 +4,7 @@ import {
   DUMP_FILE_PATH,
   formatScreenReading,
   interpretDump,
+  looksLikeHierarchy,
   parseBounds,
   parseScreenDump,
   projectScreen,
@@ -448,6 +449,60 @@ describe("interpretDump", () => {
       stderr: Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n"),
     });
     expect(outcome.error).not.toContain("\n");
+  });
+
+  it("accepts the real success output of `uiautomator dump`", () => {
+    // This is what the command actually prints on a device, and it is the defect that made
+    // `screen_read` useless for several builds:
+    //
+    //   UI hierarchy dumped to: /sdcard/mobileclaw-window-dump.xml
+    //
+    // The hierarchy is in the *file*; the command never prints it. The success test originally
+    // looked only for `<hierarchy` / `<node`, so **every successful dump was judged a failure** and
+    // the `cat` that follows was never reached. `screen_current` kept working because it runs a
+    // different command, which made this look like a broken device rather than a broken check.
+    const outcome = interpretDump({
+      exitCode: 0,
+      stdout: "UI hierarchy dumped to: /sdcard/mobileclaw-window-dump.xml",
+      stderr: "",
+    });
+    expect(outcome.error).toBeUndefined();
+    expect(outcome.written).toBe(true);
+    // Not `xml`: the caller has to read the file next.
+    expect(outcome.xml).toBeUndefined();
+  });
+
+  it("accepts the lowercase and alternate spellings of that message", () => {
+    for (const stdout of [
+      "uI hIeRaRcHy DuMpEd To: /sdcard/x.xml",
+      "Hierarchy dumped to: /sdcard/x.xml",
+    ]) {
+      const outcome = interpretDump({ exitCode: 0, stdout, stderr: "" });
+      expect(outcome.error).toBeUndefined();
+      expect(outcome.written).toBe(true);
+    }
+  });
+
+  it("still prefers the inline hierarchy when a build prints one", () => {
+    const outcome = interpretDump({ exitCode: 0, stdout: SINGLE_WINDOW, stderr: "" });
+    expect(outcome.xml).toBeDefined();
+    expect(outcome.written).toBeUndefined();
+  });
+});
+
+describe("looksLikeHierarchy", () => {
+  it("recognises a real hierarchy", () => {
+    expect(looksLikeHierarchy(SINGLE_WINDOW)).toBe(true);
+    expect(looksLikeHierarchy('<node index="0" text="x" />')).toBe(true);
+  });
+
+  it("does not mistake a command's chatter for a hierarchy", () => {
+    // The two questions are different, and conflating them is what broke `screen_read`:
+    // `interpretDump` judges a *command's output* (where "dumped to" means success), while this
+    // judges the *file's contents* (where only real XML counts).
+    expect(looksLikeHierarchy("UI hierarchy dumped to: /sdcard/x.xml")).toBe(false);
+    expect(looksLikeHierarchy("")).toBe(false);
+    expect(looksLikeHierarchy("could not get idle state")).toBe(false);
   });
 });
 
