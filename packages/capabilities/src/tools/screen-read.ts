@@ -361,8 +361,15 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
         // explanation for something that did not happen — the same conflation of
         // "nothing readable" with "nothing there" that `screen_read` exists to avoid.
         const note = snapshot.note === undefined ? "" : ` The reading also reported: ${snapshot.note}.`;
+        // The actual range is stated, not just the fact of a mismatch. "The numbering changed" leaves
+        // the caller to re-read and guess again; knowing the screen now holds 0..44 says immediately
+        // whether #49 was one node past the end, or whether the screen is a different one entirely.
+        const range =
+          snapshot.nodes.length === 0
+            ? "it currently has no numbered elements at all"
+            : `it currently numbers elements 0..${snapshot.nodes.length - 1}`;
         throw new CoreError("E_TOOL_FAILED", `element #${input.index} is not on the current screen`, {
-          hint: `Read the screen again with screen_read: it now reports ${snapshot.nodes.length} element(s), so the numbering has changed since that number was printed.${note}`,
+          hint: `Read the screen again with screen_read in the same turn and use a number from that reading: ${range}, so #${input.index} is not a number this screen uses.${note}`,
         });
       }
       // Resolve to whatever would really receive the press. An index pointing at a label inside a
