@@ -447,4 +447,120 @@ describe("screen tool permission posture", () => {
     expect(tool.neverRemember).toBe(true);
     expect(tool.mutates).not.toBe(false);
   });
+
+  describe("screen_read with scrollThrough", () => {
+    /**
+     * A list that scrolls, so the tool's loop is exercised against something that behaves like a
+     * real one rather than a canned page per call.
+     *
+     * Rows sit at fixed content offsets and the view shows a window of them; scrolling moves that
+     * window. A reader built this way cannot be misread by hand-counting.
+     */
+    function scrollingSystem(rows: string[], viewport = 3) {
+      let offset = 0;
+      const scrolls: Array<{ direction: string; amount?: number }> = [];
+      const system = screenSystem({
+        async readScreen() {
+          const visible = rows.slice(offset, offset + viewport);
+          return snapshotOf({
+            nodes: visible.map((text, i) => ({
+              index: i,
+              text,
+              bounds: { left: 0, top: 100 + i * 200, right: 100, bottom: 300 + i * 200, width: 100, height: 200, centerX: 50, centerY: 200 + i * 200 },
+            })),
+            total: visible.length,
+          });
+        },
+        async scroll(direction, amount) {
+          scrolls.push({ direction, amount });
+          offset = Math.min(offset + 1, Math.max(0, rows.length - 1));
+        },
+      });
+      return { system, scrolls, offsetNow: () => offset };
+    }
+
+    it("collects the whole list in one call, and says it reached the end", async () => {
+      // The reason this exists: the same walk done by hand costs one step per screen.
+      const { system, scrolls } = scrollingSystem(["r1", "r2", "r3", "r4", "r5", "r6"]);
+      const tool = toolNamed(system, "screen_read");
+      const result = (await tool.execute!({ scrollThrough: true } as never, { signal: new AbortController().signal } as never)) as {
+        scrolled: { screens: number; elementsAcrossScreens: number; stoppedBecause: string; incomplete: boolean; note: string };
+        reading: string;
+      };
+
+      expect(result.scrolled.stoppedBecause).toBe("no-new-content");
+      expect(result.scrolled.incomplete).toBe(false);
+      expect(result.scrolled.screens).toBeGreaterThan(1);
+      expect(result.scrolled.note).toMatch(/end of the content/);
+      // Scrolling is performed down, and the amount is left to the platform rather than guessed at
+      // by a layer that cannot see the geometry.
+      expect(scrolls.every((s) => s.direction === "down")).toBe(true);
+      expect(scrolls.every((s) => s.amount === undefined)).toBe(true);
+    });
+
+    it("honours maxScreens and reports the reading as not the whole page", async () => {
+      // The anti-hang boundary at the tool level: an endless feed must stop, and the result must not
+      // read like a complete one or the model will act as though it had seen everything.
+      const { system } = scrollingSystem(Array.from({ length: 50 }, (_, i) => `row-${i}`));
+      const tool = toolNamed(system, "screen_read");
+      const result = (await tool.execute!(
+        { scrollThrough: true, maxScreens: 3 } as never,
+        { signal: new AbortController().signal } as never,
+      )) as { scrolled: { screens: number; stoppedBecause: string; incomplete: boolean; note: string } };
+
+      expect(result.scrolled.screens).toBe(3);
+      expect(result.scrolled.stoppedBecause).toBe("screen-limit");
+      expect(result.scrolled.incomplete).toBe(true);
+      expect(result.scrolled.note).toMatch(/STOPPED AT THE SCREEN LIMIT/);
+      expect(result.scrolled.note).toMatch(/not the whole page/);
+    });
+
+    it("leaves the single-screen path exactly as it was", async () => {
+      // `scrollThrough` is opt-in. Without it the tool must read once, never scroll, and return no
+      // `scrolled` block — otherwise every existing caller pays for a feature it did not ask for.
+      const { system, scrolls } = scrollingSystem(["a", "b", "c", "d"]);
+      const tool = toolNamed(system, "screen_read");
+      const result = (await tool.execute!({} as never, { signal: new AbortController().signal } as never)) as {
+        scrolled?: unknown;
+        reading: string;
+      };
+
+      expect(scrolls).toHaveLength(0);
+      expect(result.scrolled).toBeUndefined();
+      expect(result.reading).toContain("a");
+    });
+
+    it("reports press points for the last screen only, and says how many elements preceded it", async () => {
+      // Bounds belong to the screen they were read from, so the aggregated content is for reading
+      // and searching. Saying how many elements are *not* covered by the returned numbering is what
+      // stops it being used as though it spanned everything.
+      const { system } = scrollingSystem(["r1", "r2", "r3", "r4", "r5", "r6"]);
+      const tool = toolNamed(system, "screen_read");
+      const result = (await tool.execute!({ scrollThrough: true } as never, { signal: new AbortController().signal } as never)) as {
+        scrolled: { elementsAcrossScreens: number; elementsBeforeTheLastScreen: number };
+        reading: string;
+      };
+
+      expect(result.scrolled.elementsAcrossScreens).toBe(6);
+      expect(result.scrolled.elementsBeforeTheLastScreen).toBeGreaterThan(0);
+      // The `reading` describes the screen actually in front, so its numbering is usable.
+      expect(result.reading).toContain("r6");
+    });
+
+    it("stops for a cancelled run rather than walking the whole list", async () => {
+      const { system, scrolls } = scrollingSystem(Array.from({ length: 50 }, (_, i) => `row-${i}`));
+      const controller = new AbortController();
+      controller.abort();
+      const tool = toolNamed(system, "screen_read");
+      const result = (await tool.execute!(
+        { scrollThrough: true } as never,
+        { signal: controller.signal } as never,
+      )) as { scrolled: { stoppedBecause: string; incomplete: boolean; note: string } };
+
+      expect(result.scrolled.stoppedBecause).toBe("aborted");
+      expect(result.scrolled.incomplete).toBe(true);
+      expect(result.scrolled.note).toMatch(/cancelled/);
+      expect(scrolls).toHaveLength(0);
+    });
+  });
 });

@@ -40,9 +40,9 @@
 
 | 顺序 | 做什么 | 详细条目 | 为什么 |
 |---|---|---|---|
-| **1** | **加"把应用重置到启动页"的能力**（`am force-stop` + `am start -n`，包名走 stdin，带到达核对） | §5.1 | 它对**所有应用**有效，不依赖应用是否提供深链。做完"打开应用后不知道在哪一页"就有解 |
-| **2** | **`system_open` 报出"到了哪一页"**（复用 `ForegroundWindow.activity`，读不到时报 `unverified`） | §5.2 | 与 1 配套：有了重置能力，还需要知道重置**成功了没有**。这是"陈述由代码产出"这条硬约束在启动路径上的落点 |
-| **3** | **特权深链**（`am start -a android.intent.action.VIEW -d`，走 uid 2000 绕开确认框） | §7.1 | 已实测 `orpheus://` 存在。它比 1 更快（直达目标页），但只对提供了深链的应用有效，所以是**加分项**而非基础能力。需先确认是否弹确认框 |
+| **1** | **加"把应用重置到启动页"的能力**（`am force-stop` + `am start -n`，包名走 stdin，带到达核对） | §5.1 | 它对**所有应用**有效，不依赖应用是否提供深链。做完"打开应用后不知道在哪一页"就有解。**核对所需的探针已就绪**（见 0.2 第 2 条），所以这一条现在只剩 `force-stop` + `start` 本身 |
+| ~~2~~ | ~~`system_open` 报出"到了哪一页"~~ | §5.2 | ✅ **2026-10-11 已实现**：`awaitArrival` 三态（`arrived` / `not-foreground` / `unverified`），并新增 `settleMs`。真机未验证 |
+| ~~3~~ | ~~特权深链~~ | §7.1 | ✅ **2026-10-11 已接入** `system_open(deepLink)`：走 `am start -a VIEW -d`、URL 走 stdin、`no-handler` 单独成一种结果。真机未验证。**仍需查 `orpheus://` 的 host/path 模式**，才知道能否直达歌单页 |
 
 ### 0.3 其余
 
@@ -51,7 +51,7 @@
 | **4** | `TermuxShellService` 的取舍（实现或移除） | §8.6 | 它 `available()` 恒为 `false`，留在选择逻辑里是"看着像兜底、实际不是" |
 | **5** | 镜像与 `gradle.properties` 的持久化（做成 config plugin） | §8.4、8.1、8.3 | 会反复咬人，但**不阻塞功能**。用户 2026-10-11 明确说先不做。且做它的前提是先解决 §8.5 |
 
-**已完成、不必再做的**（本轮）：§7.2（`shizuku_run` 的 deny 规则）、§8.7（shell 后端启动期探活）。
+**已完成、不必再做的**（本轮）：§7.2（`shizuku_run` 的 deny 规则）、§8.7（shell 后端启动期探活）、§5.2（`system_open` 到达核对）、§7.1（特权深链，已接入）。
 
 ---
 
@@ -187,15 +187,26 @@
 | **权限姿态待定** | 按用户定的原则「只有发送这种必须做更改或删除的才必须审批」，`force-stop` **算不算"更改"**需要用户确认。它确实会改变设备状态（杀进程），倾向需要审批 |
 | **怎么验证修好了** | 把网易云手动翻到某个深层页，然后让 agent 执行"看我的歌单"——它应当先重置到启动页，且 `currentWindow().activity` 报出的是启动页而非上次的深层页 |
 
-### 5.2 `system_open` 不核对"是否真的到了"，也不报"到了哪一页"
+### 5.2 `system_open` 不核对"是否真的到了"，也不报"到了哪一页" —— ✅ **已实现，真机未验证**
+
+> 2026-10-11 实现。下面保留原始分析，改动的说明在末尾。
 
 | 项 | 内容 |
 |---|---|
 | **现象** | `packages/capabilities/src/tools/system.ts` 的 `execute` 结尾是 `return { ok: true, opened: input.url ?? input.packageId }`。包名那条会先 `await deps.system.openApp(...)`，**失败会抛异常并传播**（这一点 0.3.1 已经修好，不再是"假成功"）；但**成功路径没有任何核对**——它不知道应用有没有真的到前台，也不知道落到了哪一页 |
 | **影响** | 模型拿到 `ok: true` 却无法验证，于是**只能靠读屏猜自己到没到**。而"到了哪一页"恰恰是决定下一步的关键信息（见 5.1）。这也是提示词里那条"公开接口优先、读屏兜底"策略缺的一环：有兜底，但**没有反馈说该不该兜底** |
-| **现在为什么不做** | 需要一并决定报什么、以及"读不到前台"时怎么说（不能报成"没打开"） |
-| **将来怎么接** | `ForegroundWindow` 类型里**已经有 `activity` 字段**（`packages/core/src/types.ts`），由 `parseForeground` 从 dumpsys 解析出来，`screen_current` 已经把它摊开返回。做法：`system_open` 在打开后轮询 `currentWindow()`，把 `package` + `activity` 一并返回；**读不到时如实报 `unverified`，不能报成功也不能报失败**（"读不到" ≠ "没打开"，这是仓库的架构不变量）。可复用 0.3.3 新增的多来源回退（`dumpsys activity activities` 优先，回退 `dumpsys window`） |
+| **将来怎么接** | `ForegroundWindow` 类型里**已经有 `activity` 字段**，由 `parseForeground` 从 dumpsys 解析出来，`screen_current` 已经把它摊开返回。做法：`system_open` 在打开后轮询 `currentWindow()`，把 `package` + `activity` 一并返回；**读不到时如实报 `unverified`，不能报成功也不能报失败**（"读不到" ≠ "没打开"，这是仓库的架构不变量）。可复用 0.3.3 新增的多来源回退 |
 | **怎么验证修好了** | 在"读不到前台"的设备上调用，返回值是 `unverified` 且带 `raw`；在正常设备上，返回值里的 `activity` 与实际落地页一致 |
+
+**已实现的方式**（`packages/capabilities/src/app-state.ts`）：
+
+- `awaitArrival(packageId, readForeground, options, ctx)` 轮询前台（默认 250 ms 间隔、5 s 上限），返回三态：`arrived` / `not-foreground`（**读到了，但是别的应用**）/ `unverified`（**读不到**）。
+- **"读不到"永远不是"没打开"**：只有 `not-foreground` 是"启动没落地"的证据。这一条单独有两个测试钉住，并做过变异验证（把 `unverified` 改成 `not-foreground` → 2 个测试失败）。
+- **报出 `activity` 是重点**：微信和网易云都会恢复上次停留的界面，所以"打开了应用"和"落在首页"是两个不同的事实。
+- `readForeground` 默认取 `system.automation.currentWindow()`——**和 `screen_current` 用同一个探针**，所以"到了没到"由模型本来就会手动去问的那个读数回答，不引入第二套判据。
+- 新增 `settleMs` 参数：在**读不到前台的设备**上，否则每次打开都要付满 5 s。有测试证明它生效（`settleMs: 0` 时调用 < 1 s 返回）。
+
+**未验证**：真机上 `activity` 的实际取值与落地页是否一致、`unverified` 路径在真实 ROM 上的表现。
 
 ---
 
@@ -213,20 +224,27 @@
 
 ---
 
-## 七、已确认但尚未利用的能力
+## 七、已确认并已接入的能力
 
-### 7.1 网易云注册了自定义 deep link（`orpheus://`），这条路已实测可行
+### 7.1 网易云注册了自定义 deep link（`orpheus://`）—— ✅ **已接入 `system_open`，真机未验证**
 
 **来源**：2026-10-11 真机实测，`dumpsys package com.netease.cloudmusic` 列出的 scheme。
 
 | 项 | 内容 |
 |---|---|
 | **事实** | 网易云注册了 `orpheus`、`apporpheus`、`cloudmusicopenapi` 等自有 scheme（另有 `http`/`https`/`content`/`file` 这些通用项，以及一批支付/登录回调 scheme）。实测 `am start -a android.intent.action.VIEW -d "orpheus://"` 可用 |
-| **为什么值得记** | 这是**导航脆弱性**（5.1 的另一面）的解药之一：深链直接跳到目标页，**不关心应用当前在哪一页**，因此天然绕开"已经打开过就要退回首页"这个难题。而且提示词里的策略阶梯**早就把深链排在第 2 位**（直接工具 → 深链 → 读屏 → 坐标），但当时只能承认"when the app documents one"，因为不知道任何应用的实际 scheme |
-| **已确认的** | scheme 存在；`am start ... -d` 能打开。**注意**：这条命令只验证了 scheme 可解析，**没有验证它是否弹确认框** —— 从 uid 2000 出发理论上不受"后台启动 Activity"限制，但"打开支持的链接"确认是另一套机制，未实测 |
-| **未确认的** | ① 能否直达**歌单页/个人页**（需要 `orpheus://` 的 host/path 模式，即 `dumpsys` 里对应的 `Authority:`/`Path:` 声明，尚未查）；② 是否弹确认框；③ 对没有自定义 scheme 的应用不适用 |
-| **将来怎么接** | 与 5.1 共用同一套特权基础设施：`am start -a android.intent.action.VIEW -d <url>`。**深链不能替代"重置到已知状态"** —— 前者只对提供了深链的应用有效，后者对所有应用有效，且后者是"应用停在深页"的通用解。两者应并存：重置保底，深链在可用时更快 |
-| **怎么验证修好了** | 让 agent 执行"看我的歌单"，它用深链直达歌单页，且 `currentWindow().activity` 报出的页面与手工点进去的一致 |
+| **为什么重要** | 这是**导航脆弱性**（5.1 的另一面）的解药之一：深链直接跳到目标页，**不关心应用当前在哪一页**，因此天然绕开"已经打开过就要退回首页"这个难题。而且提示词里的策略阶梯**早就把深链排在第 2 位**（直接工具 → 深链 → 读屏 → 坐标），但当时只能承认"when the app documents one"，因为不知道任何应用的实际 scheme |
+| **未确认的** | ① 能否直达**歌单页/个人页**（需要 `orpheus://` 的 host/path 模式，即 `dumpsys` 里对应的 `Authority:`/`Path:` 声明，尚未查）；② **是否弹确认框**（从 uid 2000 出发理论上不受"后台启动 Activity"限制，但"打开支持的链接"确认是另一套机制）；③ 对没有自定义 scheme 的应用不适用 |
+| **怎么验证** | 让 agent 执行"看我的歌单"，它用深链直达歌单页，且返回值里的 `activity` 与手工点进去的一致 |
+
+**已接入的方式**：
+
+- `system_open` 新增 `deepLink` 参数（与 `packageId`、`url` **三选一**，给两个就拒绝——两个互相矛盾的目标哪个都不是能猜的）。
+- 自定义 scheme **走特权 shell**（`packages/capabilities/src/deep-link.ts` 的 `deepLinkCommand()`），`am start -a android.intent.action.VIEW -d`。**不走 `openUrl`**，因为 `openUrl` 经普通 launcher 解析，自定义 scheme 会让 Android 弹"打开方式"确认框——而 run 期间我们在后台，那个框画在没人看的屏幕上，任务就卡在它后面。
+- **URL 走 stdin，绝不拼进命令行**。URL 是模型给的，`am start -d "$url"` 会让一个引号或 `;` 把"打开链接"变成"执行别的命令"。有测试断言 **URL 完全不出现在命令里**（不是"被转义了"，而是根本不出现）。
+- `am` **把失败写在 stdout 且仍然退出 0**，所以判据是文本不是退出码。`no-handler` 单独成一种结果（而不是"失败的变体"），因为那是模型能据此行动的事实：换个链接或问用户，而不是重试。
+- **深链不声称核对过落在哪个应用**——scheme 由谁处理在事实发生前不可知，返回值明说 `verified: "not-checked"`。把一个未核对的结论包装成已核对，正是这个项目禁止的事。
+- **深链不能替代"重置到启动页"**（5.1）：前者只对提供深链的应用有效，后者对所有应用有效。两者应并存：重置保底，深链在可用时更快。
 
 ### 7.2 `shizuku_run` 曾被默认规则永久禁用（已移除）
 

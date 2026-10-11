@@ -224,6 +224,102 @@ describe("parseForeground", () => {
     expect(result.raw.length).toBeGreaterThan(0);
     expect(result.raw).toContain("no focus here");
   });
+
+  describe("when a field names more than one thing (both cases are real device output)", () => {
+    it("skips an unset display instead of reporting no app at all", () => {
+      // Verbatim from an Android 14 phone. A virtual display writes the field as `null` and the
+      // primary display writes the real value on the next line. Taking the first match reported
+      // "no foreground app" on a device where the app was right there — the worst failure mode here,
+      // because `screen_wait` turns it into a timeout and a timeout reads as "it never opened".
+      const output = [
+        "  mCurrentFocus=null",
+        "  mCurrentFocus=Window{cad87e3 u0 com.netease.cloudmusic/com.netease.cloudmusic.activity.IconChangeDefaultAlias type=1 }",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({
+        package: "com.netease.cloudmusic",
+        activity: "com.netease.cloudmusic.activity.IconChangeDefaultAlias",
+      });
+    });
+
+    it("still answers when an unset display is listed last", () => {
+      // Pins the direction this must survive, and documents which mechanism carries it. `null` first
+      // is not a good test of the `null` short-circuit, because the later real value overwrites it
+      // and the answer is right either way. `null` *last* is the shape that matters: "take the last
+      // line" alone would conclude nothing holds focus while an app plainly does.
+      //
+      // What carries it is the token match — a `null` line has no `package/activity` in it, so it
+      // never becomes the chosen candidate. Removing the explicit `null` short-circuit changes no
+      // outcome (checked by mutation), which is why the comment in the parser says so rather than
+      // claiming the short-circuit is load-bearing.
+      const output = [
+        "  mCurrentFocus=Window{cad87e3 u0 com.netease.cloudmusic/com.netease.cloudmusic.activity.IconChangeDefaultAlias type=1 }",
+        "  mCurrentFocus=null",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({
+        package: "com.netease.cloudmusic",
+        activity: "com.netease.cloudmusic.activity.IconChangeDefaultAlias",
+      });
+    });
+
+    it("does the same for mFocusedApp", () => {
+      const output = [
+        "  mFocusedApp=null",
+        "  mFocusedApp=ActivityRecord{4686d6a u0 com.netease.cloudmusic/.activity.IconChangeDefaultAlias t695 d0}",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({ package: "com.netease.cloudmusic" });
+    });
+
+    it("takes the last task stack, not the first, when the activity dump lists several", () => {
+      // Also verbatim. `topResumedActivity` is written once per task stack and the count varies
+      // between calls (measured 1, then 2, seconds apart on the same device), so there is no fixed
+      // line to reach for. Here the launcher is listed first and the app the user was looking at is
+      // listed last; taking the first named the launcher and the arrival check called a successful
+      // launch a failure.
+      const output = [
+        "      topResumedActivity=ActivityRecord{376ccf u0 com.bbk.launcher2/.Launcher t6 d0}",
+        "    topResumedActivity=ActivityRecord{2831f17 u0 com.netease.cloudmusic/.activity.IconChangeDefaultAlias t693 d0}",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({
+        package: "com.netease.cloudmusic",
+        activity: ".activity.IconChangeDefaultAlias",
+      });
+    });
+
+    it("takes the last when our own app is listed first", () => {
+      // The same shape with this app in the first slot — the other half of the pair, and the case
+      // that made a launch look like it had not landed.
+      const output = [
+        "    topResumedActivity=ActivityRecord{3a25742 u0 dev.mobileclaw.app/.MainActivity t691 d0}",
+        "    topResumedActivity=ActivityRecord{f840f28 u0 com.netease.cloudmusic/.activity.IconChangeDefaultAlias t693 d0}",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({ package: "com.netease.cloudmusic" });
+    });
+
+    it("prefers a focus field over a resumed-activity field when both are present", () => {
+      // The ordering is the fix for a defect, not a preference: the activity dump is multi-valued,
+      // so if it is consulted first a wrong-but-parseable answer ends the search. Focus is singular
+      // by construction, so it is asked first.
+      const output = [
+        "    topResumedActivity=ActivityRecord{aaa u0 com.bbk.launcher2/.Launcher t6 d0}",
+        "  mCurrentFocus=Window{bbb u0 com.netease.cloudmusic/com.netease.cloudmusic.activity.IconChangeDefaultAlias type=1 }",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({ package: "com.netease.cloudmusic" });
+    });
+
+    it("falls through to a later field when an earlier one names only unset displays", () => {
+      // "Present" is not "answered". A field on every display and naming nothing must not stop the
+      // search, or a device that reports focus as null everywhere would never be read at all.
+      const output = [
+        "  mCurrentFocus=null",
+        "  mFocusedApp=null",
+        "    topResumedActivity=ActivityRecord{ccc u0 com.tencent.mm/.ui.LauncherUI t9 d0}",
+      ].join("\n");
+      expect(parseForeground(output)).toMatchObject({
+        package: "com.tencent.mm",
+        activity: ".ui.LauncherUI",
+      });
+    });
+  });
 });
 
 describe("isAsciiOnly", () => {
@@ -369,14 +465,44 @@ describe("createAutomationService", () => {
     const h = harness();
     const foreground = await createAutomationService(h.native, h.ports).currentWindow();
 
-    // `dumpsys window` is no longer the only source. The activity dump is tried first because its
-    // field names are the ones that survived into current releases; the window dump is the
-    // fallback for older ones. This harness answers only the latter, so both are called and the
-    // second resolves it.
-    expect(h.calls.runs[0]!.command).toContain("dumpsys activity activities");
-    expect(h.calls.runs.some((run) => run.command.includes("dumpsys window"))).toBe(true);
+    // The window dump is asked **first**, because `mCurrentFocus` is the better question: it names
+    // the window holding input focus and is singular by construction, while the activity dump writes
+    // `topResumedActivity` once per task stack and can therefore name the launcher — or this app —
+    // while a target app is genuinely in front. The first source that names anything wins, so asking
+    // the multi-valued one first let a wrong answer end the search before the right one was read.
+    expect(h.calls.runs[0]!.command).toContain("dumpsys window");
     expect(foreground.package).toBe("com.tencent.mm");
     expect(foreground.activity).toBe("com.tencent.mm.ui.LauncherUI");
+    // And the activity dump is *not* consulted, because the first source already answered. Asking it
+    // anyway would be a wasted round trip on the common path, and on the device measured here it is
+    // the source that can return a wrong-but-parseable answer.
+    expect(h.calls.runs.some((run) => run.command.includes("dumpsys activity activities"))).toBe(false);
+  });
+
+  it("falls through to the activity dump when the window dump names nothing", async () => {
+    // The other half: the ordering must not cost the fallback. On a release where `dumpsys window`
+    // has no useful field names, the activity dump is the only thing that answers, and it still has
+    // to be asked — after the better source has failed, not before it.
+    const calls: NativeCalls = { screenshots: [], runs: [] };
+    const h = harness({
+      async runPrivileged(command: string, timeoutMs: number) {
+        calls.runs.push({ command, timeoutMs });
+        if (command === "wm size") return { exitCode: 0, stdout: "Physical size: 1080x2400", stderr: "" };
+        return command.startsWith("dumpsys window")
+          ? { exitCode: 0, stdout: "WINDOW MANAGER (dumpsys window)\n  mCurrentFocus=null", stderr: "" }
+          : {
+              exitCode: 0,
+              stdout: "    topResumedActivity=ActivityRecord{ccc u0 com.tencent.mm/.ui.LauncherUI t9 d0}",
+              stderr: "",
+            };
+      },
+    });
+    const foreground = await createAutomationService(h.native, h.ports).currentWindow();
+
+    expect(calls.runs[0]!.command).toContain("dumpsys window");
+    expect(calls.runs.some((run) => run.command.includes("dumpsys activity activities"))).toBe(true);
+    expect(foreground.package).toBe("com.tencent.mm");
+    expect(foreground.activity).toBe(".ui.LauncherUI");
   });
 
   it("reports every command it tried when no source names the foreground app", async () => {

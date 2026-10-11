@@ -416,44 +416,91 @@ async function displaySize(native: NativeShizukuModule): Promise<{ width: number
  * different field names on different releases, and an OEM build can rename or drop them, so the
  * parser accepts any of them and reports which line it used.
  *
+ * **The order is the argument's, and it is deliberate: focus first, resumed-activity second.**
+ * `mCurrentFocus` / `mFocusedApp` name the window that holds input focus, which is the app the user
+ * is looking at, and they are singular by construction. The `*ResumedActivity` fields come from the
+ * activity dump, which writes one record **per task stack** — so they can name the launcher or our
+ * own app while a target app is genuinely in front, and the number of records changes between calls.
+ * Since the parser stops at the first field that names anything, putting a multi-valued field first
+ * means a wrong answer can end the search before the right one is ever read.
+ *
  * `screen_wait` is built on this, which is why a field-name change turns into a timeout rather
  * than an error: no package is parsed, so nothing ever matches.
  */
 const FOREGROUND_FIELDS = [
   "mCurrentFocus",
   "mFocusedApp",
+  "mFocusedWindow",
+  "mLastFocusedWindow",
   "topResumedActivity",
   "mResumedActivity",
   "ResumedActivity",
-  "mFocusedWindow",
-  "mLastFocusedWindow",
 ];
 
 /** A package/activity token: it must contain a dot and a slash to be one. */
 const COMPONENT_TOKEN = /([A-Za-z_][\w.]*\.[\w.]+)\/([\w.$]+)/;
 
 /**
+ * The best component named by one field, across every line that mentions it.
+ *
+ * Two things this gets right that "the first line containing the field" did not, and both were
+ * observed on a real Android 14 device:
+ *
+ * 1. **An unset display is not an answer.** A phone with a virtual or secondary display writes the
+ *    field once per display, and every one but the primary reads `mCurrentFocus=null`. Taking the
+ *    first match therefore reported *no app at all* on a device where the very next line named the
+ *    app — the worst failure mode here, because `screen_wait` turns it into a timeout and a timeout
+ *    reads as "the app never opened". Note what does the work: a `null` line carries no
+ *    package/activity token at all, so it fails the token match and never becomes `best`. The
+ *    explicit `null` test below is a cheap short-circuit, not the guard — verified by mutation,
+ *    since removing it changes no outcome.
+ *
+ * 2. **The last candidate wins.** How many lines appear depends on how many tasks or displays exist
+ *    at that moment — measured as 1 for one `dumpsys` and 2 for another seconds apart — so there is
+ *    no fixed "first" or "second" to reach for. Ordering is observable though: the records come out
+ *    in ascending task-stack id, and the primary display is written last. Both put the activity the
+ *    user is actually looking at at the end.
+ *
+ * Returns the chosen line so `raw` can show it, or `undefined` when nothing matched.
+ */
+function bestComponentIn(output: string, field: string): { package: string; activity: string; line: string } | undefined {
+  let best: { package: string; activity: string; line: string } | undefined;
+  for (const candidate of output.split("\n")) {
+    if (!candidate.includes(field)) continue;
+    // Short-circuit for the common multi-display shape; see the note above — correctness rests on
+    // the token match, not on this line.
+    if (/=\s*null\b/.test(candidate)) continue;
+    const tokens = [...candidate.matchAll(new RegExp(COMPONENT_TOKEN, "g"))];
+    if (tokens.length === 0) continue;
+    // The *last* token on the line is the value; the surrounding debug text contains other
+    // component names (e.g. `mPreferredTopFocusableStack=Task{... I=com.x/.Y}`).
+    const token = tokens[tokens.length - 1]!;
+    best = { package: token[1]!, activity: token[2]!, line: candidate.trim() };
+  }
+  return best;
+}
+
+/**
  * Read the foreground component out of `dumpsys` output.
  *
- * The known field names are tried in order so the most specific answer wins, and within a line
- * the *last* package/activity token is taken: the surrounding debug text contains other
- * component names (`mPreferredTopFocusableStack=Task{... I=com.x/.Y}`), and the trailing one is
- * the actual value.
+ * Field names are tried in the order given, and the **first field that names anything at all**
+ * wins — not the first field that is merely present. That distinction matters because a field can
+ * be present on every display and still name nothing, and stopping there would report a miss while
+ * a later field had the answer.
  *
  * A miss returns `raw` only -- the contract is "could not tell", never "nothing is open".
  */
 export function parseForeground(output: string): ForegroundWindow {
   for (const field of FOREGROUND_FIELDS) {
-    const line = output.split("\n").find((candidate) => candidate.includes(field));
-    const match = line?.match(COMPONENT_TOKEN);
-    if (match?.[1] && match[2]) {
+    const found = bestComponentIn(output, field);
+    if (found) {
       return {
-        package: match[1],
+        package: found.package,
         // A shorthand such as `.MainActivity` is relative to the package, which is how Android
         // itself writes it. Callers compare the result against a bare activity name, so keep it
         // as written rather than expanding it.
-        activity: match[2],
-        raw: line!.trim(),
+        activity: found.activity,
+        raw: found.line,
       };
     }
   }
@@ -466,19 +513,32 @@ export function hasForeground(result: ForegroundWindow): boolean {
 }
 
 /**
- * Where the foreground app is looked for, most reliable first.
+ * Where the foreground app is looked for, most authoritative first.
  *
- * `dumpsys activity activities` is the one that still works on current releases; the
- * `dumpsys window` field names are the older, more widely documented spelling. Both are cheap
- * and running the second only after the first fails keeps the common path at one round trip.
+ * **`dumpsys window` comes first because `mCurrentFocus` is the better question.** It names the
+ * window that holds input focus, which is what "the app the user is looking at" means, and it is
+ * singular by construction: on a phone with a virtual or secondary display only one line carries a
+ * real value and the others read `null`.
+ *
+ * `dumpsys activity activities` was first until this was measured on a device, and that ordering was
+ * a defect rather than a preference: `foregroundWindow` returns the **first source that names
+ * anything**, so a wrong-but-parseable answer from the activity dump ended the search. The activity
+ * dump writes `topResumedActivity` once per task stack, and the count changes between calls seconds
+ * apart (measured 1, then 2, on the same device), so it can name the launcher or our own app while a
+ * target app is genuinely in front. It is still worth asking as a fallback — on releases where
+ * `dumpsys window` names nothing, it is the only thing that answers.
+ *
+ * `grep -m 6` rather than `-m 3`: the cap exists to bound the output, not to be the answer, and
+ * three was low enough that the primary display could be cut off on a device with extra displays.
+ * Six leaves room for those and still never approaches the output-size limit.
  *
  * `grep -m` rather than `head`: `head` closes the pipe early, and `dumpsys` then reports
  * "Failed to write while dumping service window: Broken pipe", which is noise in an error path
  * that is already hard to read.
  */
 const FOREGROUND_COMMANDS = [
-  "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity|ResumedActivity' | grep -m 3 /",
-  "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mFocusedWindow|mLastFocusedWindow' | grep -m 3 /",
+  "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mFocusedWindow|mLastFocusedWindow' | grep -m 6 /",
+  "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity|ResumedActivity' | grep -m 6 /",
 ];
 
 /**

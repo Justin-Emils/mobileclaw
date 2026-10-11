@@ -200,10 +200,36 @@ export interface ShellService {
  * Cross-app automation surface. On Android these are Intents / ContentProvider
  * writes; on iOS most entries simply report `supported: false`.
  */
+/**
+ * What came of asking the privileged shell to open a link.
+ *
+ * `no-handler` is its own case rather than a flavour of failure because it is the one the model can
+ * act on: nothing on the device registered for that scheme, so the answer is a different link or a
+ * different approach — not a retry.
+ */
+export type DeepLinkResult =
+  | { opened: true; url: string }
+  | { opened: false; reason: "no-handler"; detail: string }
+  | { opened: false; reason: "failed"; detail: string };
+
 export interface SystemService {
   readonly kind: string;
   openUrl(url: string): Promise<void>;
   openApp(packageName: string): Promise<void>;
+  /**
+   * Open a link through the privileged shell (`am start`), when the host has one.
+   *
+   * Separate from `openUrl` because it is a different mechanism with a different failure mode, not
+   * a faster version of the same thing. `openUrl` resolves the URL the way an ordinary app does,
+   * which for a custom scheme (`orpheus://`, `weixin://`) means Android asks the user to choose a
+   * handler — a dialog drawn over the screen we are not watching, which stalls the run until the
+   * user notices. The shell identity starts the activity directly and never asks.
+   *
+   * Absent means the host has no privileged shell, and the caller says so rather than falling back
+   * to `openUrl` silently: a fallback that pops a dialog the model cannot see is worse than an
+   * honest "cannot".
+   */
+  openDeepLink?(url: string): Promise<DeepLinkResult>;
   listApps?(): Promise<{ packageId: string; label: string }[]>;
   sendIntent?(intent: {
     action: string;

@@ -1,25 +1,73 @@
 import { z } from "zod";
-import { CoreError, type AnyToolDefinition, type SystemService } from "@mobileclaw/core";
+import { CoreError, type AnyToolDefinition, type ForegroundWindow, type SystemService } from "@mobileclaw/core";
+import { awaitArrival, describeArrival } from "../app-state";
+import { isOpenableUrl, isPlausiblePackageId, packageIdRejection, urlRejection } from "../deep-link";
 
 /**
  * Cross-app automation. Which entries actually work depends on the platform
  * service: Android implements most through Intents, iOS reports "unsupported"
  * for the ones the sandbox forbids.
  */
-export function createSystemTools(deps: { system: SystemService }): AnyToolDefinition[] {
+export function createSystemTools(deps: {
+  system: SystemService;
+  /**
+   * Read which app (and screen) is in the foreground, so a launch can be checked.
+   *
+   * Defaults to the screen backend already carried by `SystemService`, which is the same probe
+   * `screen_current` uses — so "did it arrive" is answered by the same reading the model would
+   * otherwise call for by hand. Injected as an override because a host may have the probe without
+   * exposing it through the system service.
+   *
+   * Absent (with no `system.automation` either) means the host cannot tell, and the tool reports
+   * `unverified` rather than claiming the launch worked — see `awaitArrival`.
+   */
+  readForeground?: () => Promise<ForegroundWindow>;
+}): AnyToolDefinition[] {
+  const readForeground =
+    deps.readForeground ??
+    (deps.system.automation ? () => deps.system.automation!.currentWindow() : undefined);
+
   const systemOpen = {
     name: "system_open",
     description:
-      "Open a URL in the matching app (http/https/mailto/tel/geo), or launch an installed app by " +
-      "package id. Use it to hand the user over to the right app after doing local work. " +
-      "To open an *app*, pass `packageId` — that resolves through Android's own launcher lookup " +
-      "and either opens the app or fails with a reason. Do not pass a made-up URL as a way of " +
-      "reaching an app: Android then has to pick a handler, and it interrupts the user with a " +
-      "「选择应用」dialog that usually does not even list the app they asked for. If you do not " +
-      "know the package id, search with system_apps first, and ask the user if that finds nothing.",
+      "Bring an app or a link to the front. Pass exactly one of `packageId`, `deepLink` or `url`.\n" +
+      "· `packageId` — open an installed app through Android's own launcher lookup. This is how you " +
+      "open an app.\n" +
+      "· `deepLink` — a custom scheme such as `orpheus://` or `weixin://`, opened through the " +
+      "privileged shell so Android does not interrupt with a chooser. Use this when the app " +
+      "documents a way into a specific screen (a chat, a track, a playlist); it saves the taps and " +
+      "the guessing that navigating there by hand costs.\n" +
+      "· `url` — an ordinary web/mail/tel link (http, https, mailto, tel, geo).\n" +
+      "Do not pass a made-up URL as a way of reaching an app: Android then has to pick a handler and " +
+      "interrupts the user with a 「选择应用」dialog that usually does not even list the app they " +
+      "asked for. If you do not know the package id, search with system_apps first.\n" +
+      "The result reports where the app actually ended up, because a launch can land somewhere " +
+      "other than expected — apps restore the screen you last left them on. `verified: false` means " +
+      "the launch was *not* confirmed; say so rather than reporting it as done.",
     input: z.object({
-      url: z.string().optional().describe("URL to open."),
+      url: z
+        .string()
+        .optional()
+        .describe("An ordinary URL to open: http, https, mailto, tel, geo."),
       packageId: z.string().optional().describe("Android package id, e.g. com.android.calendar."),
+      deepLink: z
+        .string()
+        .optional()
+        .describe(
+          "A custom-scheme link into an app, e.g. orpheus://song/123. Opened through the " +
+            "privileged shell so no chooser is raised.",
+        ),
+      settleMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(15000)
+        .optional()
+        .describe(
+          "How long to wait for the app to reach the front before reporting. Defaults to 5000. " +
+            "Raise it for an app known to start slowly; there is no point lowering it much, since a " +
+            "launch that has not arrived by then is usually not going to.",
+        ),
     }),
     /**
      * Bringing an app to the front changes nothing on the device, so it is not asked.
@@ -33,16 +81,98 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
      */
     risk: "read",
     category: "system",
-    summarize: (input) => input.url ?? input.packageId ?? "open",
-    async execute(input: { url?: string; packageId?: string }) {
-      if (!input.url && !input.packageId) {
-        throw new CoreError("E_TOOL_INPUT", "provide `url` or `packageId`");
+    summarize: (input) => input.deepLink ?? input.url ?? input.packageId ?? "open",
+    async execute(
+      input: { url?: string; packageId?: string; deepLink?: string; settleMs?: number },
+      ctx: { signal?: AbortSignal },
+    ) {
+      const given = [input.url, input.packageId, input.deepLink].filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+      if (given.length === 0) {
+        throw new CoreError("E_TOOL_INPUT", "provide exactly one of `packageId`, `deepLink` or `url`");
       }
-      if (input.url) await deps.system.openUrl(input.url);
-      if (input.packageId) await deps.system.openApp(input.packageId);
-      return { ok: true, opened: input.url ?? input.packageId };
+      if (given.length > 1) {
+        // Refusing rather than picking one: which of two contradictory targets was meant is not
+        // something to guess at when the answer decides which app comes to the front.
+        throw new CoreError(
+          "E_TOOL_INPUT",
+          "provide exactly one of `packageId`, `deepLink` or `url`, not several",
+        );
+      }
+
+      // --- app by package id -------------------------------------------------
+      if (input.packageId) {
+        const packageId = input.packageId.trim();
+        if (!isPlausiblePackageId(packageId)) {
+          throw new CoreError("E_TOOL_INPUT", packageIdRejection(packageId));
+        }
+        await deps.system.openApp(packageId);
+        return finish({ packageId, opened: packageId }, input.settleMs, ctx);
+      }
+
+      // --- a custom scheme, through the shell --------------------------------
+      if (input.deepLink) {
+        const deepLink = input.deepLink.trim();
+        if (!isOpenableUrl(deepLink)) {
+          throw new CoreError("E_TOOL_INPUT", urlRejection(deepLink));
+        }
+        if (!deps.system.openDeepLink) {
+          throw new CoreError(
+            "E_TOOL_FAILED",
+            "deep links need the privileged shell, which this host does not have; " +
+              "opening through the ordinary launcher would raise a chooser the run cannot see",
+          );
+        }
+        const result = await deps.system.openDeepLink(deepLink);
+        if (!result.opened) {
+          // Reported, not thrown: "nothing registered for this scheme" is a fact about the device
+          // that the model should act on (different link, or ask the user), not a crash to retry.
+          return {
+            ok: false,
+            opened: deepLink,
+            reason: result.reason,
+            detail: result.detail,
+            ...(result.reason === "no-handler"
+              ? { hint: "no app on this device registered for that scheme; the link cannot work as written" }
+              : {}),
+          };
+        }
+        // Which package a scheme landed in is not knowable before the fact, so there is nothing to
+        // check the foreground against. Say that plainly instead of reporting an unverified success.
+        return { ok: true, opened: deepLink, verified: "not-checked", note: "opened through the shell; the target package is whatever handles this scheme" };
+      }
+
+      // --- an ordinary URL ---------------------------------------------------
+      const url = input.url!.trim();
+      if (!isOpenableUrl(url)) {
+        throw new CoreError("E_TOOL_INPUT", urlRejection(url));
+      }
+      await deps.system.openUrl(url);
+      return { ok: true, opened: url, verified: "not-checked", note: "opened through the normal launcher; the handler decides which app this reaches" };
     },
   } satisfies AnyToolDefinition;
+
+  /**
+   * Add the arrival check to a successful open.
+   *
+   * Split out so both branches report the same way, and so the *shape* of the answer cannot drift:
+   * one place decides what `verified: true` means.
+   */
+  async function finish(
+    base: Record<string, unknown>,
+    settleMs: number | undefined,
+    ctx: { signal?: AbortSignal },
+  ): Promise<Record<string, unknown>> {
+    const packageId = String(base.packageId);
+    const outcome = await awaitArrival(
+      packageId,
+      readForeground,
+      settleMs === undefined ? {} : { timeoutMs: settleMs },
+      ctx,
+    );
+    return { ...base, ...describeArrival(outcome, packageId) };
+  }
 
   const systemApps = {
     name: "system_apps",
