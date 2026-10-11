@@ -100,6 +100,15 @@ export interface RuntimeDeps {
    */
   logStatus?: { path: string; exists: boolean; lines: number; bytes?: number; lastError: string };
   /**
+   * Whether the foreground service is up, and whether the user could see its notification.
+   *
+   * Injected because both are platform facts owned by the bootstrap, and because the settings
+   * screen has to be able to say "it is running" or "it is not" without guessing.
+   */
+  backgroundServiceRunning?: () => boolean;
+  notificationsGranted?: () => Promise<boolean | undefined>;
+  requestNotifications?: () => Promise<boolean>;
+  /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
    * still letting tests drive the real request/response mapping offline.
@@ -255,6 +264,35 @@ export class MobileClawRuntime {
     } catch {
       // Nothing to clear and "cleared" are the same outcome here.
     }
+  }
+
+  /**
+   * Whether this app is currently protected from being frozen, and whether the user can see that.
+   *
+   * Two separate facts, and both matter to the question "is it running in the background?":
+   *
+   *  - the **foreground service** is what keeps the process alive while the agent operates another
+   *    app, and
+   *  - the **notification** is how the user can tell, which is not cosmetic: the platform requires
+   *    a foreground service to be visible, and on Android 13+ `POST_NOTIFICATIONS` is a runtime
+   *    permission the app never asks for on its own.
+   *
+   * Reported together because either one being false is invisible from inside the app, and the
+   * combination is what the user actually needs to know.
+   */
+  async backgroundStatus(): Promise<{
+    serviceRunning: boolean;
+    notificationsGranted: boolean | undefined;
+  }> {
+    return {
+      serviceRunning: this.deps.backgroundServiceRunning?.() ?? false,
+      notificationsGranted: await this.deps.notificationsGranted?.(),
+    };
+  }
+
+  /** Ask for the notification permission. No-op where the platform has none. */
+  async requestNotificationPermission(): Promise<boolean> {
+    return (await this.deps.requestNotifications?.()) ?? false;
   }
 
   /**

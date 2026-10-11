@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Share, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import { useFocusEffect } from "expo-router";
 import { useRuntime } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
 import { theme } from "@/ui/theme";
@@ -29,6 +30,16 @@ export default function LogsScreen() {
   const [status, setStatus] = useState<
     { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } | undefined
   >(undefined);
+  /**
+   * Whether the app is protected from being frozen, and whether the user can see that.
+   *
+   * On this screen because it is the "what is the app doing" screen, and because the answer is
+   * invisible from inside the app: the foreground service's notification is the platform's own
+   * indicator, and on Android 13+ it stays hidden until `POST_NOTIFICATIONS` is granted.
+   */
+  const [background, setBackground] = useState<
+    { serviceRunning: boolean; notificationsGranted: boolean | undefined } | undefined
+  >(undefined);
   /** Set briefly after a copy, so the action is visibly acknowledged. */
   const [copied, setCopied] = useState(false);
 
@@ -37,11 +48,20 @@ export default function LogsScreen() {
     try {
       setText(await runtime.runLog());
       setStatus(await runtime.runLogStatus());
+      setBackground(await runtime.backgroundStatus());
       setError(undefined);
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
     }
   }, [runtime]);
+
+  // Re-read on focus, not just on mount: the notification permission is granted in *system
+  // settings*, so the user comes back to this screen to find out whether it worked.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   useEffect(() => {
     void load();
@@ -107,6 +127,24 @@ export default function LogsScreen() {
 
       <Text style={styles.hint}>{strings.logs.hint}</Text>
 
+      {/* The background-running answer, above everything else, because it is the question the
+          notification was supposed to answer and cannot once the permission is missing. */}
+      {background ? (
+        <View style={styles.backgroundBox}>
+          <Text style={styles.backgroundText}>
+            {strings.logs.background(background.serviceRunning, background.notificationsGranted)}
+          </Text>
+          {background.notificationsGranted === false ? (
+            <Pressable
+              style={styles.inlineButton}
+              onPress={() => void runtime?.requestNotificationPermission().then(() => load())}
+            >
+              <Text style={styles.buttonText}>{strings.logs.grantNotifications}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
       {/* Shown above the log rather than hidden behind a details toggle: when the log is empty,
           this line is the entire diagnosis. */}
       {status ? (
@@ -163,6 +201,24 @@ const styles = StyleSheet.create({
     fontFamily: "monospace",
     paddingHorizontal: 12,
     paddingBottom: 8,
+  },
+  backgroundBox: {
+    marginHorizontal: 12,
+    marginBottom: 10,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: theme.colors.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border,
+    gap: 8,
+  },
+  backgroundText: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
+  inlineButton: {
+    alignSelf: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: theme.colors.accent,
   },
   loading: { marginTop: 32 },
   empty: { color: theme.colors.textMuted, textAlign: "center", marginTop: 32, paddingHorizontal: 24 },

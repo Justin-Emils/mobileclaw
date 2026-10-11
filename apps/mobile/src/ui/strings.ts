@@ -365,6 +365,25 @@ export const strings = {
     clear: "清空",
     empty: "还没有记录。运行一次任务后回来看。",
     /**
+     * 「应用是否在后台运行」的答案。
+     *
+     * 两件独立的事，缺一不可：前台服务决定**进程会不会被冻结**，通知决定**你能不能看见**。
+     * Android 13+ 的通知是运行时权限，而应用自己不会弹这个请求 —— 所以权限没给时，
+     * 服务在跑、通知却不存在，用户看到的就是"不知道它有没有在运行"。
+     */
+    background: (serviceRunning: boolean, notificationsGranted: boolean | undefined) =>
+      [
+        serviceRunning
+          ? "后台保活：已开启（进程不会被系统冻结）"
+          : "后台保活：未开启（切到别的应用后任务可能被系统冻结而停住）",
+        notificationsGranted === true
+          ? "通知：已授权（下拉通知栏能看到「MobileClaw 正在运行」）"
+          : notificationsGranted === false
+            ? "通知：未授权 —— 所以你看不到「正在运行」那条通知，但服务仍在后台工作"
+            : "通知：此平台不适用",
+      ].join("\n"),
+    grantNotifications: "授予通知权限",
+    /**
      * 日志文件的位置与健康状况。
      *
      * 存在的理由：「没有记录」对**空日志**和**写不进去的日志**是同一句话，而这两种情况的

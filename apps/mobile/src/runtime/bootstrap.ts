@@ -299,6 +299,27 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     log: eventLog,
     logSink,
     logStatus,
+    // Read live rather than captured: the service can be refused at launch and the user can grant
+    // notifications in system settings at any moment, so a cached answer would be a stale lie on
+    // exactly the screen that exists to tell the truth about it.
+    backgroundServiceRunning: () => runService.started(),
+    notificationsGranted: async () => {
+      if (Platform.OS !== "android") return undefined;
+      try {
+        const permissions = await Notifications.getPermissionsAsync();
+        return permissions.granted === true;
+      } catch {
+        return undefined;
+      }
+    },
+    requestNotifications: async () => {
+      try {
+        const permissions = await Notifications.requestPermissionsAsync();
+        return permissions.granted === true;
+      } catch {
+        return false;
+      }
+    },
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),

@@ -789,7 +789,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.3.7",
+    version: "0.3.8",
     orientation: "portrait",
     scheme: "mobileclaw",
     userInterfaceStyle: "dark",
@@ -799,7 +799,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Android decides "is this an upgrade" from versionCode, not versionName, and the
       // Expo template defaults it to 1 for every build. Keep it in step with `version`:
       // 0.2.0 ships as code 2.
-      versionCode: 10,
+      versionCode: 11,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
