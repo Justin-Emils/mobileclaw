@@ -54,8 +54,21 @@ export interface NativeShizukuModule {
     command: string,
     timeoutMs: number,
   ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }>;
-  /** Downscales on the shell side and writes the picture where the app can render it. */
-  screenshot(options: { maxWidth: number; quality: number; destDir?: string }): Promise<ScreenCapture>;
+  /**
+   * Downscales on the shell side and writes the picture where the app can render it.
+   *
+   * **Positional arguments, matching the Kotlin exactly.** The bridge does not pass objects: it
+   * binds each argument by position, and the native method is
+   * `screenshot(maxWidth: Double, quality: Double, destDir: String?, promise: Promise)`. An earlier
+   * version of this declaration — and of the call below it — passed a single options object, which
+   * the bridge read as `maxWidth` and then rejected:
+   *
+   *   TurboModule method "screenshot" called with 1 arguments (expected argument count: 3)
+   *
+   * Because the *type* was wrong in the same way as the call, `tsc` could not catch it, and the
+   * tests mocked the same wrong shape. It only surfaced on a device.
+   */
+  screenshot(maxWidth: number, quality: number, destDir: string | undefined): Promise<ScreenCapture>;
   /**
    * The app-internal directory screenshots are written to.
    *
@@ -477,11 +490,14 @@ export function createAutomationService(
     kind: "shizuku",
     status: () => native.status(),
     captureScreen: (options = {}) =>
-      native.screenshot({
-        maxWidth: options.maxWidth ?? SCREEN_DEFAULTS.maxWidth,
-        quality: options.quality ?? SCREEN_DEFAULTS.quality,
-        ...(options.destDir ? { destDir: options.destDir } : {}),
-      }),
+      // Three positional arguments, in the order the Kotlin declares them. See the note on
+      // `NativeShizukuModule.screenshot`: passing an object here is what produced
+      // `expected argument count: 3` on a device.
+      native.screenshot(
+        options.maxWidth ?? SCREEN_DEFAULTS.maxWidth,
+        options.quality ?? SCREEN_DEFAULTS.quality,
+        options.destDir,
+      ),
 
     async tap(fx, fy) {
       // The coordinate arrives as a fraction because nobody upstream knows the display

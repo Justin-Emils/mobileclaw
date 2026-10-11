@@ -70,11 +70,17 @@ function harness(over: Partial<NativeShizukuModule> = {}): Harness {
           : "";
       return { exitCode: 0, stdout, stderr: "" };
     },
-    async screenshot(options) {
-      calls.screenshots.push(options);
+    async screenshot(maxWidth, quality, destDir) {
+      // Positional, matching the Kotlin. Mocking an object here is what let the real defect ship:
+      // the test agreed with the (wrong) type, and only a device disagreed with both.
+      calls.screenshots.push({
+        maxWidth,
+        quality,
+        ...(destDir === undefined ? {} : { destDir }),
+      });
       return {
         path: "file:///w/shot.jpg",
-        width: options.maxWidth,
+        width: maxWidth,
         height: 1600,
       };
     },
