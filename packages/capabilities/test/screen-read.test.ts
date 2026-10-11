@@ -274,6 +274,98 @@ describe("screen_read", () => {
   });
 });
 
+describe("screen_tap_element resolves a label to its clickable control", () => {
+  /**
+   * A bottom-navigation item, as a real dump produces it: the visible label is a `TextView` with
+   * `clickable="false"`, and the thing that answers a finger is the `LinearLayout` wrapping it —
+   * with almost exactly the same rectangle.
+   *
+   * This is the shape that produced `element #51 is not pressable` on a device. The reading is not
+   * wrong to number the label: that is where the words are. Refusing it was, because the only
+   * remaining route was `screen_tap` with hand-computed coordinates, which stops the run and asks
+   * the user to approve a press they should not have had to see.
+   */
+  const NAV_BOUNDS = boundsOf("[0,2200][360,2400]");
+  const NAV_LABEL_INDEX = 7;
+  const NAV_CONTROL_INDEX = 8;
+
+  function navScreen(): ScreenNode[] {
+    return [
+      { index: 0, text: HEADER_LABEL, className: "TextView", bounds: boundsOf("[0,0][1080,200]") },
+      {
+        index: NAV_LABEL_INDEX,
+        text: SEARCH_LABEL,
+        className: "TextView",
+        bounds: boundsOf("[90,2250][270,2350]"),
+        clickable: false,
+      },
+      {
+        index: NAV_CONTROL_INDEX,
+        text: SEARCH_LABEL,
+        className: "LinearLayout",
+        bounds: NAV_BOUNDS,
+        clickable: true,
+      },
+    ];
+  }
+
+  function navHarness() {
+    const points: Array<{ x: number; y: number }> = [];
+    const system = screenSystem({
+      async tap(fx: number, fy: number) {
+        points.push({ x: fx, y: fy });
+      },
+      async readScreen() {
+        return snapshotOf({ nodes: navScreen(), total: navScreen().length });
+      },
+    });
+    return { points, tool: toolNamed(system, "screen_tap_element") };
+  }
+
+  it("presses the enclosing control, not the label that was numbered", async () => {
+    const { points, tool } = navHarness();
+    const result = (await tool.execute({ index: NAV_LABEL_INDEX } as never, CALL as never)) as Record<
+      string,
+      unknown
+    >;
+
+    // The press has to land in the control's centre, which is what a thumb would hit. The label's
+    // own centre is inside the control too, so the assertion is on the *reported* resolution and on
+    // the exact point: a fix that silently kept aiming at the label would still tap something that
+    // works, and would be wrong.
+    expect(points).toEqual([
+      { x: NAV_BOUNDS.centerX / DISPLAY.width, y: NAV_BOUNDS.centerY / DISPLAY.height },
+    ]);
+    expect(result.resolvedTo).toMatchObject({ index: NAV_CONTROL_INDEX, className: "LinearLayout" });
+    // What was asked for is still reported, so the transcript is not rewritten.
+    expect(result.index).toBe(NAV_LABEL_INDEX);
+  });
+
+  it("still refuses an element that nothing clickable contains", async () => {
+    // The honest failure has to survive: a label in a plain list with no clickable ancestor is
+    // genuinely not pressable, and saying so is better than pressing a point that does nothing.
+    const points: Array<{ x: number; y: number }> = [];
+    const system = screenSystem({
+      async tap(fx: number, fy: number) {
+        points.push({ x: fx, y: fy });
+      },
+      async readScreen() {
+        return snapshotOf({
+          nodes: [
+            { index: 0, text: HEADER_LABEL, className: "TextView", bounds: boundsOf("[0,0][1080,200]") },
+          ],
+          total: 1,
+        });
+      },
+    });
+
+    await expect(
+      toolNamed(system, "screen_tap_element").execute({ index: 0 } as never, CALL as never),
+    ).rejects.toThrow(/not pressable/);
+    expect(points).toHaveLength(0);
+  });
+});
+
 describe("screen_tap_element", () => {
   it("presses the numbered element as a fraction of the display, not at its pixel centre", async () => {
     const harness = tapHarness(snapshotOf());

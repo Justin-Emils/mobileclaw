@@ -99,6 +99,61 @@ const READ_LIMITS = {
 } as const;
 
 /**
+ * The thing that would actually receive a press aimed at `node`.
+ *
+ * In an Android accessibility tree the label usually sits on an inner `TextView` while
+ * `clickable="true"` is on an ancestor `ViewGroup` — a bottom-navigation item, a list row, a
+ * settings entry. Pressing the text node's centre is not a no-op that reports failure; the platform
+ * dispatches the touch to the clickable ancestor anyway, so it usually *works*. But reporting the
+ * text node as the target is wrong twice over: `screen_tap_element` refused it as "not pressable",
+ * and the agent then fell back to a coordinate tap, which needs explicit user approval — turning an
+ * ordinary press into a dialog the user has to answer.
+ *
+ * The ancestor is found by geometry rather than by walking the tree, because the parser flattens the
+ * hierarchy and `ScreenNode` carries no parent. An ancestor's rectangle always contains its
+ * descendant's, so "the smallest clickable node that contains this one" is the nearest clickable
+ * ancestor. Smallest, not first: an outer clickable container (a whole scroll view) would swallow
+ * the press in the wrong place.
+ *
+ * Returns `node` unchanged when it is already a usable target, and `undefined` when nothing
+ * clickable contains it — in which case the honest answer is still "not pressable".
+ */
+export function pressTargetFor(node: ScreenNode, nodes: ScreenNode[]): ScreenNode | undefined {
+  // Checked before the clickable test. A disabled control is `clickable="true"` with `enabled="false"`,
+  // so folding the two together let it fall through to the ancestor search, find nothing, and report
+  // "not pressable" — losing the real reason, which is the one the caller can act on.
+  if (node.disabled === true) return node;
+  if (node.clickable === true && node.bounds) return node;
+  if (!node.bounds) return undefined;
+
+  const { centerX, centerY } = node.bounds;
+  let best: ScreenNode | undefined;
+  let bestArea = Number.POSITIVE_INFINITY;
+
+  for (const candidate of nodes) {
+    if (candidate === node) continue;
+    // A disabled ancestor is the control the press would have gone to, so returning it is more
+    // useful than "nothing clickable here": the caller learns the thing is switched off.
+    if (candidate.clickable !== true) continue;
+    if (candidate.disabled === true) return candidate;
+    const bounds = candidate.bounds;
+    if (!bounds) continue;
+    // The centre of the text is what a finger would land on, so containment is tested with the
+    // point rather than by comparing the two rectangles: a wide row's bounds can extend past the
+    // label it holds, and a point test asks the question that matters.
+    if (centerX < bounds.left || centerX > bounds.right) continue;
+    if (centerY < bounds.top || centerY > bounds.bottom) continue;
+    const area = (bounds.right - bounds.left) * (bounds.bottom - bounds.top);
+    if (area < bestArea) {
+      best = candidate;
+      bestArea = area;
+    }
+  }
+
+  return best;
+}
+
+/**
  * Pick the element a query most likely means.
  *
  * An exact label wins outright. Otherwise a *pressable* element beats a larger one that
@@ -260,7 +315,7 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
   const screenTapElement = {
     name: "screen_tap_element",
     description:
-      "Press an element by the `#` number that screen_read printed, through the privileged backend. Only usable for an element that reported `tap`; a node without it is not pressable and pressing its centre would do nothing or something unintended. Call screen_read first, in the same turn, so the number refers to the screen that is actually in front. Returns a screenshot of the result.",
+      "Press an element by the `#` number that screen_read printed, through the privileged backend. An element that reported `tap` is pressed directly; a label inside a clickable control is resolved to that control, because the platform dispatches the touch there anyway and refusing it would send the caller to a by-hand coordinate press that the user has to approve. An element that nothing clickable contains cannot be pressed. Call screen_read first, in the same turn, so the number refers to the screen that is actually in front. Returns a screenshot of the result.",
     input: z.object({
       index: z
         .number()
@@ -310,12 +365,17 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
           hint: `Read the screen again with screen_read: it now reports ${snapshot.nodes.length} element(s), so the numbering has changed since that number was printed.${note}`,
         });
       }
-      if (node.clickable !== true || !node.bounds) {
+      // Resolve to whatever would really receive the press. An index pointing at a label inside a
+      // clickable row is a legitimate thing to ask for: the reading numbers the text because that is
+      // what has the words on it, and refusing it would send the agent to `screen_tap`, which needs
+      // the user to approve every coordinate by hand.
+      const target = pressTargetFor(node, snapshot.nodes);
+      if (!target || !target.bounds) {
         throw new CoreError("E_TOOL_FAILED", `element #${input.index} is not pressable`, {
-          hint: "Only an element shown with `tap` in screen_read can be pressed. Choose a container's pressable child, or read again.",
+          hint: "Nothing clickable contains this element, so a press at its centre would do nothing. Elements shown with `tap` in screen_read are the ones that respond; read again to see the current numbering.",
         });
       }
-      if (node.disabled === true) {
+      if (target.disabled === true) {
         throw new CoreError("E_TOOL_FAILED", `element #${input.index} is present but disabled`, {
           hint: "The app has it on screen but switched off. Wait for the state to change, or choose another element.",
         });
@@ -330,13 +390,24 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
       }
 
       const changed = await foregroundChangedFrom(automation, input.reading);
-      await automation.tap(node.bounds.centerX / width, node.bounds.centerY / height);
+      await automation.tap(target.bounds.centerX / width, target.bounds.centerY / height);
 
       const result: Record<string, unknown> = {
         index: input.index,
-        pressed: { x: node.bounds.centerX, y: node.bounds.centerY },
+        pressed: { x: target.bounds.centerX, y: target.bounds.centerY },
         label: node.text ?? node.description ?? null,
       };
+      // Said explicitly when the press went to an ancestor, so the transcript records what was
+      // actually pressed rather than only what was asked for. A caller reading back the result
+      // should not have to infer that the coordinates belong to a container.
+      if (target !== node) {
+        result.resolvedTo = {
+          index: target.index,
+          className: target.className ?? null,
+          label: labelOf(target),
+          note: "the numbered element is a label inside this control; the press was aimed at the control",
+        };
+      }
       if (input.target !== undefined) result.target = input.target;
       if (changed !== undefined) result.warning = changed;
 
