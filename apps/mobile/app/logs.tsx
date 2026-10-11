@@ -42,6 +42,8 @@ export default function LogsScreen() {
   >(undefined);
   /** Set briefly after a copy, so the action is visibly acknowledged. */
   const [copied, setCopied] = useState(false);
+  /** What the export action reported: where the file went, or why it could not. */
+  const [exported, setExported] = useState<string | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!runtime) return;
@@ -142,6 +144,30 @@ export default function LogsScreen() {
               <Text style={styles.buttonText}>{strings.logs.grantNotifications}</Text>
             </Pressable>
           ) : null}
+          {/*
+            Copies the log to shared storage so a development machine can read it over USB.
+            Deliberately in the interface rather than hidden: on a release build the app's own
+            directory is unreadable from `adb shell`, so without this a device-only bug can only be
+            read off the screen by hand.
+          */}
+          <Pressable
+            style={styles.inlineButton}
+            onPress={() => {
+              void (async () => {
+                try {
+                  const destination = await runtime?.exportRunLog();
+                  setExported(
+                    destination === undefined ? strings.logs.exportUnavailable : strings.logs.exported(destination),
+                  );
+                } catch (problem) {
+                  setExported(strings.logs.exportFailed(problem instanceof Error ? problem.message : String(problem)));
+                }
+              })();
+            }}
+          >
+            <Text style={styles.buttonText}>{strings.logs.exportLog}</Text>
+          </Pressable>
+          {exported ? <Text style={styles.backgroundText}>{exported}</Text> : null}
         </View>
       ) : null}
 

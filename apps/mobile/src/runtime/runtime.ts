@@ -41,6 +41,16 @@ import { API_KEY_SECRET, type SecretStore, type SecretStorageStatus } from "./se
 import { createSelfTestProvider, selfTestPath } from "./services/self-test";
 
 /**
+ * The run log's file name, inside the app's own files directory.
+ *
+ * Declared here rather than only inside the bootstrap's sink factory so the writer and the disk
+ * reader cannot drift apart: two spellings of one path would mean a reader that silently reads
+ * nothing while the writer keeps reporting success.
+ */
+export const RUN_LOG_FILE_NAME = "mobileclaw-run.log";
+
+
+/**
  * Prompt for the in-app self-test. Phrased as a real request so the scripted transport's
  * tool call reads naturally in the transcript.
  */
@@ -93,6 +103,19 @@ export interface RuntimeDeps {
    * (on the run's path) while reading stays async (on a screen nobody is timing).
    */
   logSink?: { read(): Promise<string>; clear(): Promise<void> };
+  /**
+   * Read a file inside this app's own storage, for pulling the log out over USB.
+   *
+   * See `NativeShizukuModule.readOwnFile`. Injected rather than reached for directly so the app
+   * still runs on a host with no native module.
+   */
+  readOwnFile?: (
+    relativePath: string,
+    offset: number,
+    length: number,
+  ) => Promise<{ size: number; offset: number; content: string; eof: boolean }>;
+  /** Copy a file inside this app's storage to a location a development machine can read. */
+  exportOwnFile?: (relativePath: string) => Promise<string>;
   /**
    * Where the log actually is and whether writing it worked.
    *
@@ -263,6 +286,41 @@ export class MobileClawRuntime {
     } catch {
       return "";
     }
+  }
+
+  /**
+   * Copy the log to a place a development machine can read.
+   *
+   * The app's own directory is unreachable from `adb shell` on a release build, so this writes
+   * through the native module rather than through the app's file-system abstraction: the native
+   * side performs the copy with the app's identity and can reach `filesDir` directly.
+   *
+   * Returns the destination path, or `undefined` when the platform has no such channel.
+   */
+  async exportRunLog(): Promise<string | undefined> {
+    const exporter = this.deps.exportOwnFile;
+    if (!exporter) return undefined;
+    return exporter(RUN_LOG_FILE_NAME);
+  }
+
+  /**
+   * The log file's size and a window of its bytes, read straight from disk.
+   *
+   * A companion to `runLog`, which goes through the in-app file-system abstraction and is what the
+   * log screen uses. This one exists for the case that screen cannot serve: a release build is not
+   * debuggable, so the path is unreachable from `adb shell`, and a bug that only reproduces on a
+   * device otherwise has to be read off the phone by hand.
+   *
+   * Returns `undefined` when the platform has no such channel, so a caller can say so rather than
+   * reporting an empty log.
+   */
+  async readRunLogFromDisk(
+    offset = 0,
+    length = 64 * 1024,
+  ): Promise<{ size: number; offset: number; content: string; eof: boolean } | undefined> {
+    const reader = this.deps.readOwnFile;
+    if (!reader) return undefined;
+    return reader(RUN_LOG_FILE_NAME, offset, length);
   }
 
   /** Clear the record, for when the user wants a clean capture of the next run. */

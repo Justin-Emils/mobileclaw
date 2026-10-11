@@ -30,7 +30,7 @@ import {
   createPrivilegedService,
   loadNativeShizuku,
 } from "./services/native-shizuku";
-import { MobileClawRuntime } from "./runtime";
+import { MobileClawRuntime, RUN_LOG_FILE_NAME } from "./runtime";
 import { DEFAULT_CONFIG, mergeConfig } from "./config";
 import {
   createExpoScreenshotStore,
@@ -219,7 +219,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     // ends in a slash, and the naive `${path}/name` produced `files//mobileclaw-run.log`, which the
     // file system rejected. `Paths.document.uri` is already a `file://` URI, which is also what
     // `File` requires — see the note on `FileLogSinkOptions.path`.
-    path: () => uriToPath(`${Paths.document.uri.replace(/\/+$/, "")}/mobileclaw-run.log`),
+    path: () => uriToPath(`${Paths.document.uri.replace(/\/+$/, "")}/${RUN_LOG_FILE_NAME}`),
     toUri: pathToUri,
   });
   const eventLog = createEventLog({ sink: logSink });
@@ -327,6 +327,27 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     // The notice text is left to the runtime, which owns `strings`: this file deliberately does not
     // reach into the UI layer, and importing the whole string table for one line would be the first
     // such dependency.
+    // Pulling the log out over USB. Optional: absent on a host with no native module, and the log
+    // screen says so rather than pretending the log is empty.
+    readOwnFile: async (relativePath: string, offset: number, length: number) => {
+      const reader = nativeShizuku?.readOwnFile;
+      if (!reader) throw new Error("this build has no native file reader");
+      return reader(relativePath, offset, length);
+    },
+    /**
+     * Copy the log somewhere a development machine can read.
+     *
+     * Done by the **app's own process**, not through the privileged shell. Handing the path to
+     * Shizuku looks like it should work — uid 2000 reads app files more easily than the app does —
+     * but Android's app-data isolation is per *process* identity, so a `u:r:shell:s0` process is
+     * refused even at the same uid. That failure creates the destination anyway, leaving a 0-byte
+     * file that reads as a successful export; it was the device that showed this, not reasoning.
+     */
+    exportOwnFile: async (relativePath: string) => {
+      const exporter = nativeShizuku?.exportOwnFile;
+      if (!exporter) throw new Error("此平台的构建无法导出日志");
+      return exporter(relativePath);
+    },
     refreshRunServiceNotice: async (text: string) => {
       if (!runService.started()) return false;
       return (await nativeShizuku?.refreshRunServiceNotice?.(text)) ?? false;

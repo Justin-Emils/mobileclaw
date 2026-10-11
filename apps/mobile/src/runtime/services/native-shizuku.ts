@@ -138,6 +138,20 @@ export interface NativeShizukuModule {
    * service with nothing visible — which is what the user sees as "I cannot tell if it is running".
    */
   refreshRunServiceNotice?(text: string): Promise<boolean>;
+  /**
+   * Read a file **inside this app's own storage**, at an offset and length.
+   *
+   * For pulling the in-app log out over a USB cable: a release build is not debuggable, so
+   * `run-as` refuses and the app-private directory is unreadable from `adb shell`. Read-only, and
+   * the path is rejected unless it stays inside `filesDir`.
+   */
+  readOwnFile?(
+    relativePath: string,
+    offset: number,
+    length: number,
+  ): Promise<{ size: number; offset: number; content: string; eof: boolean }>;
+  /** Copy a file inside this app's storage into `Download`, for reading over USB. */
+  exportOwnFile?(relativePath: string): Promise<string>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

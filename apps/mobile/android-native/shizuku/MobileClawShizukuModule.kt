@@ -288,6 +288,105 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Read a file **inside this app's own storage**, so a diagnostic on the phone can be inspected
+     * from a development machine.
+     *
+     * ## Why this exists
+     *
+     * A release build is not debuggable, so `adb shell run-as` refuses; the device has no root, so
+     * `/data/user/0/...` is unreadable from a shell; and the storage tools cannot help because the
+     * path is app-private. That left the in-app log reachable only by a human reading it off the
+     * screen and copying it out by hand — which is a fine fallback and a poor debugging loop.
+     *
+     * ## Why that is safe
+     *
+     * It reads, never writes, and it can only read *this app's* files: the path is resolved against
+     * `filesDir` and rejected if the result escapes it, so `..` cannot reach anything else. The
+     * content is the app's own log, which the app already shows on its own settings screen, and the
+     * only way to reach this method is a bridge call from the app itself.
+     *
+     * `offset` and `length` bound the transfer: a log can be hundreds of kilobytes and the bridge
+     * copies the string into the JS heap, so the caller asks for a window rather than the whole file.
+     */
+    @ReactMethod
+    fun readOwnFile(relativePath: String, offset: Double, length: Double, promise: Promise) {
+        run(promise) {
+            val root = reactContext.filesDir.canonicalFile
+            val target = File(root, relativePath).canonicalFile
+            // `canonicalFile` resolves `..` first, so the containment test below is the real guard:
+            // comparing the unresolved path would let `../databases/x` through.
+            check(target.path == root.path || target.path.startsWith(root.path + File.separator)) {
+                "only files inside this app's storage can be read"
+            }
+            check(target.isFile) { "no such file: $relativePath" }
+
+            val start = offset.toLong().coerceAtLeast(0L)
+            val size = target.length()
+            val take = length.toLong().coerceAtLeast(0L).coerceAtMost(size - start).toInt()
+            // `coerceAtMost(0)` on an offset past the end would produce a negative take; clamping to
+            // zero there reports an empty read rather than throwing, which is what a polling caller
+            // wants when it has caught up with the file.
+            val bytes = ByteArray(take.coerceAtLeast(0))
+            if (bytes.isNotEmpty()) {
+                java.io.RandomAccessFile(target, "r").use { handle ->
+                    handle.seek(start)
+                    handle.readFully(bytes)
+                }
+            }
+
+            Arguments.createMap().apply {
+                putDouble("size", size.toDouble())
+                putDouble("offset", start.toDouble())
+                putString("content", String(bytes, Charsets.UTF_8))
+                putBoolean("eof", start + take >= size)
+            }
+        }
+    }
+
+    /**
+     * Copy a file out of this app's own storage to shared storage, so a development machine can
+     * read it over USB.
+     *
+     * ## Why the app does this itself
+     *
+     * The obvious approach — hand the path to the privileged shell and let uid 2000 `cat` it — does
+     * **not** work, and fails in a way that looks like success:
+     *
+     *   /data/user/0/<pkg>/files/mobileclaw-run.log: Permission denied
+     *
+     * Android's app-data isolation is per *process* identity, not per uid: a process under
+     * `u:r:shell:s0` is refused even when its uid matches. The redirect still creates the
+     * destination, so the first attempt produced a **0-byte file that looked like an export**.
+     * Only the app can read its own directory, so the app has to be the one that copies.
+     *
+     * The write side is ordinary app storage: the app has `WRITE_EXTERNAL_STORAGE` for the releases
+     * that need it, and `Download` is where the caller is told to look.
+     */
+    @ReactMethod
+    fun exportOwnFile(relativePath: String, promise: Promise) {
+        run(promise) {
+            val root = reactContext.filesDir.canonicalFile
+            val source = File(root, relativePath).canonicalFile
+            check(source.path == root.path || source.path.startsWith(root.path + File.separator)) {
+                "only files inside this app's storage can be exported"
+            }
+            check(source.isFile) { "no such file: $relativePath" }
+
+            val destinationDir = android.os.Environment.getExternalStoragePublicDirectory(
+                android.os.Environment.DIRECTORY_DOWNLOADS,
+            )
+            check(destinationDir.isDirectory || destinationDir.mkdirs()) {
+                "could not create ${destinationDir.absolutePath}"
+            }
+            val destination = File(destinationDir, source.name)
+            source.inputStream().use { input ->
+                destination.outputStream().use { output -> input.copyTo(output) }
+            }
+            destination.absolutePath
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class

@@ -384,6 +384,16 @@ export const strings = {
       ].join("\n"),
     grantNotifications: "授予通知权限",
     /**
+     * 把日志复制到共享目录，方便用数据线在电脑上读取。
+     *
+     * 发布版不可调试、设备无 root，所以应用私有目录从 `adb shell` 读不到 —— 没有这个入口，
+     * 只在真机上复现的问题就只能靠人眼看屏幕抄下来。
+     */
+    exportLog: "导出日志到 Download",
+    exportUnavailable: "此平台不支持导出。",
+    exportFailed: (reason: string) => `导出失败：${reason}`,
+    exported: (path: string) => `已导出到 ${path}`,
+    /**
      * 日志文件的位置与健康状况。
      *
      * 存在的理由：「没有记录」对**空日志**和**写不进去的日志**是同一句话，而这两种情况的
