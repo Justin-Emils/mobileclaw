@@ -421,6 +421,34 @@ describe("interpretDump", () => {
     const outcome = interpretDump({ exitCode: 0, stdout: "   ", stderr: "" });
     expect(outcome.error).toBeDefined();
   });
+
+  it("carries the command's own output when it produces no hierarchy", () => {
+    // On a device this branch was the whole diagnosis and said nothing: "produced no window
+    // hierarchy" is the same message for an empty file, a permission refusal, a ROM that renamed
+    // the tool, and a race where the file was read before it was flushed -- four different fixes.
+    // The excerpt is what tells them apart, and it is the reason this was fixable at all.
+    const outcome = interpretDump({
+      exitCode: 0,
+      stdout: "",
+      stderr: "java.io.FileNotFoundException: /sdcard/mobileclaw-window-dump.xml",
+    });
+    expect(outcome.error).toContain("no window hierarchy");
+    expect(outcome.error).toContain("FileNotFoundException");
+  });
+
+  it("says so plainly when the command produced nothing at all", () => {
+    const outcome = interpretDump({ exitCode: 0, stdout: "", stderr: "" });
+    expect(outcome.error).toMatch(/没有任何输出/);
+  });
+
+  it("keeps the excerpt to one line so the message stays readable", () => {
+    const outcome = interpretDump({
+      exitCode: 0,
+      stdout: "",
+      stderr: Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n"),
+    });
+    expect(outcome.error).not.toContain("\n");
+  });
 });
 
 describe("the dump command", () => {

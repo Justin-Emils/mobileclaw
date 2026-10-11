@@ -140,6 +140,21 @@ const SIZE_TIMEOUT_MS = 5_000;
 const DEFAULT_SHELL_TIMEOUT_MS = 60_000;
 
 /**
+ * How long to wait before re-reading a dump whose first read came back empty.
+ *
+ * `uiautomator dump` writes its file from another process and can exit before that write is
+ * visible to a following `cat`. Long enough for a flushed write to appear, short enough not to
+ * matter when the first read was fine.
+ */
+const DUMP_FLUSH_WAIT_MS = 150;
+
+/** A cancellable-free sleep; the dump retry has no signal to honour. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+
+/**
  * Readings are dumped to a file and then read back, which puts a hard ceiling on the
  * dump in a place where it can be reported.
  *
@@ -214,8 +229,7 @@ async function readScreenViaDump(
   let lastError = "uiautomator produced no window hierarchy";
   for (const command of [DUMP_COMMANDS.dump, DUMP_COMMANDS.dumpPlain]) {
     const dumped = await native.runPrivileged(command, timeoutMs);
-    const outcome = interpretDump(dumped);
-    if (outcome.error !== undefined) {
+    const outcome = interpretDump(dumped);    if (outcome.error !== undefined) {
       lastError = outcome.error;
       continue;
     }
@@ -232,10 +246,24 @@ async function readScreenViaDump(
       };
     }
 
-    const contents = await sh(native, DUMP_COMMANDS.read, timeoutMs);
+    // Read it back, with one retry.
+    //
+    // `uiautomator dump` writes the file as a *separate process* and can exit before the write is
+    // visible, so the immediate `cat` sometimes reads an empty or half-written file — which
+    // `interpretDump` correctly reports as "no window hierarchy". On a device that showed up as
+    // every `screen_read` failing while `screen_current` (a different command, no temp file) kept
+    // working: the read path, not the ability to see the screen, was broken. One short wait and a
+    // second read costs 150 ms and removes the race.
+    //
+    // The file is removed only after the retries, so a first read that was merely early still has
+    // something to read on the second attempt.
+    let read = interpretDump(await sh(native, DUMP_COMMANDS.read, timeoutMs));
+    if (read.xml === undefined) {
+      await sleep(DUMP_FLUSH_WAIT_MS);
+      read = interpretDump(await sh(native, DUMP_COMMANDS.read, timeoutMs));
+    }
     await discardDump(native);
 
-    const read = interpretDump(contents);
     if (read.xml === undefined) {
       lastError = read.error ?? lastError;
       continue;

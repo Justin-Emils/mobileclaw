@@ -68,6 +68,20 @@ export interface DumpOutcome {
   error?: string;
 }
 
+/** How much of the raw output to keep when explaining a failure. */
+const EXCERPT_LIMIT = 200;
+
+/** One line of combined output, for an error message that has to stay readable. */
+function excerpt(result: { stdout: string; stderr: string }): string {
+  const combined = `${result.stdout}\n${result.stderr}`
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join(" / ");
+  if (combined === "") return "(命令没有任何输出)";
+  return combined.length > EXCERPT_LIMIT ? `${combined.slice(0, EXCERPT_LIMIT)}…` : combined;
+}
+
 /**
  * Decide what a finished dump command meant.
  *
@@ -75,6 +89,12 @@ export interface DumpOutcome {
  * the boundary where "the screen is empty" and "the screen could not be read" get
  * told apart, and getting it wrong is the failure the storage tools already had to be
  * fixed for — reporting a permission problem as a finding about the user's data.
+ *
+ * Every failure branch carries the command's own output. The first version returned a bare
+ * "uiautomator produced no window hierarchy", which on a real device was indistinguishable between
+ * an empty file, a permission refusal, a ROM that renamed the tool, and a race where the file was
+ * read before it was flushed — all of which need different fixes. That is the same mistake the
+ * foreground-app probe made, and it cost the same round trip.
  */
 export function interpretDump(result: {
   exitCode: number;
@@ -94,13 +114,17 @@ export function interpretDump(result: {
   // The XML is checked before the marker list, so a node whose *text* happens to
   // contain the word "error" is not mistaken for a failed dump.
   if (!combined.includes("<hierarchy") && !combined.includes("<node")) {
-    if (marker !== undefined) return { error: `uiautomator reported a failure (${marker.trim()})` };
+    if (marker !== undefined) {
+      return { error: `uiautomator reported a failure (${marker.trim()})：${excerpt(result)}` };
+    }
     if (result.exitCode !== 0) {
       return {
         error: `uiautomator exited ${result.exitCode}: ${result.stderr.trim() || "no stderr"}`,
       };
     }
-    return { error: "uiautomator produced no window hierarchy" };
+    return {
+      error: `uiautomator produced no window hierarchy（退出码 0，输出：${excerpt(result)}）`,
+    };
   }
 
   if (result.stdout.trim() === "") return { error: "the dump file was empty" };
