@@ -10,7 +10,13 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
   const systemOpen = {
     name: "system_open",
     description:
-      "Open a URL in the matching app (http/https/mailto/tel/geo), or launch an installed app by package id. Use it to hand the user over to the right app after doing local work.",
+      "Open a URL in the matching app (http/https/mailto/tel/geo), or launch an installed app by " +
+      "package id. Use it to hand the user over to the right app after doing local work. " +
+      "To open an *app*, pass `packageId` — that resolves through Android's own launcher lookup " +
+      "and either opens the app or fails with a reason. Do not pass a made-up URL as a way of " +
+      "reaching an app: Android then has to pick a handler, and it interrupts the user with a " +
+      "「选择应用」dialog that usually does not even list the app they asked for. If you do not " +
+      "know the package id, search with system_apps first, and ask the user if that finds nothing.",
     input: z.object({
       url: z.string().optional().describe("URL to open."),
       packageId: z.string().optional().describe("Android package id, e.g. com.android.calendar."),
@@ -40,19 +46,47 @@ export function createSystemTools(deps: { system: SystemService }): AnyToolDefin
 
   const systemApps = {
     name: "system_apps",
-    description: "List installed apps (Android only) so you can pick a package id for system_open.",
-    input: z.object({ filter: z.string().optional().describe("Case-insensitive substring filter.") }),
+    description:
+      "List installed apps (Android only) so you can pick a package id for system_open. " +
+      "Pass `filter` with the app's name whenever you have one — matching is against both the " +
+      "visible label and the package id. The unfiltered list is only the first slice of a long " +
+      "list, and a phone routinely has two hundred or more launchable apps, so searching by name " +
+      "is the reliable way to find one.",
+    input: z.object({
+      filter: z
+        .string()
+        .optional()
+        .describe("Case-insensitive substring of the app's visible name or its package id."),
+      limit: z.number().int().min(1).max(500).optional().describe("How many matches to return. Defaults to 50."),
+    }),
     risk: "read",
     category: "system",
-    async execute(input: { filter?: string }) {
+    async execute(input: { filter?: string; limit?: number }) {
       if (!deps.system.listApps) {
         throw new CoreError("E_TOOL_FAILED", "listing installed apps is not supported on this platform");
       }
       const apps = await deps.system.listApps();
-      const filter = input.filter?.toLowerCase();
+      const filter = input.filter?.trim().toLowerCase();
+      const limit = input.limit ?? 50;
+      const matched = filter
+        ? apps.filter((app) => app.label.toLowerCase().includes(filter) || app.packageId.includes(filter))
+        : apps;
+      const visible = matched.slice(0, limit);
       return {
-        count: apps.length,
-        apps: (filter ? apps.filter((app) => app.label.toLowerCase().includes(filter) || app.packageId.includes(filter)) : apps).slice(0, 100),
+        // These counts are the reason this returns an object rather than an array. The previous
+        // shape reported `count: apps.length` while silently slicing to 100, so a caller could
+        // not tell a complete list from a truncated one -- an app past the cut simply "did not
+        // exist". A phone has far more than 100 launchable apps, so in practice this hid real
+        // apps and pushed the model into guessing a URL instead, which is what produced an
+        // Android chooser with no correct entry in it.
+        total: apps.length,
+        matched: matched.length,
+        returned: visible.length,
+        truncated: matched.length > visible.length,
+        ...(matched.length > visible.length
+          ? { hint: "还有更多匹配项。用更精确的 filter 缩小范围，或提高 limit。" }
+          : {}),
+        apps: visible,
       };
     },
   } satisfies AnyToolDefinition;

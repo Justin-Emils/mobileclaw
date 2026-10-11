@@ -769,6 +769,96 @@ describe("System tools", () => {
     return { kind: "stub", async openUrl() {}, async openApp() {}, ...overrides };
   }
 
+  /**
+   * A phone-sized app list.
+   *
+   * The defect these guard against: `system_apps` reported `count: apps.length` while slicing to
+   * 100, and the slice was taken from the resolver's arbitrary order rather than by name. On a
+   * real phone, which has far more than 100 launchable apps, that made an app the user named
+   * simply absent -- no truncation notice, no way to tell. The model then had no package id, so
+   * it guessed a URL, and Android answered with a 「选择应用」dialog that did not list the app
+   * either. The user picked something at random and the task stalled.
+   *
+   * 「网易云音乐」 is placed past the old cut on purpose, which is where it really was.
+   */
+  const PHONE_APPS = [
+    ...Array.from({ length: 120 }, (_, i) => ({
+      packageId: `com.example.filler${String(i).padStart(3, "0")}`,
+      label: `填充应用 ${i}`,
+    })),
+    { packageId: "com.netease.cloudmusic", label: "网易云音乐" },
+    { packageId: "com.spotify.music", label: "Spotify" },
+  ];
+
+  it("does not report a complete list when it is only returning a slice", async () => {
+    const tools = createSystemTools({
+      system: makeSystem({ async listApps() { return PHONE_APPS; } }),
+    });
+    const apps = tools.find((tool) => tool.name === "system_apps");
+    const result = (await apps?.execute!({} as never, call as never)) as {
+      total: number;
+      matched: number;
+      returned: number;
+      truncated: boolean;
+      apps: { packageId: string }[];
+    };
+
+    // The old shape said `count: 122` and handed back 100 entries with nothing to indicate the
+    // difference. These three numbers are what make the truncation visible.
+    expect(result.total).toBe(PHONE_APPS.length);
+    expect(result.matched).toBe(PHONE_APPS.length);
+    expect(result.returned).toBe(50);
+    expect(result.truncated).toBe(true);
+    expect(result.apps).toHaveLength(50);
+  });
+
+  it("finds an app that the unfiltered list would have cut off", async () => {
+    const tools = createSystemTools({
+      system: makeSystem({ async listApps() { return PHONE_APPS; } }),
+    });
+    const apps = tools.find((tool) => tool.name === "system_apps")!;
+
+    const byName = (await apps.execute!({ filter: "网易云" } as never, call as never)) as {
+      matched: number;
+      truncated: boolean;
+      apps: { packageId: string; label: string }[];
+    };
+
+    // This is the whole point: searching by the name the user said must reach the app, whether
+    // or not it sits inside the unfiltered slice.
+    expect(byName.matched).toBe(1);
+    expect(byName.truncated).toBe(false);
+    expect(byName.apps[0]).toEqual({ packageId: "com.netease.cloudmusic", label: "网易云音乐" });
+  });
+
+  it("matches on the package id as well as the visible label", async () => {
+    const tools = createSystemTools({
+      system: makeSystem({ async listApps() { return PHONE_APPS; } }),
+    });
+    const apps = tools.find((tool) => tool.name === "system_apps")!;
+    const result = (await apps.execute!({ filter: "cloudmusic" } as never, call as never)) as {
+      matched: number;
+      apps: { packageId: string }[];
+    };
+    expect(result.matched).toBe(1);
+    expect(result.apps[0]!.packageId).toBe("com.netease.cloudmusic");
+  });
+
+  it("honours an explicit limit and reports a full match set as untruncated", async () => {
+    const tools = createSystemTools({
+      system: makeSystem({ async listApps() { return PHONE_APPS; } }),
+    });
+    const apps = tools.find((tool) => tool.name === "system_apps")!;
+    const result = (await apps.execute!({ filter: "填充", limit: 5 } as never, call as never)) as {
+      matched: number;
+      returned: number;
+      truncated: boolean;
+    };
+    expect(result.matched).toBe(120);
+    expect(result.returned).toBe(5);
+    expect(result.truncated).toBe(true);
+  });
+
   it("requires a target for system_open", async () => {
     const tools = createSystemTools({ system: makeSystem() });
     const open = tools.find((tool) => tool.name === "system_open");
