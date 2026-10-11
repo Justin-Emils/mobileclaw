@@ -885,7 +885,211 @@ describe("System tools", () => {
   it("requires a target for system_open", async () => {
     const tools = createSystemTools({ system: makeSystem() });
     const open = tools.find((tool) => tool.name === "system_open");
-    await expect(open?.execute!({} as never, call as never)).rejects.toThrowError(/provide `url` or `packageId`/);
+    await expect(open?.execute!({} as never, call as never)).rejects.toThrowError(
+      /provide exactly one of `packageId`, `deepLink` or `url`/,
+    );
+  });
+
+  it("refuses two contradictory targets rather than picking one", async () => {
+    // Which of two targets was meant decides which app comes to the front, and that is not a guess
+    // worth making on the user's behalf.
+    const tools = createSystemTools({ system: makeSystem() });
+    const open = tools.find((tool) => tool.name === "system_open")!;
+    await expect(
+      open.execute!({ packageId: "com.tencent.mm", url: "https://example.com" } as never, call as never),
+    ).rejects.toThrowError(/not several/);
+  });
+
+  describe("system_open arrival reporting", () => {
+    /** A system whose probe reports the given windows in order, then repeats the last. */
+    function systemWithProbe(windows: { package?: string; activity?: string; raw?: string }[]) {
+      let i = 0;
+      const opened: string[] = [];
+      return {
+        opened,
+        system: makeSystem({
+          async openApp(packageId) {
+            opened.push(packageId);
+          },
+          automation: {
+            kind: "stub",
+            async currentWindow() {
+              const w = windows[Math.min(i, windows.length - 1)]!;
+              i++;
+              return { ...w, raw: w.raw ?? "line" };
+            },
+          } as never,
+        }),
+      };
+    }
+
+    it("reports the screen the app actually landed on", async () => {
+      // The reason this exists: apps restore the screen you last left them on, so "opened" and
+      // "arrived at the home screen" are different facts and the caller needs to tell them apart.
+      const { system } = systemWithProbe([{ package: "com.netease.cloudmusic", activity: ".ui.LauncherUI" }]);
+      const tools = createSystemTools({ system });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!({ packageId: "com.netease.cloudmusic" } as never, call as never)) as {
+        verified: boolean;
+        package: string;
+        activity: string;
+      };
+      expect(result.verified).toBe(true);
+      expect(result.package).toBe("com.netease.cloudmusic");
+      expect(result.activity).toBe(".ui.LauncherUI");
+    });
+
+    it("says the launch did not land when the probe shows another app", async () => {
+      const { system } = systemWithProbe([{ package: "com.android.launcher3", activity: ".Launcher" }]);
+      const tools = createSystemTools({ system });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!(
+        { packageId: "com.netease.cloudmusic", settleMs: 0 } as never,
+        call as never,
+      )) as {
+        verified: boolean;
+        verifyNote: string;
+      };
+      expect(result.verified).toBe(false);
+      expect(result.verifyNote).toContain("com.android.launcher3");
+    });
+
+    it("reports unverified — not a failure — when the probe cannot name an app", async () => {
+      // The invariant this whole path is built around: on a device whose dumpsys does not name the
+      // foreground window, "we could not see" must not be reported as "the app did not open".
+      const { system } = systemWithProbe([{ raw: "dumpsys named nothing" }]);
+      const tools = createSystemTools({ system });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!(
+        { packageId: "com.netease.cloudmusic", settleMs: 0 } as never,
+        call as never,
+      )) as {
+        verified: boolean;
+        verifyNote: string;
+      };
+      expect(result.verified).toBe(false);
+      expect(result.verifyNote).toMatch(/detection failure, not proof the launch failed/i);
+      expect(result.verifyNote).toMatch(/do not report it as done/i);
+    });
+
+    it("honours settleMs, so an unreadable probe does not stall every call", async () => {
+      // A device that never names the foreground app would otherwise pay the full default timeout on
+      // every single open. The caller can shorten it, and this proves the option reaches the check.
+      const { system } = systemWithProbe([{ raw: "nothing" }]);
+      const tools = createSystemTools({ system });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const started = Date.now();
+      await open.execute!({ packageId: "com.netease.cloudmusic", settleMs: 0 } as never, call as never);
+      expect(Date.now() - started).toBeLessThan(1000);
+    });
+
+    it("says so plainly when the host has no probe at all", async () => {
+      const tools = createSystemTools({ system: makeSystem() });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!({ packageId: "com.netease.cloudmusic" } as never, call as never)) as {
+        verified: boolean;
+        verifyNote: string;
+      };
+      expect(result.verified).toBe(false);
+      expect(result.verifyNote).toContain("cannot report which app is in the foreground");
+    });
+
+    it("rejects a package id that is not one, before opening anything", async () => {
+      const { system, opened } = systemWithProbe([{ package: "com.x" }]);
+      const tools = createSystemTools({ system });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      await expect(
+        open.execute!({ packageId: "com.tencent.mm; rm -rf /" } as never, call as never),
+      ).rejects.toThrowError(/not an Android package id/);
+      expect(opened).toHaveLength(0);
+    });
+  });
+
+  describe("system_open deep links", () => {
+    it("routes a custom scheme through openDeepLink, not openUrl", async () => {
+      // The whole point: `openUrl` goes through the ordinary launcher and raises a chooser on a
+      // screen the run cannot see. A custom scheme must take the shell route.
+      const urls: string[] = [];
+      const deepLinks: string[] = [];
+      const tools = createSystemTools({
+        system: makeSystem({
+          async openUrl(url) {
+            urls.push(url);
+          },
+          async openDeepLink(url) {
+            deepLinks.push(url);
+            return { opened: true, url };
+          },
+        }),
+      });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      await open.execute!({ deepLink: "orpheus://song/123" } as never, call as never);
+      expect(deepLinks).toEqual(["orpheus://song/123"]);
+      expect(urls).toHaveLength(0);
+    });
+
+    it("reports a scheme nothing handles as a fact to act on, not a crash", async () => {
+      const tools = createSystemTools({
+        system: makeSystem({
+          async openDeepLink() {
+            return { opened: false, reason: "no-handler", detail: "Error: Activity not found" };
+          },
+        }),
+      });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!({ deepLink: "nosuch://x" } as never, call as never)) as {
+        ok: boolean;
+        reason: string;
+        hint?: string;
+      };
+      expect(result.ok).toBe(false);
+      expect(result.reason).toBe("no-handler");
+      expect(result.hint).toMatch(/registered for that scheme/);
+    });
+
+    it("refuses a deep link when the host has no shell, instead of falling back to a chooser", async () => {
+      const tools = createSystemTools({ system: makeSystem() });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      await expect(
+        open.execute!({ deepLink: "orpheus://" } as never, call as never),
+      ).rejects.toThrowError(/privileged shell/);
+    });
+
+    it("refuses a value that is not a link", async () => {
+      const tools = createSystemTools({
+        system: makeSystem({
+          async openDeepLink(url) {
+            return { opened: true, url };
+          },
+        }),
+      });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      await expect(
+        open.execute!({ deepLink: "com.tencent.mm" } as never, call as never),
+      ).rejects.toThrowError(/not a link/);
+      await expect(
+        open.execute!({ deepLink: "orpheus://x\nam force-stop com.tencent.mm" } as never, call as never),
+      ).rejects.toThrowError(/control characters/);
+    });
+
+    it("does not claim to have verified which app a scheme landed in", async () => {
+      // An unverified claim dressed as a verified one is exactly what this project forbids. Which
+      // package handles a scheme is not knowable before the fact, so the answer says so.
+      const tools = createSystemTools({
+        system: makeSystem({
+          async openDeepLink(url) {
+            return { opened: true, url };
+          },
+        }),
+      });
+      const open = tools.find((tool) => tool.name === "system_open")!;
+      const result = (await open.execute!({ deepLink: "orpheus://" } as never, call as never)) as {
+        ok: boolean;
+        verified: string;
+      };
+      expect(result.ok).toBe(true);
+      expect(result.verified).toBe("not-checked");
+    });
   });
 
   it("creates a calendar event and defaults the duration", async () => {

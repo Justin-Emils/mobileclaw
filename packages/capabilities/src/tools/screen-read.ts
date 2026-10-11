@@ -10,6 +10,20 @@ import {
 } from "@mobileclaw/core";
 import { available, requireAvailable, unavailable } from "../availability";
 import { formatScreenReading } from "../ui-dump";
+import {
+  SCROLL_THROUGH_DEFAULTS,
+  describeScrollThrough,
+  scrollThrough,
+} from "../scroll-through";
+
+/**
+ * Bounds for the scroll-through option, as the tool offers it.
+ *
+ * Deliberately tighter than the helper's own ceiling. Ten screens of a chat is already a lot of
+ * scrolling to perform on someone's screen without asking, and the cost of a too-small cap is one
+ * more call, whereas the cost of a too-large one is a run that sits there scrolling.
+ */
+const SCROLL_TOOL_LIMITS = { maxScreens: 25 } as const;
 /**
  * The matching vocabulary, from the shared module.
  *
@@ -159,7 +173,8 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
   const screenRead = {
     name: "screen_read",
     description:
-      "Read the current screen as text through the privileged backend: each element with its label, its kind, its state, and the pixel point to press. Prefer this over screen_capture whenever you need to know what is on screen — a picture cannot be read by you, and this returns the same window as text. Reach for it as a fallback, though, not as the first move: if the job can be done with system_open (an app or a URL), a deep link, or a purpose-built tool, do that instead — this path depends on the current layout, breaks on animation, and every action it enables is a real tap the user did not ask for. It reads the accessibility tree, so it sees only what an app publishes: a canvas, a game or a video may return little or nothing, and an app that hides its contents (FLAG_SECURE, banking) returns nothing at all. When the reading is thin, say so instead of assuming the screen is empty.",
+      "Read the current screen as text through the privileged backend: each element with its label, its kind, its state, and the pixel point to press. Prefer this over screen_capture whenever you need to know what is on screen — a picture cannot be read by you, and this returns the same window as text. Reach for it as a fallback, though, not as the first move: if the job can be done with system_open (an app or a URL), a deep link, or a purpose-built tool, do that instead — this path depends on the current layout, breaks on animation, and every action it enables is a real tap the user did not ask for. It reads the accessibility tree, so it sees only what an app publishes: a canvas, a game or a video may return little or nothing, and an app that hides its contents (FLAG_SECURE, banking) returns nothing at all. When the reading is thin, say so instead of assuming the screen is empty.\n" +
+      "Set `scrollThrough` when you need the *whole* of a scrolling page (a long chat, a playlist, a list you have to search): it scrolls and reads repeatedly **inside this one call**, so a page that would cost a step per screen costs one step. It reports how many screens it read and whether it found the end, and the result is for reading and searching — press points stay valid only for the screen that is in front, so re-read before tapping.",
     input: z.object({
       maxTextLength: z
         .number()
@@ -168,17 +183,68 @@ export function createScreenReadTools(deps: { system: SystemService }): AnyToolD
         .max(READ_LIMITS.maxTextLength)
         .optional()
         .describe("Longest label to return per element. Longer text is shortened and the result says so."),
+      scrollThrough: z
+        .boolean()
+        .optional()
+        .describe(
+          "Keep scrolling and reading until the content stops growing, and return everything found. " +
+            "Use it instead of alternating screen_read and screen_scroll by hand.",
+        ),
+      maxScreens: z
+        .number()
+        .int()
+        .min(1)
+        .max(SCROLL_TOOL_LIMITS.maxScreens)
+        .optional()
+        .describe(
+          `Most screens to read when scrollThrough is set. Defaults to ${SCROLL_THROUGH_DEFAULTS.maxScreens}; ` +
+            "the result says so when this limit stopped it.",
+        ),
     }),
     risk: "read",
     category: "screen-read",
     requires: ["shizuku"],
-    async execute(input: { maxTextLength?: number }) {
+    async execute(
+      input: { maxTextLength?: number; scrollThrough?: boolean; maxScreens?: number },
+      ctx: { signal?: AbortSignal },
+    ) {
       const automation = await requireScreen("reading the screen");
-      const snapshot = await automation.readScreen(
-        input.maxTextLength === undefined ? {} : { maxTextLength: input.maxTextLength },
+      const readOptions = input.maxTextLength === undefined ? {} : { maxTextLength: input.maxTextLength };
+
+      if (!input.scrollThrough) {
+        const snapshot = await automation.readScreen(readOptions);
+        const reading = formatScreenReading(snapshot);
+        return { ...reading.snapshot, reading: reading.text };
+      }
+
+      const walk = await scrollThrough(
+        () => automation.readScreen(readOptions),
+        // Down, because the walk is about moving onwards through the content. The amount is left to
+        // the platform's own step: overriding it here would guess at a geometry this layer cannot see.
+        (amount) => automation.scroll("down", amount),
+        {
+          ...(input.maxScreens === undefined ? {} : { maxScreens: input.maxScreens }),
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        },
       );
-      const reading = formatScreenReading(snapshot);
-      return { ...reading.snapshot, reading: reading.text };
+
+      // The collected elements are described from the **last** reading, because that is the only one
+      // whose press points are still valid: bounds are relative to the screen they came from. The
+      // earlier screens are reported as what they are — content that was read, to be searched.
+      const lastReading = formatScreenReading(walk.last);
+      const earlier = walk.nodes.length - walk.last.nodes.length;
+      return {
+        ...lastReading.snapshot,
+        reading: lastReading.text,
+        scrolled: {
+          screens: walk.screens,
+          elementsAcrossScreens: walk.nodes.length,
+          elementsBeforeTheLastScreen: Math.max(0, earlier),
+          stoppedBecause: walk.stoppedBecause,
+          incomplete: walk.incomplete,
+          note: describeScrollThrough(walk, walk.nodes.length),
+        },
+      };
     },
   } satisfies AnyToolDefinition;
 

@@ -1,4 +1,4 @@
-import type { AutomationService, PrivilegedService, SystemService } from "@mobileclaw/core";
+import type { AutomationService, DeepLinkResult, PrivilegedService, SystemService } from "@mobileclaw/core";
 import { CoreError } from "@mobileclaw/core";
 
 /**
@@ -13,6 +13,14 @@ export interface ExpoSystemPorts {
   openUrl(url: string): Promise<void>;
   /** Launch an app by package id; requires a `<queries>` entry on Android 11+. */
   openApp?(packageId: string): Promise<void>;
+  /**
+   * Open a link through the privileged shell, so a custom scheme does not raise a chooser.
+   *
+   * Optional because it needs Shizuku: without it the port is absent and `system_open` reports that
+   * it cannot open a deep link, rather than falling back to `openUrl` and popping a dialog on a
+   * screen the run is not watching.
+   */
+  openDeepLink?(url: string): Promise<DeepLinkResult>;
   listApps?(): Promise<{ packageId: string; label: string }[]>;
   sendIntent?(intent: {
     action: string;
@@ -40,7 +48,12 @@ export interface ExpoSystemPorts {
 export class ExpoSystemService implements SystemService {
   readonly kind = "expo-system";
 
-  constructor(private readonly ports: ExpoSystemPorts) {}
+  constructor(private readonly ports: ExpoSystemPorts) {
+    // Only present when this host can actually do it — see the note on the property.
+    if (ports.openDeepLink) {
+      this.openDeepLink = (url: string) => ports.openDeepLink!(url);
+    }
+  }
 
   async openUrl(url: string): Promise<void> {
     await this.ports.openUrl(url);
@@ -55,23 +68,22 @@ export class ExpoSystemService implements SystemService {
     await this.ports.openApp(packageName);
   }
 
+  /**
+   * Opens a custom-scheme link through the privileged shell.
+   *
+   * Declared as an optional *property* rather than a method, and only assigned when the port exists.
+   * `SystemService.openDeepLink` is optional, and `system_open` decides whether the shell route
+   * exists by asking whether this is there at all. A method that always exists and throws would turn
+   * "this host cannot do it" into "this host tried and failed", and the tool would stop explaining
+   * that the only alternative is a chooser dialog drawn on a screen the run cannot see.
+   */
+  openDeepLink?: (url: string) => Promise<DeepLinkResult>;
+
   async listApps(): Promise<{ packageId: string; label: string }[]> {
     if (!this.ports.listApps) {
       throw new CoreError("E_TOOL_FAILED", "listing installed apps needs the Android native module");
     }
     return this.ports.listApps();
-  }
-
-  async sendIntent(intent: {
-    action: string;
-    data?: string;
-    package?: string;
-    extras?: Record<string, string>;
-  }): Promise<void> {
-    if (!this.ports.sendIntent) {
-      throw new CoreError("E_TOOL_FAILED", "custom intents need the Android native module");
-    }
-    await this.ports.sendIntent(intent);
   }
 
   async getClipboard(): Promise<string> {

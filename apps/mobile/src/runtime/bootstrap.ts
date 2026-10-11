@@ -20,7 +20,7 @@ import {
   uriToPath,
   type ExpoFsLike,
 } from "./services/expo-file-system";
-import { createWebSearchService } from "@mobileclaw/capabilities";
+import { createWebSearchService, deepLinkCommand, interpretDeepLink } from "@mobileclaw/capabilities";
 import { describeStorageAccess, probeAllFilesAccess } from "./services/permissions";
 import { createNativeDriver, listInstalledApps, loadNativeFiles } from "./services/native-files";
 import { openAppByPackageId } from "./services/app-launch";
@@ -44,6 +44,7 @@ import type {
   FileSystemService,
   PrivilegedService,
   ShellResult,
+  ShellRunOptions,
   ShellService,
 } from "@mobileclaw/core";
 
@@ -364,8 +365,12 @@ class NativeBridgeShell {
     return "Shizuku is not running: open the Shizuku app to start the service, then grant MobileClaw permission again";
   }
 
-  async run(command: string, options: { timeoutMs?: number } = {}): Promise<ShellResult> {
-    return this.privileged.run(command, { timeoutMs: options.timeoutMs ?? 60_000 });
+  async run(command: string, options: ShellRunOptions = {}): Promise<ShellResult> {
+    // The whole options object is forwarded, not just `timeoutMs`. `stdin` is the one that matters:
+    // it is the channel that carries a model-supplied value without putting it on a command line,
+    // and narrowing the type here silently made that channel unusable — which is how a value ends
+    // up interpolated again.
+    return this.privileged.run(command, { ...options, timeoutMs: options.timeoutMs ?? 60_000 });
   }
 }
 
@@ -451,6 +456,48 @@ function createSystemPorts(
     // (it is only read alongside a `className`), so launches were not pinned to the package at
     // all and could land in an unrelated app.
     ports.openApp = async (packageId: string) => openAppByPackageId(packageId, IntentLauncher);
+
+    // Deep links go through the shell, not through `openUrl`.
+    //
+    // `openUrl` resolves the URL the way an ordinary app does, so a custom scheme (`orpheus://`,
+    // `weixin://`) makes Android ask the user to pick a handler. During a run our app is behind the
+    // app being operated, so that dialog is drawn on a screen nobody is watching and the run waits
+    // behind it. `am start` from uid 2000 starts the activity directly and never asks — verified on
+    // the target device with `am start -a android.intent.action.VIEW -d "orpheus://"`.
+    //
+    // The URL travels on stdin, never in the command line. It is model-supplied, so composing
+    // `am start -d "$url"` would let a quote or a `;` turn "open this link" into "run this other
+    // thing". `deepLinkCommand()` is a constant, which is why the argument list can be a fixed
+    // string and the untrusted value never appears in a command an operator would see logged.
+    ports.openDeepLink = async (url: string) => {
+      // Built from `extra.privileged` rather than the module-level `shell`: this function is called
+      // with the privileged service as a parameter, and reaching for the boot-time variable would
+      // tie a pure port factory to the order `bootstrap()` happens to run in.
+      if (!extra.privileged) {
+        return {
+          opened: false as const,
+          reason: "failed" as const,
+          detail:
+            "deep links need the privileged shell (Shizuku) and this build has no native module for it; " +
+            "opening through the normal launcher would raise a chooser dialog on a screen the run cannot see",
+        };
+      }
+      const shell = new NativeBridgeShell(extra.privileged);
+      if (!(await shell.available())) {
+        return {
+          opened: false as const,
+          reason: "failed" as const,
+          detail:
+            "deep links need the privileged shell (Shizuku) and it is not available right now; " +
+            "opening through the normal launcher would raise a chooser dialog on a screen the run cannot see",
+        };
+      }
+      const result = await shell.run(deepLinkCommand(), {
+        stdin: `${url}\n`,
+        timeoutMs: 15_000,
+      });
+      return interpretDeepLink(result, url);
+    };
 
     // `system_apps` was declared but never wired, so it always failed with "not supported on
     // this platform" -- which surfaced to the user as a bare 失败 in the tool card, with no
