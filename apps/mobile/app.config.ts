@@ -789,17 +789,34 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.4.0",
+    version: "0.4.1",
     orientation: "portrait",
     scheme: "mobileclaw",
+    /**
+     * The launcher icon, from a photo.
+     *
+     * Two files because Android needs both: `icon` is the flat square that older launchers draw as
+     * given, and `android.adaptiveIcon.foregroundImage` is a 108dp canvas of which only the middle
+     * 66dp is shown — inside a shape the launcher chooses (circle, squircle, rounded square). The
+     * foreground therefore carries transparent margin around the face, sized so the head fills ~80%
+     * of the visible circle; a foreground that fills its canvas gets its top and chin cut off.
+     *
+     * `eng/build-icon.py` produces both from the source photo, with the framing measured rather than
+     * guessed, and renders what the mask will show so the result can be looked at before shipping.
+     */
+    icon: "./assets/icon.png",
     userInterfaceStyle: "dark",
     assetBundlePatterns: ["**/*"],
     android: {
       package: "dev.mobileclaw.app",
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#121822",
+      },
       // Android decides "is this an upgrade" from versionCode, not versionName, and the
       // Expo template defaults it to 1 for every build. Keep it in step with `version`:
       // 0.2.0 ships as code 2.
-      versionCode: 13,
+      versionCode: 14,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
