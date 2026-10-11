@@ -4,6 +4,7 @@ import {
   DUMP_FILE_PATH,
   formatScreenReading,
   interpretDump,
+  looksLikeHierarchy,
   parseScreenDump,
   projectScreen,
 } from "@mobileclaw/capabilities";
@@ -54,8 +55,21 @@ export interface NativeShizukuModule {
     command: string,
     timeoutMs: number,
   ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }>;
-  /** Downscales on the shell side and writes the picture where the app can render it. */
-  screenshot(options: { maxWidth: number; quality: number; destDir?: string }): Promise<ScreenCapture>;
+  /**
+   * Downscales on the shell side and writes the picture where the app can render it.
+   *
+   * **Positional arguments, matching the Kotlin exactly.** The bridge does not pass objects: it
+   * binds each argument by position, and the native method is
+   * `screenshot(maxWidth: Double, quality: Double, destDir: String?, promise: Promise)`. An earlier
+   * version of this declaration — and of the call below it — passed a single options object, which
+   * the bridge read as `maxWidth` and then rejected:
+   *
+   *   TurboModule method "screenshot" called with 1 arguments (expected argument count: 3)
+   *
+   * Because the *type* was wrong in the same way as the call, `tsc` could not catch it, and the
+   * tests mocked the same wrong shape. It only surfaced on a device.
+   */
+  screenshot(maxWidth: number, quality: number, destDir: string | undefined): Promise<ScreenCapture>;
   /**
    * The app-internal directory screenshots are written to.
    *
@@ -77,6 +91,30 @@ export interface NativeShizukuModule {
    * "the display is not held", not fail to load.
    */
   keepScreenOn?(on: boolean): Promise<boolean>;
+  /**
+   * Start the foreground service that keeps this process from being frozen.
+   *
+   * **Must be called while the app is visible.** Android 12+ refuses to start a foreground service
+   * from the background, so calling it when a run begins — by which time the agent has switched to
+   * another app — throws instead of starting. See `runtime/run-service.ts` for how that is arranged,
+   * and `MobileClawForegroundService.kt` for why the service stays up rather than being scoped to a
+   * run.
+   *
+   * `text` is the notification body; it comes from `ui/strings.ts` so the wording lives with the
+   * rest of the interface. Optional like the others: a native module older than this JavaScript
+   * degrades to "no foreground service", which must not take screen automation down with it.
+   */
+  startRunService?(text: string): Promise<boolean>;
+  /** Stop it and drop the notification. Safe when it was never started. */
+  stopRunService?(): Promise<boolean>;
+  /**
+   * Re-post the ongoing notice.
+   *
+   * Called after the user grants the notification permission: `startForeground` runs only when the
+   * service starts, so a permission granted later would otherwise leave a running foreground
+   * service with nothing visible — which is what the user sees as "I cannot tell if it is running".
+   */
+  refreshRunServiceNotice?(text: string): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {
@@ -109,6 +147,21 @@ const SWIPE_DURATION_MS = 300;
 const INPUT_TIMEOUT_MS = 15_000;
 const SIZE_TIMEOUT_MS = 5_000;
 const DEFAULT_SHELL_TIMEOUT_MS = 60_000;
+
+/**
+ * How long to wait before re-reading a dump whose first read came back empty.
+ *
+ * `uiautomator dump` writes its file from another process and can exit before that write is
+ * visible to a following `cat`. Long enough for a flushed write to appear, short enough not to
+ * matter when the first read was fine.
+ */
+const DUMP_FLUSH_WAIT_MS = 150;
+
+/** A cancellable-free sleep; the dump retry has no signal to honour. */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 
 /**
  * Readings are dumped to a file and then read back, which puts a hard ceiling on the
@@ -203,16 +256,28 @@ async function readScreenViaDump(
       };
     }
 
-    const contents = await sh(native, DUMP_COMMANDS.read, timeoutMs);
+    // Read it back, with one retry.
+    //
+    // `uiautomator dump` writes the hierarchy to a file and can exit before the write is visible
+    // to a following `cat`, so an immediate read can come back empty. One short wait and a second
+    // read costs 150 ms and removes that. The file is removed only after both attempts.
+    const firstRead = await sh(native, DUMP_COMMANDS.read, timeoutMs);
+    let xmlText = firstRead.stdout;
+    if (!looksLikeHierarchy(xmlText)) {
+      await sleep(DUMP_FLUSH_WAIT_MS);
+      xmlText = (await sh(native, DUMP_COMMANDS.read, timeoutMs)).stdout;
+    }
     await discardDump(native);
 
-    const read = interpretDump(contents);
-    if (read.xml === undefined) {
-      lastError = read.error ?? lastError;
+    // The command already told us it wrote the hierarchy, so the file's *contents* are what matter
+    // now — not whether they satisfy the marker search that judges a command's own output. A file
+    // that is genuinely empty is still a failure, and is reported as one.
+    if (!looksLikeHierarchy(xmlText)) {
+      lastError = xmlText.trim() === "" ? "the dump file was empty" : `the dump file held no hierarchy: ${xmlText.slice(0, 200)}`;
       continue;
     }
 
-    const dump = parseScreenDump(read.xml);
+    const dump = parseScreenDump(xmlText);
     // The real display size is measured, not inferred from the dump. The dump's own
     // idea of the screen comes from a window rectangle, and a dump that starts at a
     // dialog or a notification shade is smaller than the display — which would make
@@ -521,11 +586,14 @@ export function createAutomationService(
     kind: "shizuku",
     status: () => native.status(),
     captureScreen: (options = {}) =>
-      native.screenshot({
-        maxWidth: options.maxWidth ?? SCREEN_DEFAULTS.maxWidth,
-        quality: options.quality ?? SCREEN_DEFAULTS.quality,
-        ...(options.destDir ? { destDir: options.destDir } : {}),
-      }),
+      // Three positional arguments, in the order the Kotlin declares them. See the note on
+      // `NativeShizukuModule.screenshot`: passing an object here is what produced
+      // `expected argument count: 3` on a device.
+      native.screenshot(
+        options.maxWidth ?? SCREEN_DEFAULTS.maxWidth,
+        options.quality ?? SCREEN_DEFAULTS.quality,
+        options.destDir,
+      ),
 
     async tap(fx, fy) {
       // The coordinate arrives as a fraction because nobody upstream knows the display

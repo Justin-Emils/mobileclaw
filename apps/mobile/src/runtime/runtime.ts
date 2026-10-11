@@ -1,6 +1,7 @@
 import {
   Agent,
   type AgentEvent,
+  type AgentLog,
   type AgentRunResult,
   Context,
   DEFAULT_SYSTEM_PROMPT,
@@ -31,6 +32,7 @@ import {
   type ScreenProbeRecord,
   type ScreenProbeReport,
 } from "@mobileclaw/capabilities";
+import { strings } from "@/ui/strings";
 import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
@@ -75,6 +77,45 @@ export interface RuntimeDeps {
    * being confused with "search found nothing".
    */
   search?: WebSearchService;
+  /**
+   * Diagnostic sink for the agent.
+   *
+   * Optional, and absent in tests: the run must not depend on being logged. It exists because a
+   * release build bridges no `console` output to logcat, so a failure on a real device left
+   * nothing to read afterwards.
+   */
+  log?: AgentLog;
+  /**
+   * The durable side of `log`.
+   *
+   * Separate from `log` because the two answer different questions: `log` writes, and this reads
+   * back what survived the last launch. Keeping them apart is what lets the writer stay synchronous
+   * (on the run's path) while reading stays async (on a screen nobody is timing).
+   */
+  logSink?: { read(): Promise<string>; clear(): Promise<void> };
+  /**
+   * Where the log actually is and whether writing it worked.
+   *
+   * A snapshot taken right after the first write. It is here because an empty log and a log that
+   * could not be created look identical on screen, and the difference is the whole diagnosis.
+   */
+  logStatus?: { path: string; exists: boolean; lines: number; bytes?: number; lastError: string };
+  /**
+   * Whether the foreground service is up, and whether the user could see its notification.
+   *
+   * Injected because both are platform facts owned by the bootstrap, and because the settings
+   * screen has to be able to say "it is running" or "it is not" without guessing.
+   */
+  backgroundServiceRunning?: () => boolean;
+  notificationsGranted?: () => Promise<boolean | undefined>;
+  requestNotifications?: () => Promise<boolean>;
+  /**
+   * Put the foreground service's notice back, after permission arrives.
+   *
+   * Separate from `requestNotifications` because on iOS there is no such notice, and because this
+   * is the native module's job rather than the notification library's.
+   */
+  refreshRunServiceNotice?: (text: string) => Promise<unknown>;
   /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
@@ -207,6 +248,87 @@ export class MobileClawRuntime {
    */
   screenshots(): ScreenshotRetention | undefined {
     return this.deps.screenshots;
+  }
+
+  /**
+   * The diagnostic record of this run and the previous one.
+   *
+   * Exposed to the UI because the log's whole purpose is to leave the device: a run that failed on
+   * someone's phone is diagnosed from what they can copy out of it, and there is no `adb` on the
+   * phone. Returns an empty string when no log is configured (tests), and never throws.
+   */
+  async runLog(): Promise<string> {
+    try {
+      return (await this.deps.logSink?.read()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Clear the record, for when the user wants a clean capture of the next run. */
+  async clearRunLog(): Promise<void> {
+    try {
+      await this.deps.logSink?.clear();
+    } catch {
+      // Nothing to clear and "cleared" are the same outcome here.
+    }
+  }
+
+  /**
+   * Whether this app is currently protected from being frozen, and whether the user can see that.
+   *
+   * Two separate facts, and both matter to the question "is it running in the background?":
+   *
+   *  - the **foreground service** is what keeps the process alive while the agent operates another
+   *    app, and
+   *  - the **notification** is how the user can tell, which is not cosmetic: the platform requires
+   *    a foreground service to be visible, and on Android 13+ `POST_NOTIFICATIONS` is a runtime
+   *    permission the app never asks for on its own.
+   *
+   * Reported together because either one being false is invisible from inside the app, and the
+   * combination is what the user actually needs to know.
+   */
+  async backgroundStatus(): Promise<{
+    serviceRunning: boolean;
+    notificationsGranted: boolean | undefined;
+  }> {
+    return {
+      serviceRunning: this.deps.backgroundServiceRunning?.() ?? false,
+      notificationsGranted: await this.deps.notificationsGranted?.(),
+    };
+  }
+
+  /** Ask for the notification permission. No-op where the platform has none. */
+  async requestNotificationPermission(): Promise<boolean> {
+    const granted = (await this.deps.requestNotifications?.()) ?? false;
+    // Re-post the notice the moment permission exists. `startForeground` ran once, when the
+    // service started -- which on Android 13+ is usually *before* the permission is granted, so
+    // without this the service keeps running with nothing visible and nothing retries.
+    if (granted) {
+      try {
+        await this.deps.refreshRunServiceNotice?.(strings.run.serviceText);
+      } catch {
+        // A notice that cannot be shown must not fail the permission flow.
+      }
+    }
+    return granted;
+  }
+
+  /**
+   * The log's current location and health, read live rather than from the bootstrap snapshot, so a
+   * write that started failing later is visible too.
+   */
+  async runLogStatus(): Promise<
+    { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } | undefined
+  > {
+    const sink = this.deps.logSink as
+      | { status?: () => { path: string; exists: boolean; lines: number; bytes?: number; lastError: string } }
+      | undefined;
+    try {
+      return sink?.status?.() ?? this.deps.logStatus;
+    } catch {
+      return this.deps.logStatus;
+    }
   }
 
   /**
@@ -750,6 +872,8 @@ export class MobileClawRuntime {
       // than folded into `environment` (which is evaluated before any conversation
       // exists). Without this the agent never learns where to put what it produces.
       describeWorkspace,
+      // Absent in tests, where the point is the behaviour rather than the record of it.
+      ...(this.deps.log ? { log: this.deps.log } : {}),
     });
   }
 

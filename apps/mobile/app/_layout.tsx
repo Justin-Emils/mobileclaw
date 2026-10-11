@@ -26,6 +26,7 @@ export default function RootLayout() {
           <Stack.Screen name="conversations" options={{ title: strings.conversations.title }} />
           <Stack.Screen name="screen-probe" options={{ title: strings.probe.title }} />
           <Stack.Screen name="screenshots" options={{ title: strings.shots.title }} />
+          <Stack.Screen name="logs" options={{ title: strings.logs.title }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>

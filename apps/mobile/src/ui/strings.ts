@@ -353,12 +353,71 @@ export const strings = {
     timeUnknown: "时间未知",
   },
 
+  /** 诊断日志页。见 `runtime/services/event-log.ts` 与 `app/logs.tsx`。 */
+  logs: {
+    title: "诊断日志",
+    hint:
+      "这是应用自己记的运行日志，用于排查「在真机上失败了但看不到原因」的情况 —— 发布版不会把日志输出到 adb，所以只能从这里取。分享出去即可。",
+    refresh: "刷新",
+    copy: "复制全部",
+    copied: "已复制 ✓",
+    share: "分享",
+    clear: "清空",
+    empty: "还没有记录。运行一次任务后回来看。",
+    /**
+     * 「应用是否在后台运行」的答案。
+     *
+     * 两件独立的事，缺一不可：前台服务决定**进程会不会被冻结**，通知决定**你能不能看见**。
+     * Android 13+ 的通知是运行时权限，而应用自己不会弹这个请求 —— 所以权限没给时，
+     * 服务在跑、通知却不存在，用户看到的就是"不知道它有没有在运行"。
+     */
+    background: (serviceRunning: boolean, notificationsGranted: boolean | undefined) =>
+      [
+        serviceRunning
+          ? "后台保活：已开启（进程不会被系统冻结）"
+          : "后台保活：未开启（切到别的应用后任务可能被系统冻结而停住）",
+        notificationsGranted === true
+          ? "通知：已授权（下拉通知栏能看到「MobileClaw 正在运行」）"
+          : notificationsGranted === false
+            ? "通知：未授权 —— 所以你看不到「正在运行」那条通知，但服务仍在后台工作"
+            : "通知：此平台不适用",
+      ].join("\n"),
+    grantNotifications: "授予通知权限",
+    /**
+     * 日志文件的位置与健康状况。
+     *
+     * 存在的理由：「没有记录」对**空日志**和**写不进去的日志**是同一句话，而这两种情况的
+     * 诊断价值完全相反。这一行把它们分开。
+     */
+    status: (path: string, exists: boolean, lines: number, bytes: number | undefined, lastError: string) =>
+      [
+        `文件：${path}`,
+        `存在：${exists ? "是" : "否"}`,
+        `本次已写：${lines} 行${bytes === undefined ? "" : `，${bytes} 字节`}`,
+        lastError === "" ? "未出现错误" : `⚠ 错误：${lastError}`,
+      ].join("　"),
+    failed: (reason: string) => `读取日志失败：${reason}`,
+  },
+
   risk: {
     read: "读取",
     write: "写入",
     execute: "执行",
     network: "联网",
     system: "系统",
+  },
+
+  /** 前台服务的常驻通知。见 `runtime/run-service.ts`。 */
+  run: {
+    /**
+     * 通知正文。
+     *
+     * 说清"为什么有一条一直不走的通知"，因为这条通知**不会**在任务结束后消失 —— 它必须一直在，
+     * 否则 Android 会在应用切到后台时冻结进程，而"操作别的应用"恰恰要求本应用待在后台。
+     * 通知标题与渠道名由 Kotlin 提供（见 `MobileClawForegroundService.kt`），因为它们要在任何
+     * JavaScript 运行之前就存在。
+     */
+    serviceText: "正在运行，以便在你操作其它应用时不被系统冻结",
   },
 } as const;
 

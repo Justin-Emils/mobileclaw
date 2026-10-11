@@ -17,6 +17,7 @@ import { MemoryShellService } from "./services/memory-shell";
 import {
   createExpoFileSystem,
   defaultAppRoots,
+  pathToUri,
   uriToPath,
   type ExpoFsLike,
 } from "./services/expo-file-system";
@@ -39,6 +40,9 @@ import {
   DEFAULT_RETENTION_DAYS,
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
+import { startRunService } from "./run-service";
+import { createEventLog } from "./services/event-log";
+import { createFileLogSink } from "./log-sink";
 import type {
   AutomationService,
   FileSystemService,
@@ -190,6 +194,54 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // question backwards — see the note on `onRunForegroundLoss` below.
   const keepAwake = createRunKeepAwake(nativeShizuku);
 
+  // --- keeping the process alive -------------------------------------------
+  //
+  // A run is a JavaScript loop in this process, and operating another app puts this process in the
+  // background, where Android freezes it — stopping the loop silently between two tool calls. This
+  // is the fix for "after opening the app it just hangs".
+  //
+  // Started here, at bootstrap, **not when a run begins**: Android 12+ refuses to start a foreground
+  // service from the background, so a run-time start would be refused at exactly the moment it is
+  // needed. The service is started while the app is visible and then left up; see
+  // `runtime/run-service.ts` for the full reasoning, and `MobileClawForegroundService.kt` for the
+  // Kotlin. Failures are logged and ignored — a foreground service that will not start degrades the
+  // run and must not prevent it.
+  // --- diagnostics ---------------------------------------------------------
+  //
+  // The on-device run record. Created before anything that might fail, so a failure during
+  // bootstrap is itself recorded rather than being the one thing missing from the log.
+  //
+  // It is a file in the app's private directory because the interesting run is often the one
+  // *before* the current launch: an in-memory buffer would be gone by the time anyone reads it.
+  const logSink = createFileLogSink({
+    fs: expoFsModule(),
+    // Built from the directory's *URI* rather than by joining path strings: `Paths.document.uri`
+    // ends in a slash, and the naive `${path}/name` produced `files//mobileclaw-run.log`, which the
+    // file system rejected. `Paths.document.uri` is already a `file://` URI, which is also what
+    // `File` requires — see the note on `FileLogSinkOptions.path`.
+    path: () => uriToPath(`${Paths.document.uri.replace(/\/+$/, "")}/mobileclaw-run.log`),
+    toUri: pathToUri,
+  });
+  const eventLog = createEventLog({ sink: logSink });
+  // The first write is the one that proves the path is writable, so its outcome is captured
+  // immediately. Without this the screen can only say "nothing recorded", which is the same
+  // message for an empty log and for one that failed to be created.
+  const logStatus = logSink.status();
+  eventLog.info("app", "bootstrap start", { platform: Platform.OS, logPath: logStatus.path });
+
+  const runService = startRunService({
+    native: nativeShizuku,
+    appState: AppState,
+    onError: (error) => {
+      console.log(
+        `[mobileclaw] foreground service: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      eventLog.error("service", "foreground service did not start", {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
+
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend(privileged);
 
@@ -242,6 +294,43 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     http,
     system,
     search,
+    // The run record. A release build bridges no `console` output to logcat, so without this a
+    // failure on a real device leaves nothing to read afterwards — which is exactly what happened
+    // to a run that ended with an empty assistant message and no visible reason.
+    log: eventLog,
+    logSink,
+    logStatus,
+    // Read live rather than captured: the service can be refused at launch and the user can grant
+    // notifications in system settings at any moment, so a cached answer would be a stale lie on
+    // exactly the screen that exists to tell the truth about it.
+    backgroundServiceRunning: () => runService.started(),
+    notificationsGranted: async () => {
+      if (Platform.OS !== "android") return undefined;
+      try {
+        const permissions = await Notifications.getPermissionsAsync();
+        return permissions.granted === true;
+      } catch {
+        return undefined;
+      }
+    },
+    requestNotifications: async () => {
+      try {
+        const permissions = await Notifications.requestPermissionsAsync();
+        return permissions.granted === true;
+      } catch {
+        return false;
+      }
+    },
+    // Only meaningful once the service is up and the module supports it; both are checked here
+    // rather than at the call site so the UI's permission button stays a single call.
+    //
+    // The notice text is left to the runtime, which owns `strings`: this file deliberately does not
+    // reach into the UI layer, and importing the whole string table for one line would be the first
+    // such dependency.
+    refreshRunServiceNotice: async (text: string) => {
+      if (!runService.started()) return false;
+      return (await nativeShizuku?.refreshRunServiceNotice?.(text)) ?? false;
+    },
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),

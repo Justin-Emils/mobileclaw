@@ -422,6 +422,15 @@ export default function SettingsScreen() {
             <Text style={styles.buttonGhostText}>{strings.shots.title}</Text>
           </Pressable>
         </Link>
+        {/* The diagnostic log is a file in the app's private directory, which nothing else on the
+            phone can read, and a release build writes nothing to logcat. This entry is therefore the
+            only way the log can leave the device — without it the log is exactly as invisible as the
+            failure it was added to explain. */}
+        <Link href="/logs" asChild>
+          <Pressable style={styles.buttonGhost}>
+            <Text style={styles.buttonGhostText}>{strings.logs.title}</Text>
+          </Pressable>
+        </Link>
         <Text style={styles.hint}>
           {strings.settings.capabilitySummary(
             tools.length,

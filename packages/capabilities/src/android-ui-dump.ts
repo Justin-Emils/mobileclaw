@@ -62,11 +62,67 @@ const DUMP_ERROR_MARKERS = [
 ] as const;
 
 export interface DumpOutcome {
-  /** The XML, present only when the command both ran and produced a usable dump. */
+  /** The XML, present only when the command printed the hierarchy itself. */
   xml?: string;
+  /**
+   * The command reported writing the hierarchy to the dump file.
+   *
+   * This is the shape a real device produces: `uiautomator dump` prints
+   * `UI hierarchy dumped to: <path>` and nothing else, so the caller must read the file next. It is
+   * distinct from `xml` because the two are judged differently — this one says the *command*
+   * succeeded, and the file's contents still have to be checked.
+   */
+  written?: boolean;
   /** What went wrong, phrased for the model rather than for a log. */
   error?: string;
 }
+
+/** How much of the raw output to keep when explaining a failure. */
+const EXCERPT_LIMIT = 200;
+
+/**
+ * Whether a string is a window hierarchy rather than a command's chatter.
+ *
+ * Used on the **contents of the dump file**, which is a different question from what
+ * `interpretDump` answers about a command's output. Keeping the two apart is what stops a
+ * successful dump from being judged by the wrong text — see `DUMP_SUCCESS_MARKERS`.
+ */
+export function looksLikeHierarchy(text: string): boolean {
+  const lowered = text.toLowerCase();
+  return lowered.includes("<hierarchy") || lowered.includes("<node");
+}
+
+/** One line of combined output, for an error message that has to stay readable. */
+function excerpt(result: { stdout: string; stderr: string }): string {
+  const combined = `${result.stdout}\n${result.stderr}`
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .join(" / ");
+  if (combined === "") return "(命令没有任何输出)";
+  return combined.length > EXCERPT_LIMIT ? `${combined.slice(0, EXCERPT_LIMIT)}…` : combined;
+}
+
+/**
+ * Output the dump command prints when it *succeeded*.
+ *
+ * This is the whole reason the screen could not be read for several builds:
+ *
+ *   `uiautomator dump` prints **`UI hierarchy dumped to: <path>`** and puts the XML in the file.
+ *   It never prints the hierarchy itself.
+ *
+ * The success test below originally looked only for `<hierarchy` / `<node`, which the dump
+ * command's own output never contains — so **every successful dump was judged a failure**, the
+ * `cat` that follows was never reached, and `screen_read` reported "no window hierarchy" on a
+ * device where the dump had in fact worked. `screen_current` kept working because it runs a
+ * different command with no temp file, which is what made this look like a broken device rather
+ * than a broken check.
+ *
+ * Matched loosely and case-insensitively: some builds say "dumped to", others "Dumped to", and at
+ * least one says "hierarchy dumped to". The XML test is still tried first, so a build that ever
+ * does print the hierarchy inline keeps working.
+ */
+const DUMP_SUCCESS_MARKERS = ["hierarchy dumped to", "dumped to"] as const;
 
 /**
  * Decide what a finished dump command meant.
@@ -75,6 +131,11 @@ export interface DumpOutcome {
  * the boundary where "the screen is empty" and "the screen could not be read" get
  * told apart, and getting it wrong is the failure the storage tools already had to be
  * fixed for — reporting a permission problem as a finding about the user's data.
+ *
+ * Every failure branch carries the command's own output. The first version returned a bare
+ * "uiautomator produced no window hierarchy", which on a real device was indistinguishable between
+ * an empty file, a permission refusal, a ROM that renamed the tool, and a read that was merely
+ * early — all of which need different fixes. That excerpt is what identified the real cause.
  */
 export function interpretDump(result: {
   exitCode: number;
@@ -91,18 +152,33 @@ export function interpretDump(result: {
 
   const combined = `${result.stdout}\n${result.stderr}`.toLowerCase();
   const marker = DUMP_ERROR_MARKERS.find((candidate) => combined.includes(candidate));
-  // The XML is checked before the marker list, so a node whose *text* happens to
-  // contain the word "error" is not mistaken for a failed dump.
-  if (!combined.includes("<hierarchy") && !combined.includes("<node")) {
-    if (marker !== undefined) return { error: `uiautomator reported a failure (${marker.trim()})` };
+  const hasXml = combined.includes("<hierarchy") || combined.includes("<node");
+  const reportsWritten = DUMP_SUCCESS_MARKERS.some((candidate) => combined.includes(candidate));
+
+  // The XML case covers a build that prints the hierarchy inline; `reportsWritten` covers the
+  // documented behaviour of writing it to a file. Neither is an error, whatever else is in the
+  // output — which is why both are checked before the marker list: a node whose *text* says
+  // "error" is user content, and a successful dump must not be turned into a failure by it.
+  if (!hasXml && !reportsWritten) {
+    if (marker !== undefined) {
+      return { error: `uiautomator reported a failure (${marker.trim()})：${excerpt(result)}` };
+    }
     if (result.exitCode !== 0) {
       return {
         error: `uiautomator exited ${result.exitCode}: ${result.stderr.trim() || "no stderr"}`,
       };
     }
-    return { error: "uiautomator produced no window hierarchy" };
+    return {
+      error: `uiautomator produced no window hierarchy（退出码 0，输出：${excerpt(result)}）`,
+    };
   }
 
-  if (result.stdout.trim() === "") return { error: "the dump file was empty" };
-  return { xml: result.stdout };
+  if (hasXml) {
+    if (result.stdout.trim() === "") return { error: "the dump file was empty" };
+    return { xml: result.stdout };
+  }
+
+  // The command reported writing the hierarchy to a file. The caller reads that file next and
+  // judges *its* contents; this outcome only says the command did its part.
+  return { written: true };
 }
