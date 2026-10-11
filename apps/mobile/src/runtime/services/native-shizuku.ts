@@ -59,6 +59,16 @@ export interface NativeShizukuModule {
    * by the model and interpolated into `sh -c command` is an injection — a quote or a `;` turns
    * "open this link" into "run this other thing".
    *
+   * **`stdin` is required, and must be `""` when there is none.** Marking it optional here was a
+   * mistake and it broke every command on a device:
+   *
+   *   TurboModule method "runPrivileged" called with 2 arguments (expected argument count: 3)
+   *
+   * The bridge checks the *argument count*, not the TypeScript signature. A `?` is a compile-time
+   * convenience that compiles a two-argument call perfectly happily and then fails at runtime, so
+   * `screen_current`, `screen_read` and every other shell command died the moment a third parameter
+   * appeared. Declaring it required makes the compiler point at every call site instead.
+   *
    * **Positional, like `screenshot`.** The bridge binds arguments by position; an options object here
    * would be read as `command` and then fail on the argument count, which is exactly what happened to
    * `screenshot` and cost a device round trip to find.
@@ -66,7 +76,7 @@ export interface NativeShizukuModule {
   runPrivileged(
     command: string,
     timeoutMs: number,
-    stdin?: string,
+    stdin: string,
   ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }>;
   /**
    * Downscales on the shell side and writes the picture where the app can render it.
@@ -250,7 +260,7 @@ async function readScreenViaDump(
 
   let lastError = "uiautomator produced no window hierarchy";
   for (const command of [DUMP_COMMANDS.dump, DUMP_COMMANDS.dumpPlain]) {
-    const dumped = await native.runPrivileged(command, timeoutMs);
+    const dumped = await native.runPrivileged(command, timeoutMs, "");
     const outcome = interpretDump(dumped);
     if (outcome.error !== undefined) {
       lastError = outcome.error;
@@ -403,7 +413,7 @@ async function sh(
   command: string,
   timeoutMs: number,
 ): Promise<{ stdout: string; exitCode: number; stderr: string }> {
-  const result = await native.runPrivileged(command, timeoutMs);
+  const result = await native.runPrivileged(command, timeoutMs, "");
   return { stdout: result.stdout, exitCode: result.exitCode, stderr: result.stderr };
 }
 
@@ -676,10 +686,13 @@ export function createPrivilegedService(native: NativeShizukuModule): Privileged
       // options object and explained why that mattered — so a value the caller had deliberately kept
       // off the command line arrived as nothing, and the command read EOF. That comment warns about
       // narrowing the type exactly here; this is where it happened.
+      // `options.stdin ?? ""` rather than `options.stdin`: the native method always takes three
+      // arguments and the bridge checks the count, so the slot must be filled. `undefined` would
+      // occupy it and serialise as nothing; an explicit empty string says the same thing on purpose.
       const result = await native.runPrivileged(
         command,
         options.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
-        options.stdin,
+        options.stdin ?? "",
       );
       return {
         command,

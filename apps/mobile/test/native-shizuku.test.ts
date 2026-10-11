@@ -594,7 +594,7 @@ describe("createPrivilegedService", () => {
     const h = harness();
     await createPrivilegedService(h.native).run("id", { timeoutMs: 5000 });
 
-    expect(h.calls.runs).toEqual([{ command: "id", timeoutMs: 5000 }]);
+    expect(h.calls.runs).toEqual([{ command: "id", timeoutMs: 5000, stdin: "" }]);
   });
 
   it("uses a positive default timeout when the caller gives none", async () => {
@@ -641,12 +641,27 @@ describe("createPrivilegedService", () => {
     expect(calls.runs.at(-1)?.stdin).toBe("orpheus://song/1\n");
   });
 
-  it("omits stdin rather than sending an empty string when there is none", async () => {
-    // A command that reads stdin must see the difference between "no input" and "an empty line":
-    // `read` consumes a newline and succeeds on the latter. Keeping the parameter absent leaves the
-    // native side to close the stream, which is EOF.
+  it("always fills the stdin argument, because the bridge counts arguments", async () => {
+    // The defect this pins down, and it broke every command on a device:
+    //
+    //   TurboModule method "runPrivileged" called with 2 arguments (expected argument count: 3)
+    //
+    // Adding an optional third parameter to the Kotlin method made the bridge demand three
+    // arguments, while the TypeScript `stdin?: string` compiled two-argument calls perfectly happily.
+    // So `screen_current`, `screen_read` and every other shell command failed -- anything that used
+    // the privileged shell, which is most of them.
+    //
+    // The rule: the count is fixed at the boundary, so every call site passes the slot. "No input"
+    // is the empty string, which the child reads as EOF just as it would from a closed stream. The
+    // meaningful distinction is per-call (`options.stdin` present or not), not per-arity.
     const { native, calls } = harness();
     await createPrivilegedService(native).run("id");
-    expect(calls.runs.at(-1)).not.toHaveProperty("stdin");
+    expect(calls.runs.at(-1)?.stdin).toBe("");
+  });
+
+  it("passes a supplied stdin through unchanged", async () => {
+    const { native, calls } = harness();
+    await createPrivilegedService(native).run("read -r url", { stdin: "weixin://\n" });
+    expect(calls.runs.at(-1)?.stdin).toBe("weixin://\n");
   });
 });
