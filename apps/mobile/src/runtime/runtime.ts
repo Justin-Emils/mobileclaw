@@ -1,6 +1,7 @@
 import {
   Agent,
   type AgentEvent,
+  type AgentLog,
   type AgentRunResult,
   Context,
   DEFAULT_SYSTEM_PROMPT,
@@ -75,6 +76,22 @@ export interface RuntimeDeps {
    * being confused with "search found nothing".
    */
   search?: WebSearchService;
+  /**
+   * Diagnostic sink for the agent.
+   *
+   * Optional, and absent in tests: the run must not depend on being logged. It exists because a
+   * release build bridges no `console` output to logcat, so a failure on a real device left
+   * nothing to read afterwards.
+   */
+  log?: AgentLog;
+  /**
+   * The durable side of `log`.
+   *
+   * Separate from `log` because the two answer different questions: `log` writes, and this reads
+   * back what survived the last launch. Keeping them apart is what lets the writer stay synchronous
+   * (on the run's path) while reading stays async (on a screen nobody is timing).
+   */
+  logSink?: { read(): Promise<string>; clear(): Promise<void> };
   /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
@@ -207,6 +224,30 @@ export class MobileClawRuntime {
    */
   screenshots(): ScreenshotRetention | undefined {
     return this.deps.screenshots;
+  }
+
+  /**
+   * The diagnostic record of this run and the previous one.
+   *
+   * Exposed to the UI because the log's whole purpose is to leave the device: a run that failed on
+   * someone's phone is diagnosed from what they can copy out of it, and there is no `adb` on the
+   * phone. Returns an empty string when no log is configured (tests), and never throws.
+   */
+  async runLog(): Promise<string> {
+    try {
+      return (await this.deps.logSink?.read()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /** Clear the record, for when the user wants a clean capture of the next run. */
+  async clearRunLog(): Promise<void> {
+    try {
+      await this.deps.logSink?.clear();
+    } catch {
+      // Nothing to clear and "cleared" are the same outcome here.
+    }
   }
 
   /**
@@ -750,6 +791,8 @@ export class MobileClawRuntime {
       // than folded into `environment` (which is evaluated before any conversation
       // exists). Without this the agent never learns where to put what it produces.
       describeWorkspace,
+      // Absent in tests, where the point is the behaviour rather than the record of it.
+      ...(this.deps.log ? { log: this.deps.log } : {}),
     });
   }
 

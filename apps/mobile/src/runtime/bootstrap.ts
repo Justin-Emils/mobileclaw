@@ -40,6 +40,8 @@ import {
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
 import { startRunService } from "./run-service";
+import { createEventLog } from "./services/event-log";
+import { createFileLogSink } from "./log-sink";
 import type {
   AutomationService,
   FileSystemService,
@@ -202,13 +204,31 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // `runtime/run-service.ts` for the full reasoning, and `MobileClawForegroundService.kt` for the
   // Kotlin. Failures are logged and ignored — a foreground service that will not start degrades the
   // run and must not prevent it.
+  // --- diagnostics ---------------------------------------------------------
+  //
+  // The on-device run record. Created before anything that might fail, so a failure during
+  // bootstrap is itself recorded rather than being the one thing missing from the log.
+  //
+  // It is a file in the app's private directory because the interesting run is often the one
+  // *before* the current launch: an in-memory buffer would be gone by the time anyone reads it.
+  const logSink = createFileLogSink({
+    fs: expoFsModule(),
+    path: () => `${uriToPath(Paths.document.uri)}/mobileclaw-run.log`,
+  });
+  const eventLog = createEventLog({ sink: logSink });
+  eventLog.info("app", "bootstrap start", { platform: Platform.OS });
+
   const runService = startRunService({
     native: nativeShizuku,
     appState: AppState,
-    onError: (error) =>
+    onError: (error) => {
       console.log(
         `[mobileclaw] foreground service: ${error instanceof Error ? error.message : String(error)}`,
-      ),
+      );
+      eventLog.error("service", "foreground service did not start", {
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    },
   });
 
   // --- shell backends ------------------------------------------------------
@@ -263,6 +283,11 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     http,
     system,
     search,
+    // The run record. A release build bridges no `console` output to logcat, so without this a
+    // failure on a real device leaves nothing to read afterwards — which is exactly what happened
+    // to a run that ended with an empty assistant message and no visible reason.
+    log: eventLog,
+    logSink,
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),

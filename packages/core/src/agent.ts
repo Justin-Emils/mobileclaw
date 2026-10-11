@@ -32,6 +32,16 @@ export interface AgentOptions {
   /** Extra context appended to the system prompt (device facts, roots, ...). */
   environment?: () => string | Promise<string>;
   /**
+   * Diagnostic sink for the run.
+   *
+   * Optional, and absent in the Node tests, because the run must not depend on it. What it exists
+   * for is the failure that leaves no trace: the provider stream ending with neither text nor tool
+   * calls, which the loop turns into an empty assistant message and `stopReason: "completed"`.
+   * Without a record of the stream and its finish reason, that is indistinguishable from the model
+   * having nothing to say.
+   */
+  log?: AgentLog;
+  /**
    * Render the per-conversation workspace line for the system prompt.
    *
    * A callback so the app owns the wording and the storage layout; core only knows
@@ -67,6 +77,23 @@ export type AgentEvent =
   | { type: "done"; text: string; steps: number; stopReason: StopReason };
 
 export type StopReason = "completed" | "step_limit" | "cancelled" | "error";
+
+/**
+ * A diagnostic sink the agent writes to.
+ *
+ * Deliberately not `console`: on a release Android build React Native does not bridge the console
+ * to logcat, so a `console.log` here is invisible on the only device where these runs happen. The
+ * app passes a file-backed implementation (see `apps/mobile/src/runtime/services/event-log.ts`).
+ *
+ * Every method must be safe to call from inside the run loop and **must not throw** — this is a
+ * diagnostic, and a diagnostic that can fail a run has become a source of failures.
+ */
+export interface AgentLog {
+  debug(scope: string, message: string, fields?: Record<string, string | number | boolean | null | undefined>): void;
+  info(scope: string, message: string, fields?: Record<string, string | number | boolean | null | undefined>): void;
+  warn(scope: string, message: string, fields?: Record<string, string | number | boolean | null | undefined>): void;
+  error(scope: string, message: string, fields?: Record<string, string | number | boolean | null | undefined>): void;
+}
 
 export interface AgentRunResult {
   conversationId: string;
@@ -144,6 +171,16 @@ export class Agent {
         (await this.store.create({ id: input.conversationId }))
       : await this.store.create({ title: titleFrom(input.input) });
 
+    // The run boundary. Everything between these two entries is attributable to one request, which
+    // is what makes a log readable when several runs are interleaved in the file.
+    const startedAt = Date.now();
+    this.options.log?.info("run", "start", {
+      conversation: conversation.id,
+      chars: input.input.length,
+      maxSteps,
+      priorMessages: conversation.messages.length,
+    });
+
     // Approvals are per conversation: restore the ones this conversation already
     // earned. Without this, reopening a conversation would ask again for a tool the
     // user had already permanently allowed in it.
@@ -220,8 +257,19 @@ export class Agent {
         const calls = new Map<string, { name: string; args: string; order: number }>();
         let finishReason: string | undefined;
         let order = 0;
+        let streamEvents = 0;
+
+        // Recorded before the stream, so a request that never returns is distinguishable from one
+        // that was never made.
+        this.options.log?.info("provider", "stream request", {
+          model: request.model,
+          messages: request.messages.length,
+          tools: request.tools?.length ?? 0,
+          step,
+        });
 
         for await (const event of this.options.provider.stream(request)) {
+          streamEvents += 1;
           switch (event.type) {
             case "text":
               assistantText += event.delta;
@@ -256,6 +304,29 @@ export class Agent {
           content: assistantText,
           at: Date.now(),
         };
+
+        // The line that makes a silent failure legible.
+        //
+        // A provider stream that ends with no text and no tool calls is turned by the loop into an
+        // empty assistant message and `stopReason: "completed"` -- the run looks like it finished
+        // normally and the screen shows nothing. This entry is what separates "the model had
+        // nothing to say" from "the stream ended early", from "the tools were requested but the
+        // deltas never arrived".
+        const producedNothing = assistantText === "" && calls.size === 0;
+        const outcome = {
+          finishReason: finishReason ?? "(none)",
+          events: streamEvents,
+          textLen: assistantText.length,
+          reasoningLen: assistantReasoning.length,
+          toolCalls: calls.size,
+          step,
+        };
+        if (producedNothing) {
+          this.options.log?.warn("provider", "stream produced no text and no tool calls", outcome);
+        } else {
+          this.options.log?.info("provider", "stream done", outcome);
+        }
+
         if (calls.size > 0) {
           assistantMessage.toolCalls = [...calls.entries()]
             .sort((a, b) => a[1].order - b[1].order)
@@ -355,6 +426,12 @@ export class Agent {
       });
       await persist();
       emit({ type: "done", text: finalText, steps, stopReason: "step_limit" });
+      this.options.log?.warn("run", "step limit reached", {
+        steps,
+        maxSteps,
+        toolCalls: toolCallCount,
+        ms: Date.now() - startedAt,
+      });
       return {
         conversationId: conversation.id,
         text: finalText,
@@ -367,6 +444,15 @@ export class Agent {
       const coreError = toCoreError(error, "E_PROVIDER");
       const stopReason: StopReason =
         coreError.code === "E_CANCELLED" ? "cancelled" : "error";
+      // The full error, not just its message: a provider failure that arrives as a bare
+      // "fetch failed" is not diagnosable, and `code`/`details` are where the useful part lives.
+      this.options.log?.error("run", "failed", {
+        code: coreError.code,
+        message: coreError.message,
+        steps,
+        ms: Date.now() - startedAt,
+        detail: coreError.details === undefined ? undefined : JSON.stringify(coreError.details).slice(0, 500),
+      });
       conversation.entries.push({
         kind: "notice",
         id: createId("entry"),
@@ -455,6 +541,11 @@ export class Agent {
 
     if (!decision.allowed) {      const durationMs = Date.now() - started;
       emit({ type: "denied", name: call.name, reason: decision.reason });
+      this.options.log?.warn("tool", "denied", {
+        name: call.name,
+        reason: decision.reason,
+        ms: durationMs,
+      });
       emit({
         type: "tool_end",
         callId: call.id,
@@ -533,6 +624,12 @@ export class Agent {
     const durationMs = Date.now() - started;
 
     if (!outcome.ok) {
+      this.options.log?.error("tool", "failed", {
+        name: call.name,
+        error: outcome.error.message.slice(0, 300),
+        code: outcome.error.code,
+        ms: durationMs,
+      });
       emit({
         type: "tool_end",
         callId: call.id,
@@ -565,6 +662,11 @@ export class Agent {
     }
 
     const rendered = renderToolOutput(outcome.value);
+    this.options.log?.info("tool", "ok", {
+      name: call.name,
+      ms: durationMs,
+      outLen: rendered.text.length,
+    });
     emit({
       type: "tool_end",
       callId: call.id,
@@ -704,6 +806,15 @@ export class Agent {
   ): Promise<AgentRunResult> {
     await persist();
     emit({ type: "done", text, steps, stopReason });
+    // The normal end of a run. Paired with the "start" entry, this is what shows a run that returned
+    // almost nothing, and `textLen` is the number to look at first: a "completed" run with
+    // `textLen=0` is the silent failure this log exists for.
+    this.options.log?.info("run", "done", {
+      stopReason,
+      steps,
+      toolCalls,
+      textLen: text.length,
+    });
     return { conversationId: conversation.id, text, steps, stopReason, usage, toolCalls };
   }
 }

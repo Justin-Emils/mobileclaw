@@ -353,6 +353,18 @@ export const strings = {
     timeUnknown: "时间未知",
   },
 
+  /** 诊断日志页。见 `runtime/services/event-log.ts` 与 `app/logs.tsx`。 */
+  logs: {
+    title: "诊断日志",
+    hint:
+      "这是应用自己记的运行日志，用于排查「在真机上失败了但看不到原因」的情况 —— 发布版不会把日志输出到 adb，所以只能从这里取。分享出去即可。",
+    refresh: "刷新",
+    share: "分享",
+    clear: "清空",
+    empty: "还没有记录。运行一次任务后回来看。",
+    failed: (reason: string) => `读取日志失败：${reason}`,
+  },
+
   risk: {
     read: "读取",
     write: "写入",
