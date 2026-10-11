@@ -14,10 +14,14 @@
 
 **下面是"接下来按什么顺序做"，每条都指向本文档里的详细条目。**
 
-### 0.1 第一优先：后台进程被冻结（用户明确指出的最关键问题）
+### 0.1 第一优先：后台进程被冻结（用户明确指出的最关键问题）—— **已实现，待真机验证**
 
 > 用户 2026-10-11 原话——**"没有后台权限，这个软件放在后台无法正确运行"**，以及
 > **"最关键的解决后台无法使用的问题"**。
+>
+> **2026-10-11 状态**：0.1.2 的前台服务已按本节的方案实现（见 §一 的「已做」），
+> `pnpm check` 662 全过、release APK 构建成功且服务类与权限都在包里。
+> **仍未做的只有真机验证（0.1.1）**——修复前是全停、修复后应当继续推进，这一步必须在设备上实跑。
 
 **为什么它排第一，而且排在所有功能缺口之前**：驱动整个 agent 的是**本进程里的 JS 循环**。
 一旦进程被系统冻结，**循环就停了** —— 不是"走得慢"，也不是"某一步失败"，而是**在两次工具调用
@@ -62,8 +66,11 @@
 | **现象** | 用户 2026-10-11 报告"没有后台权限，这个软件放在后台无法正确运行"。实测现象是：agent 走到"打开网易云"这一步之后**一直停住** |
 | **为什么这是结构性的** | 操作别的应用时，**我们必然在后台**（手机一次只显示一个应用）。而 Android 会冻结后台进程，**冻结会停掉整个 agent 循环**——它是 JS，跑在本进程里。`FLAG_KEEP_SCREEN_ON` 只防止熄屏挂起，**不防止进程被冻结** |
 | **与 §五 是两个不同成因** | "停住"有两种可能：**进程被冻结**（本条）或**缺导航能力**（§5.1，表现为继续读屏但走不下去）。**区分方法**：回到 app 看对话是否还在推进——冻结则全停，缺能力则继续读屏但无进展。**这个判断必须先做**，否则可能修错方向 |
-| **当前状态** | 全仓库搜 `startForeground` / `FOREGROUND_SERVICE` → **0 处**。`docs/runtime-prerequisites.md` §2.3 记为"已评估、明确推迟"，推迟理由有两条：①**无真机无法验证** ②会改变 Play 上架形态（`dataSync` 类型需要声明用途，且要常驻通知）。**理由 ① 现在不成立了**——项目已有可测真机，且 2026-10-11 已用 release 包验证过 `shell_run` |
-| **将来怎么接（前台服务）** | 涉及四处：①`app.config.ts` 加 `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` 权限与 `<service android:foregroundServiceType="dataSync">` 声明（**走 config plugin**，对标已有的 `withShizukuManifest`/`withShizukuGradle`，否则 prebuild 会清掉）；②`apps/mobile/android-native/shizuku/` 加一个 `Service` 子类，`startForeground()` + 常驻通知，通知文案走 `ui/strings.ts`；③`native-shizuku.ts` 暴露 `startRunService`/`stopRunService`（**做成可选方法**，旧原生模块不该让整个模块加载失败——这是仓库既有惯例）；④`bootstrap.ts` 用 `AppState` 在 app 变为可见时启动服务 |
+| **当前状态** | **已实现，待真机验证**（2026-10-11）。四处都按本条的方案落地了，见下方「已做」。 |
+| **已做（2026-10-11）** | ①`apps/mobile/app.config.ts`：新增配置插件 `withMobileClawForegroundService`，声明 `<service android:foregroundServiceType="dataSync" android:exported="false" android:stopWithTask="false">`，并防御性地补 `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_DATA_SYNC` 权限（同时也在 `android.permissions` 里声明，让 Expo 生成）。②`apps/mobile/android-native/shizuku/MobileClawForegroundService.kt`（新文件，由已有的 `withMobileClawShizuku` 一并复制）：`startForeground()` + 常驻通知 + `mobileclaw-run` 渠道；通知标题与渠道名必须在任何 JS 运行前存在，所以留在 Kotlin，**通知正文由 JS 传入**，保持在 `ui/strings.ts` 里。③`native-shizuku.ts` 暴露可选方法 `startRunService(text)` / `stopRunService()`。④`runtime/run-service.ts`（新文件，可测）：`AppState` 为 `active` 时启动一次，之后**无论切到后台都不停**；`bootstrap.ts` 在启动时接线，**不在运行开始时启动**（那正是平台会拒绝的调用）。 |
+| **验证到哪一步了** | `pnpm check` 662 全过（新增 `apps/mobile/test/run-service.test.ts` 9 例，覆盖"可见时才启动""后台不启动""切后台不停""旧原生模块缺方法则静默降级"）；**release APK 构建成功**，且已确认 `MobileClawForegroundService` 类在 dex 里、`foregroundServiceType=0x1(dataSync)` 与两个权限在打包后的清单里。**真机行为未验证**——需要按下方「怎么验证修好了」实跑一次。 |
+| **遗留（真机验证时一起看）** | Android 13+ 下 `POST_NOTIFICATIONS` 是**运行时权限**。未授予时前台服务仍可运行，但**用户看不到那条通知**——而"用户看得见"正是前台服务的契约。若真机上出现"服务在跑但没有通知"，先查这个。 |
+| **将来怎么接（前台服务）** | 已按此实现，保留原文以便对照原始方案：涉及四处：①`app.config.ts` 加 `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC` 权限与 `<service android:foregroundServiceType="dataSync">` 声明（**走 config plugin**，对标已有的 `withShizukuManifest`/`withShizukuGradle`，否则 prebuild 会清掉）；②`apps/mobile/android-native/shizuku/` 加一个 `Service` 子类，`startForeground()` + 常驻通知，通知文案走 `ui/strings.ts`；③`native-shizuku.ts` 暴露 `startRunService`/`stopRunService`（**做成可选方法**，旧原生模块不该让整个模块加载失败——这是仓库既有惯例）；④`bootstrap.ts` 用 `AppState` 在 app 变为可见时启动服务 |
 | **关键陷阱（会让朴素实现失败）** | Android 12+ **禁止从后台启动前台服务**，抛 `ForegroundServiceStartNotAllowedException`。而"运行开始时起、结束时停"这种朴素做法**正好在需要它的那一刻从后台调用** → 必然失败。**正确做法是服务常驻**：在 app 可见时启动一次，之后一直带着通知运行，运行期间不再启停 |
 | **代价（需要产品决定）** | 一个**常驻通知**。这是前台服务的本质——系统要求用户看得见有东西在后台跑。若用户不接受，只剩下面这条替代方案 |
 | **未验证的替代方案：悬浮球** | `SYSTEM_ALERT_WINDOW` 理论上也能提高进程重要度、且不需要常驻通知。但有三个问题：①它是**特殊权限**，要用户去"设置 → 应用 → 特殊权限 → 显示在其他应用上层"手工开，那个提示比"有一个通知"更吓人；②**会遮挡屏幕**，与 `screen_read`/`screen_tap` 直接冲突（可能出现在 `uiautomator dump` 里，或盖住 `screen_tap` 的坐标）；③能否真正防冻结**依赖 ROM 省电策略**（尤其国内 ROM），在此无法验证。**另注意**：debug 构建里这个权限来自 **React Native 的 debug manifest**（`node_modules/react-native/ReactAndroid/src/debug/AndroidManifest.xml`），**release 里不存在**，要用必须显式声明 |

@@ -360,6 +360,19 @@ export const strings = {
     network: "联网",
     system: "系统",
   },
+
+  /** 前台服务的常驻通知。见 `runtime/run-service.ts`。 */
+  run: {
+    /**
+     * 通知正文。
+     *
+     * 说清"为什么有一条一直不走的通知"，因为这条通知**不会**在任务结束后消失 —— 它必须一直在，
+     * 否则 Android 会在应用切到后台时冻结进程，而"操作别的应用"恰恰要求本应用待在后台。
+     * 通知标题与渠道名由 Kotlin 提供（见 `MobileClawForegroundService.kt`），因为它们要在任何
+     * JavaScript 运行之前就存在。
+     */
+    serviceText: "正在运行，以便在你操作其它应用时不被系统冻结",
+  },
 } as const;
 
 /** 风险等级的中文名，找不到就回退成原值。 */

@@ -476,6 +476,16 @@ const SHIZUKU_AIDL_DIR = "app/src/main/aidl/dev/mobileclaw/app/shizuku";
 
 const SHIZUKU_PROVIDER = "rikka.shizuku.ShizukuProvider";
 
+/**
+ * The foreground service, which lives in the same package as the Shizuku module.
+ *
+ * Same package because `withMobileClawShizuku` already copies every file in
+ * `android-native/shizuku/` into `dev/mobileclaw/app/shizuku/`; a second package would need a
+ * second copy step for no benefit. The two are unrelated in purpose (one bridges Shizuku, the
+ * other holds the process up), which is why the class carries its own explanation.
+ */
+const FOREGROUND_SERVICE_NAME = "dev.mobileclaw.app.shizuku.MobileClawForegroundService";
+
 /** Idempotency marker for the gradle patch, which has two separate insertions. */
 const SHIZUKU_GRADLE_MARKER = "MOBILECLAW_SHIZUKU";
 
@@ -535,6 +545,77 @@ const withMobileClawShizuku: ConfigPlugin = (config) => {
 interface ManifestProvider {
   $: Record<string, string>;
 }
+
+/** The `<service>` element as the manifest mod carries it, which Expo's types omit. */
+interface ManifestService {
+  $: Record<string, string>;
+}
+
+/**
+ * Declare the foreground service that keeps this process from being frozen.
+ *
+ * ## Why this is a config plugin and not an edit to `android/`
+ *
+ * `android/` is generated. `expo prebuild` rewrites it from this file every time, so anything
+ * added there by hand — including the `<service>` element — is gone on the next build. The
+ * Shizuku provider and the app's Gradle dependencies are declared the same way, for the same
+ * reason.
+ *
+ * ## Why the service, and why it is not optional
+ *
+ * Operating another app necessarily puts this one in the background (a phone shows one app at a
+ * time), and Android freezes background processes. The agent loop is JavaScript **in this
+ * process**, so a freeze stops the run — silently, between two tool calls. That is the bug this
+ * whole change exists for.
+ *
+ * The Kotlin class is copied by `withMobileClawShizuku`, since it lives in the same package and
+ * that plugin already owns that directory. This one only handles the manifest, which keeps the
+ * two concerns — "which sources exist" and "what the system is told about them" — separable.
+ *
+ * `android:exported="false"`: nothing outside this app may start it. The service has no binder
+ * and takes no input beyond the notification text, so there is no interface to expose.
+ * `android:stopWithTask="false"` matters: the default would tear the service down when the user
+ * swipes the app away, and the point of it is to survive exactly that kind of backgrounding.
+ */
+const withMobileClawForegroundService: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (cfg) => {
+    const application = cfg.modResults.manifest.application?.[0];
+    if (!application) {
+      throw new Error("withMobileClawForegroundService: the manifest has no <application> element");
+    }
+
+    const host = application as typeof application & { service?: ManifestService[] };
+    const services = (host.service ??= []);
+    if (services.some((entry) => entry.$["android:name"] === FOREGROUND_SERVICE_NAME)) return cfg;
+
+    services.push({
+      $: {
+        "android:name": FOREGROUND_SERVICE_NAME,
+        "android:exported": "false",
+        "android:stopWithTask": "false",
+        // Required from targetSdk 34. `dataSync` is the declared type whose meaning matches what
+        // this service does: holding the process up while the user's own task runs. It is also why
+        // `FOREGROUND_SERVICE_DATA_SYNC` is in `android.permissions` above.
+        "android:foregroundServiceType": "dataSync",
+      },
+    });
+
+    // The permission pair is declared in `android.permissions` so Expo emits it, but a build that
+    // reaches here without it would fail at runtime with a SecurityException rather than at build
+    // time. Adding it defensively costs nothing and turns that into a duplicate, which the
+    // platform tolerates.
+    const manifest = cfg.modResults.manifest as {
+      "uses-permission"?: { $?: Record<string, string> }[];
+    };
+    const permissions = (manifest["uses-permission"] ??= []);
+    for (const name of ["android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC"]) {
+      if (!permissions.some((entry) => entry?.$?.["android:name"] === name)) {
+        permissions.push({ $: { "android:name": name } });
+      }
+    }
+
+    return cfg;
+  });
 
 /**
  * Declare the provider Shizuku uses to reach this app.
@@ -728,6 +809,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "READ_MEDIA_VIDEO",
         "READ_MEDIA_AUDIO",
         "POST_NOTIFICATIONS",
+        // The agent loop is JavaScript in this process, and operating another app puts this app in
+        // the background -- where Android freezes processes. A foreground service is what stops
+        // that, and `dataSync` is the type whose declaration matches what it does (it is holding
+        // the process up while the user's own task runs, not doing network sync).
+        //
+        // `FOREGROUND_SERVICE_DATA_SYNC` is required in addition from targetSdk 34, and the
+        // `android:foregroundServiceType` attribute is added by `withMobileClawForegroundService`.
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_DATA_SYNC",
         "READ_CALENDAR",
         "WRITE_CALENDAR",
         "com.termux.permission.RUN_COMMAND",
@@ -767,6 +857,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       withMobileClawShizuku as unknown as string,
       withShizukuManifest as unknown as string,
       withShizukuGradle as unknown as string,
+      withMobileClawForegroundService as unknown as string,
       withLocalReleaseSigning as unknown as string,
       ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],

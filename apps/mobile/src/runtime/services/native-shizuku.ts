@@ -77,6 +77,22 @@ export interface NativeShizukuModule {
    * "the display is not held", not fail to load.
    */
   keepScreenOn?(on: boolean): Promise<boolean>;
+  /**
+   * Start the foreground service that keeps this process from being frozen.
+   *
+   * **Must be called while the app is visible.** Android 12+ refuses to start a foreground service
+   * from the background, so calling it when a run begins — by which time the agent has switched to
+   * another app — throws instead of starting. See `runtime/run-service.ts` for how that is arranged,
+   * and `MobileClawForegroundService.kt` for why the service stays up rather than being scoped to a
+   * run.
+   *
+   * `text` is the notification body; it comes from `ui/strings.ts` so the wording lives with the
+   * rest of the interface. Optional like the others: a native module older than this JavaScript
+   * degrades to "no foreground service", which must not take screen automation down with it.
+   */
+  startRunService?(text: string): Promise<boolean>;
+  /** Stop it and drop the notification. Safe when it was never started. */
+  stopRunService?(): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

@@ -39,6 +39,7 @@ import {
   DEFAULT_RETENTION_DAYS,
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
+import { startRunService } from "./run-service";
 import type {
   AutomationService,
   FileSystemService,
@@ -188,6 +189,27 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   // What this deliberately does *not* do any more is watch `AppState` and abort. That guard had the
   // question backwards — see the note on `onRunForegroundLoss` below.
   const keepAwake = createRunKeepAwake(nativeShizuku);
+
+  // --- keeping the process alive -------------------------------------------
+  //
+  // A run is a JavaScript loop in this process, and operating another app puts this process in the
+  // background, where Android freezes it — stopping the loop silently between two tool calls. This
+  // is the fix for "after opening the app it just hangs".
+  //
+  // Started here, at bootstrap, **not when a run begins**: Android 12+ refuses to start a foreground
+  // service from the background, so a run-time start would be refused at exactly the moment it is
+  // needed. The service is started while the app is visible and then left up; see
+  // `runtime/run-service.ts` for the full reasoning, and `MobileClawForegroundService.kt` for the
+  // Kotlin. Failures are logged and ignored — a foreground service that will not start degrades the
+  // run and must not prevent it.
+  const runService = startRunService({
+    native: nativeShizuku,
+    appState: AppState,
+    onError: (error) =>
+      console.log(
+        `[mobileclaw] foreground service: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+  });
 
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend(privileged);

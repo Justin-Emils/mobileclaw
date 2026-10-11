@@ -231,6 +231,40 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Start the foreground service that keeps this process from being frozen.
+     *
+     * **Call this while the app is visible.** Android 12+ refuses to start a foreground service
+     * from the background, so calling it when a run begins — by which time the agent has already
+     * switched to another app — throws `ForegroundServiceStartNotAllowedException`. Starting it
+     * once when the app is shown and leaving it running is the only shape that works; see
+     * `MobileClawForegroundService` for the full reasoning.
+     *
+     * `text` is the notification's body, supplied by the caller so the wording stays in
+     * `ui/strings.ts` with the rest of the interface.
+     */
+    @ReactMethod
+    fun startRunService(text: String?, promise: Promise) {
+        run(promise) {
+            MobileClawForegroundService.start(reactContext, text ?: "")
+            true
+        }
+    }
+
+    /**
+     * Stop that service, dropping its notification.
+     *
+     * Safe to call when the service was never started. Nothing depends on it having run, so a
+     * failure here must not surface as a run error.
+     */
+    @ReactMethod
+    fun stopRunService(promise: Promise) {
+        run(promise) {
+            MobileClawForegroundService.stop(reactContext)
+            true
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class
