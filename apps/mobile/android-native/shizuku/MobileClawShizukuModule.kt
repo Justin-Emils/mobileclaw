@@ -265,6 +265,23 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Re-post the ongoing notice, after the user grants the notification permission.
+     *
+     * `startForeground` runs once, when the service starts. If the permission arrives later — which
+     * is the normal path, because Android 13+ makes it a runtime permission and the app asks from
+     * its own settings screen — the service keeps running with **no visible notification** and
+     * nothing retries. On a device that looked like: `isForeground=true`, the channel present and
+     * unblocked, `POST_NOTIFICATIONS` granted, and zero notifications posted.
+     */
+    @ReactMethod
+    fun refreshRunServiceNotice(text: String?, promise: Promise) {
+        run(promise) {
+            MobileClawForegroundService.refresh(reactContext, text ?: "")
+            true
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class

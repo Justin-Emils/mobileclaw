@@ -107,6 +107,14 @@ export interface NativeShizukuModule {
   startRunService?(text: string): Promise<boolean>;
   /** Stop it and drop the notification. Safe when it was never started. */
   stopRunService?(): Promise<boolean>;
+  /**
+   * Re-post the ongoing notice.
+   *
+   * Called after the user grants the notification permission: `startForeground` runs only when the
+   * service starts, so a permission granted later would otherwise leave a running foreground
+   * service with nothing visible — which is what the user sees as "I cannot tell if it is running".
+   */
+  refreshRunServiceNotice?(text: string): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

@@ -77,16 +77,7 @@ class MobileClawForegroundService : Service() {
         // the service is restarted by the system with no intent, which is the one path JavaScript
         // is not around to supply it on.
         val text = intent?.getStringExtra(EXTRA_TEXT) ?: TEXT_FALLBACK
-
-        val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(TITLE)
-            .setContentText(text)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setContentIntent(openAppIntent())
-            .build()
+        val notification = buildNotification(text)
 
         // The type argument is mandatory from Android 14 (API 34). Passing it unconditionally
         // would crash on older releases, and omitting it crashes on newer ones, so it is chosen
@@ -97,6 +88,18 @@ class MobileClawForegroundService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
+
+    /** The ongoing notice, shared by `startForeground` and `postNotice`. */
+    private fun buildNotification(text: String): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(TITLE)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentIntent(openAppIntent())
+            .build()
 
     /**
      * Tapping the notification opens the app, so the notice is actionable rather than permanent
@@ -171,6 +174,55 @@ class MobileClawForegroundService : Service() {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
+            }
+        }
+
+        /**
+         * Put the ongoing notice back.
+         *
+         * Needed because the notification permission can be granted *after* the service started,
+         * and `startForeground` is only called when the service starts. On Android 13+ that
+         * combination leaves a running foreground service with **no visible notification** — the
+         * platform hides it, and nothing ever retries. Observed on a device exactly that way:
+         * `isForeground=true`, the channel present and unblocked, `POST_NOTIFICATIONS` granted, and
+         * zero notifications posted.
+         *
+         * `NotificationManager.notify` with the service's own id updates that notification rather
+         * than creating a second one, and is harmless when the notice is already showing.
+         */
+        fun refresh(context: Context, text: String) {
+            try {
+                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && manager.getNotificationChannel(CHANNEL_ID) == null) {
+                    manager.createNotificationChannel(
+                        NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW).apply {
+                            description = CHANNEL_DESCRIPTION
+                            setShowBadge(false)
+                        },
+                    )
+                }
+                val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                val pending = launch?.let {
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    } else {
+                        PendingIntent.FLAG_UPDATE_CURRENT
+                    }
+                    PendingIntent.getActivity(context, 0, it, flags)
+                }
+                val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+                    .setContentTitle(TITLE)
+                    .setContentText(text)
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setOngoing(true)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                    .apply { if (pending != null) setContentIntent(pending) }
+                    .build()
+                manager.notify(NOTIFICATION_ID, notification)
+            } catch (error: Throwable) {
+                // A notice that cannot be shown must not take the run down with it.
             }
         }
 

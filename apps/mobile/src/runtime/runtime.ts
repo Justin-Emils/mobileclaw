@@ -32,6 +32,7 @@ import {
   type ScreenProbeRecord,
   type ScreenProbeReport,
 } from "@mobileclaw/capabilities";
+import { strings } from "@/ui/strings";
 import { ApprovalBroker } from "./approval";
 import { AsyncEventQueue } from "./event-queue";
 import { DEFAULT_CONFIG, mergeConfig, type AppConfig } from "./config";
@@ -108,6 +109,13 @@ export interface RuntimeDeps {
   backgroundServiceRunning?: () => boolean;
   notificationsGranted?: () => Promise<boolean | undefined>;
   requestNotifications?: () => Promise<boolean>;
+  /**
+   * Put the foreground service's notice back, after permission arrives.
+   *
+   * Separate from `requestNotifications` because on iOS there is no such notice, and because this
+   * is the native module's job rather than the notification library's.
+   */
+  refreshRunServiceNotice?: (text: string) => Promise<unknown>;
   /**
    * Transport for the model provider. Injecting the transport (rather than a
    * whole provider) keeps `providerInfo()` consistent with the config while
@@ -292,7 +300,18 @@ export class MobileClawRuntime {
 
   /** Ask for the notification permission. No-op where the platform has none. */
   async requestNotificationPermission(): Promise<boolean> {
-    return (await this.deps.requestNotifications?.()) ?? false;
+    const granted = (await this.deps.requestNotifications?.()) ?? false;
+    // Re-post the notice the moment permission exists. `startForeground` ran once, when the
+    // service started -- which on Android 13+ is usually *before* the permission is granted, so
+    // without this the service keeps running with nothing visible and nothing retries.
+    if (granted) {
+      try {
+        await this.deps.refreshRunServiceNotice?.(strings.run.serviceText);
+      } catch {
+        // A notice that cannot be shown must not fail the permission flow.
+      }
+    }
+    return granted;
   }
 
   /**

@@ -320,6 +320,16 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
         return false;
       }
     },
+    // Only meaningful once the service is up and the module supports it; both are checked here
+    // rather than at the call site so the UI's permission button stays a single call.
+    //
+    // The notice text is left to the runtime, which owns `strings`: this file deliberately does not
+    // reach into the UI layer, and importing the whole string table for one line would be the first
+    // such dependency.
+    refreshRunServiceNotice: async (text: string) => {
+      if (!runService.started()) return false;
+      return (await nativeShizuku?.refreshRunServiceNotice?.(text)) ?? false;
+    },
     environment: () => describeEnvironment(roots, fs),
     // App-owned storage: no permission needed, survives updates, easy to inspect.
     workspaceBaseDir: appRoots[0] ?? uriToPath(Paths.document.uri),
