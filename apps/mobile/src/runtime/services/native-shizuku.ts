@@ -51,9 +51,22 @@ export interface NativeShizukuModule {
   status(): Promise<AutomationStatus & { installed?: boolean }>;
   /** Opens Shizuku's own consent dialog; needs no Activity. */
   requestPermission(): Promise<boolean>;
+  /**
+   * Runs a command as shell (uid 2000).
+   *
+   * `stdin` carries a value that must not appear on the command line. It is a parameter rather than
+   * part of `command` for the same reason the AIDL method takes it: a URL or a package id supplied
+   * by the model and interpolated into `sh -c command` is an injection — a quote or a `;` turns
+   * "open this link" into "run this other thing".
+   *
+   * **Positional, like `screenshot`.** The bridge binds arguments by position; an options object here
+   * would be read as `command` and then fail on the argument count, which is exactly what happened to
+   * `screenshot` and cost a device round trip to find.
+   */
   runPrivileged(
     command: string,
     timeoutMs: number,
+    stdin?: string,
   ): Promise<{ exitCode: number; stdout: string; stderr: string; timedOut?: boolean }>;
   /**
    * Downscales on the shell side and writes the picture where the app can render it.
@@ -657,7 +670,17 @@ export function createPrivilegedService(native: NativeShizukuModule): Privileged
     requestPermission: () => native.requestPermission(),
     async run(command: string, options: ShellRunOptions = {}): Promise<ShellResult> {
       const started = Date.now();
-      const result = await native.runPrivileged(command, options.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS);
+      // `options.stdin` is forwarded, not dropped.
+      //
+      // It was dropped at this layer while `NativeBridgeShell.run` already forwarded the whole
+      // options object and explained why that mattered — so a value the caller had deliberately kept
+      // off the command line arrived as nothing, and the command read EOF. That comment warns about
+      // narrowing the type exactly here; this is where it happened.
+      const result = await native.runPrivileged(
+        command,
+        options.timeoutMs ?? DEFAULT_SHELL_TIMEOUT_MS,
+        options.stdin,
+      );
       return {
         command,
         exitCode: result.exitCode,

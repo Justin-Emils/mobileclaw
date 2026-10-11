@@ -33,7 +33,7 @@ const NON_ASCII_TEXT = "\u4f60\u597d";
 
 interface NativeCalls {
   screenshots: Array<{ maxWidth: number; quality: number; destDir?: string }>;
-  runs: Array<{ command: string; timeoutMs: number }>;
+  runs: Array<{ command: string; timeoutMs: number; stdin?: string }>;
 }
 
 interface Harness {
@@ -58,8 +58,8 @@ function harness(over: Partial<NativeShizukuModule> = {}): Harness {
     async requestPermission() {
       return true;
     },
-    async runPrivileged(command, timeoutMs) {
-      calls.runs.push({ command, timeoutMs });
+    async runPrivileged(command, timeoutMs, stdin) {
+      calls.runs.push(stdin === undefined ? { command, timeoutMs } : { command, timeoutMs, stdin });
       events.push(`run:${command}`);
       // `wm size` and the window dump are the two commands whose output the adapter
       // parses; a canonical response keeps the tests about geometry and matching.
@@ -623,5 +623,30 @@ describe("createPrivilegedService", () => {
 
   it("forwards the permission request to the native module", async () => {
     expect(await createPrivilegedService(harness().native).requestPermission?.()).toBe(true);
+  });
+
+  it("passes stdin through to the native module", async () => {
+    // The seam that was missing, and the reason the deep-link feature did not work.
+    //
+    // `NativeBridgeShell.run` forwarded the whole options object and said why: a value that must not
+    // appear on a command line can only travel on stdin. This layer then passed `command` and
+    // `timeoutMs` and dropped the rest, so `read -r url` in AIDL's `sh -c` read EOF. On a device that
+    // surfaced as `read exit=1 url=[]` and `am start` rejecting an empty data URI — with the failure
+    // reported as though the device had no handler for the scheme.
+    //
+    // Asserted here rather than only at the shell wrapper, because this is the layer that dropped it:
+    // the wrapper's own test passed the whole time.
+    const { native, calls } = harness();
+    await createPrivilegedService(native).run("read -r url", { stdin: "orpheus://song/1\n" });
+    expect(calls.runs.at(-1)?.stdin).toBe("orpheus://song/1\n");
+  });
+
+  it("omits stdin rather than sending an empty string when there is none", async () => {
+    // A command that reads stdin must see the difference between "no input" and "an empty line":
+    // `read` consumes a newline and succeeds on the latter. Keeping the parameter absent leaves the
+    // native side to close the stream, which is EOF.
+    const { native, calls } = harness();
+    await createPrivilegedService(native).run("id");
+    expect(calls.runs.at(-1)).not.toHaveProperty("stdin");
   });
 });

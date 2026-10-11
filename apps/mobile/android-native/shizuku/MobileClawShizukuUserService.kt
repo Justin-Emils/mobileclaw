@@ -31,7 +31,7 @@ import kotlin.system.exitProcess
  */
 class MobileClawShizukuUserService : IMobileClawShizukuUserService.Stub() {
 
-    override fun exec(command: String, timeoutMs: Int): String {
+    override fun exec(command: String, timeoutMs: Int, stdin: String): String {
         return try {
             val process = ProcessBuilder("sh", "-c", command).start()
 
@@ -43,10 +43,28 @@ class MobileClawShizukuUserService : IMobileClawShizukuUserService.Stub() {
                 .apply { isDaemon = true }
                 .also { it.start() }
 
+            // stdin is written on its own thread too, and this is not tidiness.
+            //
+            // The child may write before it reads — `sh` echoing a prompt, a tool printing a banner —
+            // and if we wrote stdin inline before draining stdout, neither side would move: the child
+            // waits for input, we wait for output that cannot be produced until the child reads. That
+            // is a deadlock that only appears for commands that both write and read.
+            //
+            // A closed stream is the normal case (the command did not consume its input), so it is
+            // swallowed rather than reported.
+            val stdinThread = Thread {
+                try {
+                    process.outputStream.use { it.write(stdin.toByteArray()); it.flush() }
+                } catch (ignored: Throwable) {
+                    // Broken pipe: the command finished without reading. Not an error.
+                }
+            }.apply { isDaemon = true }.also { it.start() }
+
             val out = readAll(process.inputStream)
             val finished = process.waitFor(timeoutMs.toLong(), TimeUnit.MILLISECONDS)
             if (!finished) process.destroyForcibly()
             errorThread.join(DRAIN_JOIN_MS)
+            stdinThread.join(DRAIN_JOIN_MS)
 
             JSONObject()
                 // Only ask for the exit value once the process really ended; after a

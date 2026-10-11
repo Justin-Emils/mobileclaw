@@ -152,11 +152,17 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
         }
     }
 
-    /** Runs a command as shell. The result is the user service's JSON, reshaped. */
+    /**
+     * Runs a command as shell. The result is the user service's JSON, reshaped.
+     *
+     * `stdin` is optional and defaults to empty. It exists so a model-supplied value can reach a
+     * command without being interpolated into its command line — see the note on the AIDL method.
+     * Declared with a default so the JS side may keep calling it with two arguments.
+     */
     @ReactMethod
-    fun runPrivileged(command: String, timeoutMs: Double, promise: Promise) {
+    fun runPrivileged(command: String, timeoutMs: Double, stdin: String?, promise: Promise) {
         run(promise) {
-            val json = JSONObject(awaitService().exec(command, timeoutMs.toInt()))
+            val json = JSONObject(awaitService().exec(command, timeoutMs.toInt(), stdin ?: ""))
             if (json.has("error")) throw IllegalStateException(json.getString("error"))
             Arguments.createMap().apply {
                 putInt("exitCode", json.optInt("exitCode", -1))

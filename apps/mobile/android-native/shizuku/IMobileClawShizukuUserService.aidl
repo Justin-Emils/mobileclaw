@@ -10,8 +10,19 @@
 package dev.mobileclaw.app.shizuku;
 
 interface IMobileClawShizukuUserService {
-    /** Runs `sh -c command`. Returns JSON: {exitCode, stdout, stderr, timedOut}. */
-    String exec(String command, int timeoutMs);
+    /**
+     * Runs `sh -c command`, feeding `stdin` to it. Returns JSON: {exitCode, stdout, stderr, timedOut}.
+     *
+     * `stdin` exists so a value that came from the model can reach a command **without appearing on
+     * its command line**. A URL or a package id interpolated into `sh -c` is an injection: a quote or
+     * a `;` turns "open this link" into "run this other thing". The channel was declared and then
+     * silently dropped by every layer between here and the caller, so a script reading from stdin
+     * got EOF and the feature failed in a way that looked like the device's fault — see the note on
+     * `deepLinkCommand`.
+     *
+     * Empty string means no input; the child then sees EOF immediately.
+     */
+    String exec(String command, int timeoutMs, String stdin);
 
     /**
      * Captures the screen, downscales to `maxWidth` and compresses to JPEG.
