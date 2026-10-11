@@ -737,7 +737,30 @@ describe("Automation tools", () => {
       call as never,
     )) as { matched: boolean; reason: string };
     expect(missed.matched).toBe(false);
-    expect(missed.reason).toMatch(/timed out/);
+    // The stub reads nothing at all, which is the state `screen_wait` most needs to describe
+    // accurately: it is a detection failure, not proof that the app never opened. The old message
+    // said only "timed out", which reads as the latter and sent the user looking in the wrong
+    // place.
+    expect(missed.reason).toMatch(/no foreground app could be read/);
+  });
+
+  it("distinguishes 'read something else' from 'could not read anything' on timeout", async () => {
+    // The second case is the one that matters on a device whose `dumpsys` field names differ:
+    // every poll comes back without a package, so `screen_wait` can never match however long it
+    // waits, and saying so is more useful than reporting a timeout as if the app had not opened.
+    const other = screen({
+      async currentWindow() {
+        return { package: "com.android.launcher", activity: ".Launcher", raw: "launcher in front" };
+      },
+    });
+    const missedOther = (await toolNamed(other, "screen_wait").execute(
+      { package: "com.tencent.mm", timeoutMs: 150 } as never,
+      call as never,
+    )) as { matched: boolean; reason: string; raw: string };
+    expect(missedOther.matched).toBe(false);
+    expect(missedOther.reason).toMatch(/timed out before the screen matched/);
+    // What it actually saw is carried back, so the caller can tell the two apart.
+    expect(missedOther.raw).toContain("launcher in front");
   });
 
   it("matches a substring of the activity name as well as the package", async () => {

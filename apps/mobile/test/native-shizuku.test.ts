@@ -359,13 +359,37 @@ describe("createAutomationService", () => {
     );
   });
 
-  it("queries the window dump and parses the foreground app", async () => {
+  it("queries the foreground window and parses the result", async () => {
     const h = harness();
     const foreground = await createAutomationService(h.native, h.ports).currentWindow();
 
-    expect(h.calls.runs[0]!.command).toContain("dumpsys window");
+    // `dumpsys window` is no longer the only source. The activity dump is tried first because its
+    // field names are the ones that survived into current releases; the window dump is the
+    // fallback for older ones. This harness answers only the latter, so both are called and the
+    // second resolves it.
+    expect(h.calls.runs[0]!.command).toContain("dumpsys activity activities");
+    expect(h.calls.runs.some((run) => run.command.includes("dumpsys window"))).toBe(true);
     expect(foreground.package).toBe("com.tencent.mm");
     expect(foreground.activity).toBe("com.tencent.mm.ui.LauncherUI");
+  });
+
+  it("reports every command it tried when no source names the foreground app", async () => {
+    // The failure this exists for: on a ROM whose `dumpsys` names the field something else, every
+    // probe comes back empty, `screen_wait` times out, and the only thing the user is told is that
+    // it timed out. Carrying the attempts into `raw` is what makes that diagnosable.
+    const h = harness({
+      async runPrivileged(command, timeoutMs) {
+        h.calls.runs.push({ command, timeoutMs });
+        if (command === "wm size") return { exitCode: 0, stdout: "Physical size: 1080x2400", stderr: "" };
+        return { exitCode: 0, stdout: "", stderr: "no such field" };
+      },
+    });
+    const foreground = await createAutomationService(h.native, h.ports).currentWindow();
+
+    expect(foreground.package).toBeUndefined();
+    expect(foreground.raw).toContain("dumpsys activity activities");
+    expect(foreground.raw).toContain("dumpsys window");
+    expect(foreground.raw).toContain("no such field");
   });
 
   it("fills a bare capture from SCREEN_DEFAULTS and forwards no destination", async () => {

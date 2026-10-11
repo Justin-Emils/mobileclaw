@@ -313,31 +313,6 @@ export function parseScreenSize(output: string): { width: number; height: number
   return physical ? { width: Number(physical[1]), height: Number(physical[2]) } : undefined;
 }
 
-/**
- * The foreground app, from debug output.
- *
- * Best effort by nature: these key names have changed across Android versions and some
- * ROMs reformat them, so several shapes are tried and `raw` is kept. An empty result
- * means "could not tell", never "nothing is open" — which is why callers are told to
- * treat it that way rather than concluding the screen is blank.
- */
-export function parseForeground(output: string): ForegroundWindow {
-  const patterns = [
-    /mCurrentFocus=Window\{[^}]*?\s([\w.]+)\/([\w.$]+)/,
-    /mFocusedApp=.*?\s([\w.]+)\/([\w.$]+)/,
-    /topResumedActivity.*?\s([\w.]+)\/([\w.$]+)/,
-    /mResumedActivity.*?\s([\w.]+)\/([\w.$]+)/,
-  ];
-
-  for (const pattern of patterns) {
-    const match = pattern.exec(output);
-    if (match) {
-      return { package: match[1], activity: match[2], raw: match[0] };
-    }
-  }
-  return { raw: output.trim().split("\n").slice(0, 5).join("\n") };
-}
-
 /* ------------------------------------------------------------- the service --- */
 
 export interface AutomationPorts {
@@ -370,19 +345,106 @@ async function displaySize(native: NativeShizukuModule): Promise<{ width: number
 }
 
 /**
+ * The fields that name the foreground window, best-effort, across Android versions.
+ *
+ * There is no stable API for this. `dumpsys window` and `dumpsys activity activities` use
+ * different field names on different releases, and an OEM build can rename or drop them, so the
+ * parser accepts any of them and reports which line it used.
+ *
+ * `screen_wait` is built on this, which is why a field-name change turns into a timeout rather
+ * than an error: no package is parsed, so nothing ever matches.
+ */
+const FOREGROUND_FIELDS = [
+  "mCurrentFocus",
+  "mFocusedApp",
+  "topResumedActivity",
+  "mResumedActivity",
+  "ResumedActivity",
+  "mFocusedWindow",
+  "mLastFocusedWindow",
+];
+
+/** A package/activity token: it must contain a dot and a slash to be one. */
+const COMPONENT_TOKEN = /([A-Za-z_][\w.]*\.[\w.]+)\/([\w.$]+)/;
+
+/**
+ * Read the foreground component out of `dumpsys` output.
+ *
+ * The known field names are tried in order so the most specific answer wins, and within a line
+ * the *last* package/activity token is taken: the surrounding debug text contains other
+ * component names (`mPreferredTopFocusableStack=Task{... I=com.x/.Y}`), and the trailing one is
+ * the actual value.
+ *
+ * A miss returns `raw` only -- the contract is "could not tell", never "nothing is open".
+ */
+export function parseForeground(output: string): ForegroundWindow {
+  for (const field of FOREGROUND_FIELDS) {
+    const line = output.split("\n").find((candidate) => candidate.includes(field));
+    const match = line?.match(COMPONENT_TOKEN);
+    if (match?.[1] && match[2]) {
+      return {
+        package: match[1],
+        // A shorthand such as `.MainActivity` is relative to the package, which is how Android
+        // itself writes it. Callers compare the result against a bare activity name, so keep it
+        // as written rather than expanding it.
+        activity: match[2],
+        raw: line!.trim(),
+      };
+    }
+  }
+  return { raw: output.trim().split("\n").slice(0, 5).join("\n") };
+}
+
+/** Whether a parse produced something `screen_wait` can actually match against. */
+export function hasForeground(result: ForegroundWindow): boolean {
+  return typeof result.package === "string" && result.package.length > 0;
+}
+
+/**
+ * Where the foreground app is looked for, most reliable first.
+ *
+ * `dumpsys activity activities` is the one that still works on current releases; the
+ * `dumpsys window` field names are the older, more widely documented spelling. Both are cheap
+ * and running the second only after the first fails keeps the common path at one round trip.
+ *
+ * `grep -m` rather than `head`: `head` closes the pipe early, and `dumpsys` then reports
+ * "Failed to write while dumping service window: Broken pipe", which is noise in an error path
+ * that is already hard to read.
+ */
+const FOREGROUND_COMMANDS = [
+  "dumpsys activity activities | grep -E 'topResumedActivity|mResumedActivity|ResumedActivity' | grep -m 3 /",
+  "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mFocusedWindow|mLastFocusedWindow' | grep -m 3 /",
+];
+
+/**
  * The foreground app, best effort.
  *
  * Shared rather than inlined so the screen reader and `screen_current` cannot drift
  * apart in how they explain a miss: both report "could not tell", never "nothing is
  * open".
+ *
+ * `raw` is accumulated across every attempt, not just the last. When detection fails this is the
+ * only thing that explains why, and a report of one empty command would be useless on a device
+ * whose `dumpsys` names the field something nobody here anticipated.
  */
 async function foregroundWindow(native: NativeShizukuModule): Promise<ForegroundWindow> {
-  const { stdout } = await sh(
-    native,
-    "dumpsys window | grep -E 'mCurrentFocus|mFocusedApp|mResumedActivity|topResumedActivity' | head -n 5",
-    SIZE_TIMEOUT_MS,
-  );
-  return parseForeground(stdout);
+  const attempts: string[] = [];
+  let last: ForegroundWindow = { raw: "" };
+
+  for (const command of FOREGROUND_COMMANDS) {
+    const { stdout, stderr } = await sh(native, command, SIZE_TIMEOUT_MS);
+    const parsed = parseForeground(stdout);
+    last = parsed;
+    if (hasForeground(parsed)) {
+      return attempts.length === 0
+        ? parsed
+        : { ...parsed, raw: `${parsed.raw}\n(通过第 ${attempts.length + 1} 个来源取得)` };
+    }
+    attempts.push(`$ ${command}\n(标准输出 ${stdout.trim().length} 字符)\n${stdout.trim() || "(空)"}`);
+    if (stderr.trim()) attempts.push(`stderr: ${stderr.trim()}`);
+  }
+
+  return { raw: `无法判断前台应用。已尝试的命令及其原始输出：\n${attempts.join("\n")}`, ...(last.activity ? { activity: last.activity } : {}) };
 }
 
 /** The last addressable pixel is `extent - 1`; a fraction of 1 would land past the edge. */

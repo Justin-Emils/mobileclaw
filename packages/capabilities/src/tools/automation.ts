@@ -396,7 +396,12 @@ export function createAutomationTools(deps: {
   const screenWait = {
     name: "screen_wait",
     description:
-      "Wait until the foreground app (and optionally a specific screen of it) matches, or until the timeout runs out. Polls the same best-effort source as screen_current, so it can report 'timed out' on a ROM whose debug output does not name the foreground app. Use it instead of assuming the app has finished loading.",
+      "Wait until the foreground app (and optionally a specific screen of it) matches, or until the " +
+      "timeout runs out. Polls the same best-effort source as screen_current. That source reads " +
+      "`dumpsys`, whose field names differ between Android releases and OEM builds, so 'timed out' " +
+      "can mean either 'the app really did not come to the front' or 'this device does not let us " +
+      "see which app is in front'. The result carries the raw output it saw, so check it before " +
+      "concluding the app failed to open. Use it instead of assuming the app has finished loading.",
     input: z.object({
       package: z.string().optional().describe("Package id to wait for, e.g. com.tencent.mm."),
       activity: z.string().optional().describe("Substring of the activity name to wait for."),
@@ -411,6 +416,7 @@ export function createAutomationTools(deps: {
     ) {
       const automation = await requireScreen("screen waiting");
       const deadline = Date.now() + input.timeoutMs;
+      let sawAny: string | undefined;
       for (;;) {
         const window = await automation.currentWindow();
         const packageOk = !input.package || window.package === input.package;
@@ -418,10 +424,17 @@ export function createAutomationTools(deps: {
         if (packageOk && activityOk) {
           return { matched: true, waitedMs: input.timeoutMs - (deadline - Date.now()), ...window };
         }
+        // Keep a non-empty reading only while nothing has been recognised: the last attempt is
+        // usually the most informative, but on a device where detection never works every
+        // attempt carries the same diagnostic and only the first one is worth returning.
+        if (!sawAny || Date.now() >= deadline) sawAny = window.raw;
         if (Date.now() >= deadline) {
+          const neverSaw = window.package === undefined;
           return {
             matched: false,
-            reason: "timed out before the screen matched",
+            reason: neverSaw
+              ? "timeout, and no foreground app could be read at all on this device — this is a detection failure, not necessarily a failure to open. The raw output below is what the probe returned."
+              : "timed out before the screen matched",
             wanted: { package: input.package, activity: input.activity },
             ...window,
           };
