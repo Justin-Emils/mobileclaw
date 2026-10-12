@@ -434,16 +434,30 @@ export async function bootstrapRuntime(
     for (const [id, notificationId] of [...posted]) {
       if (waiting.has(id)) continue;
       posted.delete(id);
+      eventLog.info("approval", "withdrawing the approval notification", { approvalId: id });
       void withdrawApprovalNotification(notificationId);
     }
     for (const entry of pending) {
       if (posted.has(entry.id)) continue;
       posted.set(entry.id, entry.id);
-      void postApprovalNotification(entry).catch((error: unknown) => {
-        eventLog.warn("approval", "could not post the approval notification", {
-          detail: error instanceof Error ? error.message : String(error),
-        });
+      eventLog.info("approval", "posting the approval notification", {
+        approvalId: entry.id,
+        title: entry.title,
       });
+      void postApprovalNotification(entry)
+        .then(() => {
+          // Logged apart from the attempt: "asked" and "the platform accepted it" are different
+          // facts, and only the second says the notice reached the system. Without it, a banner
+          // that never appeared looks identical to a post that never happened.
+          eventLog.info("approval", "approval notification handed to the system", {
+            approvalId: entry.id,
+          });
+        })
+        .catch((error: unknown) => {
+          eventLog.warn("approval", "could not post the approval notification", {
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        });
     }
   };
 
