@@ -2,7 +2,14 @@ import type { ExpoConfig, ConfigContext } from "expo/config";
 // `expo/config-plugins` (the sub-export) rather than the `@expo/config-plugins`
 // package: Expo requires the former, and installing the latter directly makes
 // expo-doctor fail and risks two copies of the plugin runtime.
-import { withAndroidManifest, withAppBuildGradle, withDangerousMod, withMainApplication, type ConfigPlugin } from "expo/config-plugins";
+import {
+  withAndroidManifest,
+  withAppBuildGradle,
+  withDangerousMod,
+  withGradleProperties,
+  withMainApplication,
+  type ConfigPlugin,
+} from "expo/config-plugins";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -585,6 +592,30 @@ interface ManifestService {
  * `android:stopWithTask="false"` matters: the default would tear the service down when the user
  * swipes the app away, and the point of it is to survive exactly that kind of backgrounding.
  */
+/**
+ * Raise the Gradle JVM heap.
+ *
+ * The Expo template sets \`-Xmx2048m\`, which is not enough for \`mergeDexRelease\` on this project:
+ * a full rebuild failed with \`D8: java.lang.OutOfMemoryError: Java heap space\`, and it failed at the
+ * very end of a six-minute build. Raising it to 4 GiB fixed it, and 4 GiB is a modest ask against the
+ * 31 GiB on the development machine.
+ *
+ * Written here rather than edited into \`android/gradle.properties\` by hand because that directory is
+ * generated: a hand edit survives exactly until the next \`expo prebuild\`, which is how the setting
+ * was lost the first time and how the failure came back.
+ */
+const withMobileClawMemory: ConfigPlugin = (config) =>
+  withGradleProperties(config, (cfg) => {
+    const key = "org.gradle.jvmargs";
+    const wanted = "-Xmx4096m -XX:MaxMetaspaceSize=1024m";
+    const existing = cfg.modResults.find(
+      (entry) => entry.type === "property" && entry.key === key,
+    ) as { type: "property"; key: string; value: string } | undefined;
+    if (existing) existing.value = wanted;
+    else cfg.modResults.push({ type: "property", key, value: wanted });
+    return cfg;
+  });
+
 const withMobileClawForegroundService: ConfigPlugin = (config) =>
   withAndroidManifest(config, (cfg) => {
     const application = cfg.modResults.manifest.application?.[0];
@@ -817,7 +848,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.6.2",
+    version: "0.6.4",
     orientation: "portrait",
     scheme: "mobileclaw",
     /**
@@ -857,7 +888,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Android decides "is this an upgrade" from versionCode, not versionName, and the
       // Expo template defaults it to 1 for every build. Keep it in step with `version`:
       // 0.2.0 ships as code 2.
-      versionCode: 27,
+      versionCode: 29,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
@@ -916,6 +947,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       withShizukuManifest as unknown as string,
       withShizukuGradle as unknown as string,
       withMobileClawForegroundService as unknown as string,
+        // Heap size for Gradle itself. Last in the list because it only writes a property and
+        // depends on nothing else here.
+        withMobileClawMemory as unknown as string,
       withLocalReleaseSigning as unknown as string,
       ...(playSafe ? [withPlaySafeStorage as unknown as string] : []),
     ],

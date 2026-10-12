@@ -74,11 +74,29 @@ class MobileClawApprovalReceiver : BroadcastReceiver() {
         fun notificationIdFor(approvalId: String): Int = 5000 + (approvalId.hashCode() and 0x0FFF)
 
         /**
-         * Post the question with its two buttons.
+         * Post the approval question with its two buttons.
          *
-         * On the `IMPORTANCE_HIGH` channel so Android shows it as a heads-up banner over whatever is
-         * on screen — a LOW channel would be silent and sit unnoticed in a tray the user has no
-         * reason to open, which is the failure being fixed.
+         * ## Why a separate notification on the HIGH channel
+         *
+         * Putting the buttons on the run's own notice was the first idea and it does not work: that
+         * notice lives on the `IMPORTANCE_LOW` channel, which is right for "still working" and wrong
+         * for a question — a low-importance notification is collapsed to one line and **its action
+         * buttons are not drawn at all**. The run's notice stays as it is, and the question gets its
+         * own notice on `IMPORTANCE_HIGH` so Android will show it as a banner over whatever is in
+         * front, which is the entire point.
+         *
+         * The id is derived from the approval id rather than counted, because the component that
+         * cancels this notice is a different one from the component that posts it.
+         *
+         * ## The buttons
+         *
+         * Built with the `Action` overload, not `addAction(icon, title, intent)`. The three-argument
+         * form was tried first and produced a notification that `dumpsys` reported as `actions=2`
+         * while the shade drew **no buttons** — registered and invisible, which is worse than absent
+         * because everything except the screen said it had worked.
+         *
+         * The icon is a real system drawable. `0` is accepted by the API but is not something the
+         * shade can draw, which is the likeliest reason nothing appeared.
          */
         fun post(context: Context, approvalId: String, title: String, body: String) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -93,9 +111,29 @@ class MobileClawApprovalReceiver : BroadcastReceiver() {
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
                 // Tapping the body opens the app, which is the other way to answer: the sheet is there.
                 .setContentIntent(openApp(context, approvalId))
-                .setOngoing(true)
-                .addAction(0, "拒绝", action(context, approvalId, false))
-                .addAction(0, "本次允许", action(context, approvalId, true))
+                // Deliberately *not* `setOngoing(true)`.
+                //
+                // It was set at first, on the reasoning that a blocked run should not be dismissible by
+                // a swipe. On a device that made the notice impossible to **expand**, so its two
+                // buttons stayed hidden behind a long press — the user found them, but a control that
+                // requires discovering a gesture is not one that solves "the run stopped and nobody
+                // knows". An expandable notice shows the buttons, and a swipe that dismisses it leaves
+                // the in-app sheet and the blocked run untouched, so nothing is lost.
+                .setAutoCancel(false)
+                .addAction(
+                    NotificationCompat.Action(
+                        android.R.drawable.ic_menu_close_clear_cancel,
+                        "拒绝",
+                        action(context, approvalId, false),
+                    ),
+                )
+                .addAction(
+                    NotificationCompat.Action(
+                        android.R.drawable.ic_menu_send,
+                        "本次允许",
+                        action(context, approvalId, true),
+                    ),
+                )
                 .build()
 
             manager.notify(notificationIdFor(approvalId), notification)
