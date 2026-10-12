@@ -3,7 +3,7 @@ import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-na
 import type { InlineNode, ListItemNode, MarkdownBlock } from "@/ui/render/markdown";
 import { parseMarkdown } from "@/ui/render/markdown";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 /**
  * Markdown renderer for assistant messages.
@@ -37,6 +37,8 @@ export const MarkdownText = memo(function MarkdownText({
   color,
   onCopyCode,
 }: MarkdownProps) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const blocks = useMemo(() => parseMarkdown(text, streaming), [text, streaming]);
   const baseColor = color ?? theme.colors.text;
 
@@ -91,13 +93,15 @@ const BlockView = memo(function BlockView({
   first: boolean;
   onCopyCode?: (code: string) => void;
 }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   switch (block.type) {
     case "heading":
       return (
         <Text
           selectable
           style={[
-            headingStyle(block.level),
+            headingStyle(styles, block.level),
             { color: theme.colors.text, marginTop: first ? 0 : theme.space(3) },
           ]}
         >
@@ -176,6 +180,8 @@ const ListItem = memo(function ListItem({
   marker: string;
   color: string;
 }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   return (
     <View style={styles.listRow}>
       <Text selectable style={[styles.listMarker, { color: theme.colors.textMuted }]}>
@@ -238,6 +244,8 @@ const TableView = memo(function TableView({
 }: {
   block: Extract<MarkdownBlock, { type: "table" }>;
 }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const { columns, align, rows } = buildTableGrid(block);
   const cellStyle = (index: number) => {
     const value = align[index] ?? null;
@@ -286,6 +294,8 @@ const Inline = memo(function Inline({
   nodes: InlineNode[];
   color: string;
 }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   return (
     <>
       {nodes.map((node, index) => {
@@ -338,21 +348,28 @@ const Inline = memo(function Inline({
   );
 });
 
-function headingStyle(level: number) {
+/**
+ * Heading style for a level.
+ *
+ * Takes the styles rather than reading a module-level sheet: the sheet is now built per palette, so a
+ * helper outside a component has nothing to read at module scope.
+ */
+function headingStyle(sheet: ReturnType<(typeof themedStyles)>, level: number) {
   switch (level) {
     case 1:
-      return styles.h1;
+      return sheet.h1;
     case 2:
-      return styles.h2;
+      return sheet.h2;
     case 3:
-      return styles.h3;
+      return sheet.h3;
     default:
-      return styles.h4;
+      return sheet.h4;
   }
 }
 
 /** Copy affordance: long-press any code block to select it. */
 export const CopyHint = memo(function CopyHint() {
+  const styles = useThemedStyles(themedStyles);
   return (
     <Pressable>
       <Text style={styles.copyHint}>长按可复制</Text>
@@ -360,79 +377,82 @@ export const CopyHint = memo(function CopyHint() {
   );
 });
 
-const styles = StyleSheet.create({
-  paragraph: { fontSize: 15, lineHeight: 23 },
-  h1: { fontSize: 21, fontWeight: "700", lineHeight: 29 },
-  h2: { fontSize: 19, fontWeight: "700", lineHeight: 27 },
-  h3: { fontSize: 17, fontWeight: "600", lineHeight: 25 },
-  h4: { fontSize: 15, fontWeight: "600", lineHeight: 23 },
-  strong: { fontWeight: "700" },
-  em: { fontStyle: "italic" },
-  del: { textDecorationLine: "line-through", color: theme.colors.textFaint },
-  link: { color: theme.colors.accent, textDecorationLine: "underline" },
-  inlineCode: {
-    fontFamily: theme.font.mono,
-    fontSize: 13.5,
-    color: theme.colors.warning,
-    backgroundColor: theme.colors.background,
-  },
-  codeBlock: {
-    marginTop: theme.space(2.5),
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.radius.md,
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: theme.space(2),
-    paddingHorizontal: theme.space(3),
-  },
-  codeHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: theme.space(1),
-  },
-  copyAction: { color: theme.colors.accent, fontSize: 11, fontWeight: "600" },
-  codeLang: {
-    color: theme.colors.textFaint,
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginBottom: theme.space(1),
-  },
-  codeText: { fontFamily: theme.font.mono, fontSize: 12.5, lineHeight: 19, color: theme.colors.text },
-  copyHint: { color: theme.colors.textFaint, fontSize: 10, marginTop: theme.space(1) },
-  listRow: { flexDirection: "row", alignItems: "flex-start", marginTop: theme.space(1) },
-  listMarker: { fontSize: 15, lineHeight: 23, minWidth: 20, fontVariant: ["tabular-nums"] },
-  listContent: { flex: 1 },
-  quote: {
-    borderLeftColor: theme.colors.accent,
-    borderLeftWidth: 3,
-    paddingLeft: theme.space(3),
-    paddingVertical: theme.space(1),
-  },
-  hr: { height: StyleSheet.hairlineWidth, backgroundColor: theme.colors.border },
-  tableScroll: { marginTop: theme.space(2.5) },
-  tableContent: { paddingRight: theme.space(2) },
-  table: {
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: theme.radius.sm,
-    overflow: "hidden",
-  },
-  tableRow: { flexDirection: "row" },
-  tableHeaderRow: { backgroundColor: theme.colors.surfaceAlt },
-  tableRowAlt: { backgroundColor: "rgba(255,255,255,0.02)" },
-  cell: {
-    paddingVertical: theme.space(2),
-    paddingHorizontal: theme.space(2.5),
-    borderRightColor: theme.colors.border,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    minWidth: 88,
-    maxWidth: 260,
-    justifyContent: "center",
-  },
-  cellRight: { justifyContent: "center" },
-  cellCenter: { justifyContent: "center" },
-  headerCellText: { color: theme.colors.text, fontSize: 13, fontWeight: "700", lineHeight: 19 },
-  cellText: { color: theme.colors.text, fontSize: 13, lineHeight: 19 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    paragraph: { fontSize: 15, lineHeight: 23 },
+    h1: { fontSize: 21, fontWeight: "700", lineHeight: 29 },
+    h2: { fontSize: 19, fontWeight: "700", lineHeight: 27 },
+    h3: { fontSize: 17, fontWeight: "600", lineHeight: 25 },
+    h4: { fontSize: 15, fontWeight: "600", lineHeight: 23 },
+    strong: { fontWeight: "700" },
+    em: { fontStyle: "italic" },
+    del: { textDecorationLine: "line-through", color: colors.textFaint },
+    link: { color: colors.accent, textDecorationLine: "underline" },
+    inlineCode: {
+      fontFamily: theme.font.mono,
+      fontSize: 13.5,
+      color: colors.warning,
+      backgroundColor: colors.background,
+    },
+    codeBlock: {
+      marginTop: theme.space(2.5),
+      backgroundColor: colors.background,
+      borderRadius: theme.radius.md,
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+      paddingVertical: theme.space(2),
+      paddingHorizontal: theme.space(3),
+    },
+    codeHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: theme.space(1),
+    },
+    copyAction: { color: colors.accent, fontSize: 11, fontWeight: "600" },
+    codeLang: {
+      color: colors.textFaint,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      marginBottom: theme.space(1),
+    },
+    codeText: { fontFamily: theme.font.mono, fontSize: 12.5, lineHeight: 19, color: colors.text },
+    copyHint: { color: colors.textFaint, fontSize: 10, marginTop: theme.space(1) },
+    listRow: { flexDirection: "row", alignItems: "flex-start", marginTop: theme.space(1) },
+    listMarker: { fontSize: 15, lineHeight: 23, minWidth: 20, fontVariant: ["tabular-nums"] },
+    listContent: { flex: 1 },
+    quote: {
+      borderLeftColor: colors.accent,
+      borderLeftWidth: 3,
+      paddingLeft: theme.space(3),
+      paddingVertical: theme.space(1),
+    },
+    hr: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
+    tableScroll: { marginTop: theme.space(2.5) },
+    tableContent: { paddingRight: theme.space(2) },
+    table: {
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: theme.radius.sm,
+      overflow: "hidden",
+    },
+    tableRow: { flexDirection: "row" },
+    tableHeaderRow: { backgroundColor: colors.surfaceAlt },
+    tableRowAlt: { backgroundColor: "rgba(255,255,255,0.02)" },
+    cell: {
+      paddingVertical: theme.space(2),
+      paddingHorizontal: theme.space(2.5),
+      borderRightColor: colors.border,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      minWidth: 88,
+      maxWidth: 260,
+      justifyContent: "center",
+    },
+    cellRight: { justifyContent: "center" },
+    cellCenter: { justifyContent: "center" },
+    headerCellText: { color: colors.text, fontSize: 13, fontWeight: "700", lineHeight: 19 },
+    cellText: { color: colors.text, fontSize: 13, lineHeight: 19 },
+  });
 });

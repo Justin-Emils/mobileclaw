@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { clampFraction, containRect, toFraction, type Point, type Size } from "@/ui/point-mapping";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useThemedStyles } from "@/ui/theme-tokens";
 
 /** Drawn size of the crosshair, in points. */
 const MARKER_RADIUS = 12;
@@ -38,6 +38,7 @@ export function PointPicker({
   onConfirm: (point: Point) => void;
   onCancel: () => void;
 }) {
+  const styles = useThemedStyles(themedStyles);
   const [imageSize, setImageSize] = useState<Size>();
   const [box, setBox] = useState<Size>();
   const [picked, setPicked] = useState<Point>();
@@ -127,40 +128,43 @@ export function PointPicker({
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-    padding: theme.space(4),
-    gap: theme.space(3),
-  },
-  title: { color: theme.colors.text, fontSize: 18, fontWeight: "600" },
-  hint: { color: theme.colors.textMuted, fontSize: 13, lineHeight: 19 },
-  canvas: {
-    flex: 1,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    overflow: "hidden",
-  },
-  marker: {
-    position: "absolute",
-    width: MARKER_RADIUS * 2,
-    height: MARKER_RADIUS * 2,
-    borderRadius: MARKER_RADIUS,
-    borderWidth: 2,
-    borderColor: theme.colors.accent,
-    backgroundColor: "rgba(255,255,255,0.25)",
-  },
-  readout: { color: theme.colors.text, fontSize: 13, fontFamily: theme.font.mono },
-  actions: { flexDirection: "row", gap: theme.space(2), justifyContent: "flex-end" },
-  button: {
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(2.5),
-    borderRadius: theme.radius.md,
-  },
-  cancel: { backgroundColor: theme.colors.surfaceAlt },
-  cancelText: { color: theme.colors.text, fontWeight: "600" },
-  confirm: { backgroundColor: theme.colors.accent },
-  confirmText: { color: "#fff", fontWeight: "600" },
-  disabled: { opacity: 0.4 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: colors.background,
+      padding: theme.space(4),
+      gap: theme.space(3),
+    },
+    title: { color: colors.text, fontSize: 18, fontWeight: "600" },
+    hint: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+    canvas: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      overflow: "hidden",
+    },
+    marker: {
+      position: "absolute",
+      width: MARKER_RADIUS * 2,
+      height: MARKER_RADIUS * 2,
+      borderRadius: MARKER_RADIUS,
+      borderWidth: 2,
+      borderColor: colors.accent,
+      backgroundColor: "rgba(255,255,255,0.25)",
+    },
+    readout: { color: colors.text, fontSize: 13, fontFamily: theme.font.mono },
+    actions: { flexDirection: "row", gap: theme.space(2), justifyContent: "flex-end" },
+    button: {
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(2.5),
+      borderRadius: theme.radius.md,
+    },
+    cancel: { backgroundColor: colors.surfaceAlt },
+    cancelText: { color: colors.text, fontWeight: "600" },
+    confirm: { backgroundColor: colors.accent },
+    confirmText: { color: "#fff", fontWeight: "600" },
+    disabled: { opacity: 0.4 },
+  });
 });

@@ -22,7 +22,7 @@ import { renderContent } from "@/ui/render";
 import type { AllFilesAccessReport } from "@/runtime/services/permissions";
 import { toBubbles as toTranscriptBubbles } from "@/ui/conversation-view";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 interface Bubble {  id: string;
   role: "user" | "assistant" | "notice";
@@ -42,6 +42,10 @@ interface Bubble {  id: string;
 const PERMISSION_PROMPT_FLAG = "storage.permissionPrompted";
 
 export default function ChatScreen() {
+
+  const styles = useThemedStyles(themedStyles);
+
+  const { theme } = useTheme();
   const state = useRuntimeState();
   const params = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
@@ -418,6 +422,8 @@ export default function ChatScreen() {
 }
 
 function ToolCardList({ tools }: { tools: TranscriptEntry[] }) {
+
+  const styles = useThemedStyles(themedStyles);
   return (
     <View style={styles.toolList}>
       <Text style={styles.sectionLabel}>{strings.chat.toolActivity}</Text>
@@ -429,6 +435,10 @@ function ToolCardList({ tools }: { tools: TranscriptEntry[] }) {
 }
 
 function BubbleView({ bubble }: { bubble: Bubble }) {
+
+  const styles = useThemedStyles(themedStyles);
+
+  const { theme } = useTheme();
   /** Briefly show "已复制" after a copy, so the tap has visible feedback. */
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -559,123 +569,126 @@ function applyEvent(
   }
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(2),
-    borderBottomColor: theme.colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerModel: { color: theme.colors.textMuted, fontSize: 12, flexShrink: 1 },
-  headerActions: { flexDirection: "row", gap: theme.space(2) },
-  headerButton: {
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(1.5),
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.surfaceAlt,
-  },
-  headerButtonText: { color: theme.colors.text, fontSize: 12 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space(3) },
-  listContent: { padding: theme.space(4), gap: theme.space(3) },
-  empty: { paddingTop: theme.space(16), gap: theme.space(3) },
-  emptyTitle: { color: theme.colors.text, fontSize: 20, fontWeight: "600" },
-  muted: { color: theme.colors.textMuted, fontSize: 13, lineHeight: 20 },
-  error: { color: theme.colors.danger, fontSize: 13, padding: theme.space(4), textAlign: "center" },
-  bubbleRow: { flexDirection: "row" },
-  bubbleRowMine: { justifyContent: "flex-end" },
-  bubble: { maxWidth: "88%", borderRadius: theme.radius.lg, padding: theme.space(3.5) },
-  bubbleMine: { backgroundColor: theme.colors.accentSoft },
-  bubbleTheirs: { backgroundColor: theme.colors.surface },
-  bubbleText: { color: theme.colors.text, fontSize: 15, lineHeight: 22 },
-  notice: {
-    borderLeftColor: theme.colors.border,
-    borderLeftWidth: 2,
-    paddingLeft: theme.space(3),
-    paddingVertical: theme.space(1),
-  },
-  noticeText: { fontSize: 12, lineHeight: 18 },
-  storageBanner: {
-    backgroundColor: theme.colors.warningSoft,
-    borderColor: theme.colors.warning,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: theme.radius.md,
-    marginHorizontal: theme.space(4),
-    marginBottom: theme.space(2),
-    padding: theme.space(3),
-    gap: theme.space(1),
-  },
-  storageBannerTitle: { color: theme.colors.warning, fontSize: 13, fontWeight: "700" },
-  storageBannerBody: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
-  /** The system's own error text: monospace-ish and muted so it reads as raw evidence. */
-  storageBannerEvidence: {
-    color: theme.colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-    fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
-  },
-  storageBannerButton: {
-    alignSelf: "flex-start",
-    marginTop: theme.space(2),
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.accentSoft,
-  },
-  storageBannerButtonText: { color: theme.colors.text, fontSize: 12, fontWeight: "600" },
-  bubbleAction: { alignSelf: "flex-end", marginTop: theme.space(2), paddingVertical: theme.space(1) },
-  bubbleActionMine: { alignSelf: "flex-end" },
-  bubbleActionText: { color: theme.colors.textMuted, fontSize: 11, fontWeight: "600" },
-  toolList: { gap: theme.space(2), marginBottom: theme.space(2) },
-  sectionLabel: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-  },
-  status: { color: theme.colors.textFaint, fontSize: 11, paddingHorizontal: theme.space(4), paddingBottom: theme.space(1) },
-  continueBar: {
-    marginHorizontal: theme.space(3),
-    marginBottom: theme.space(2),
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(3),
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.accentSoft,
-    borderColor: theme.colors.accent,
-    borderWidth: 1,
-    gap: theme.space(1),
-  },
-  continueText: { color: theme.colors.text, fontWeight: "600", fontSize: 14 },
-  continueHint: { color: theme.colors.textMuted, fontSize: 11 },
-  composer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: theme.space(2),
-    padding: theme.space(3),
-    borderTopColor: theme.colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  input: {
-    flex: 1,
-    maxHeight: 140,
-    minHeight: 44,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    color: theme.colors.text,
-    fontSize: 15,
-  },
-  send: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(3),
-  },
-  sendDisabled: { opacity: 0.4 },
-  stop: { backgroundColor: theme.colors.danger },
-  sendText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(2),
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    headerModel: { color: colors.textMuted, fontSize: 12, flexShrink: 1 },
+    headerActions: { flexDirection: "row", gap: theme.space(2) },
+    headerButton: {
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(1.5),
+      borderRadius: theme.radius.pill,
+      backgroundColor: colors.surfaceAlt,
+    },
+    headerButtonText: { color: colors.text, fontSize: 12 },
+    center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space(3) },
+    listContent: { padding: theme.space(4), gap: theme.space(3) },
+    empty: { paddingTop: theme.space(16), gap: theme.space(3) },
+    emptyTitle: { color: colors.text, fontSize: 20, fontWeight: "600" },
+    muted: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
+    error: { color: colors.danger, fontSize: 13, padding: theme.space(4), textAlign: "center" },
+    bubbleRow: { flexDirection: "row" },
+    bubbleRowMine: { justifyContent: "flex-end" },
+    bubble: { maxWidth: "88%", borderRadius: theme.radius.lg, padding: theme.space(3.5) },
+    bubbleMine: { backgroundColor: colors.accentSoft },
+    bubbleTheirs: { backgroundColor: colors.surface },
+    bubbleText: { color: colors.text, fontSize: 15, lineHeight: 22 },
+    notice: {
+      borderLeftColor: colors.border,
+      borderLeftWidth: 2,
+      paddingLeft: theme.space(3),
+      paddingVertical: theme.space(1),
+    },
+    noticeText: { fontSize: 12, lineHeight: 18 },
+    storageBanner: {
+      backgroundColor: colors.warningSoft,
+      borderColor: colors.warning,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderRadius: theme.radius.md,
+      marginHorizontal: theme.space(4),
+      marginBottom: theme.space(2),
+      padding: theme.space(3),
+      gap: theme.space(1),
+    },
+    storageBannerTitle: { color: colors.warning, fontSize: 13, fontWeight: "700" },
+    storageBannerBody: { color: colors.text, fontSize: 12, lineHeight: 18 },
+    /** The system's own error text: monospace-ish and muted so it reads as raw evidence. */
+    storageBannerEvidence: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 16,
+      fontFamily: Platform.OS === "ios" ? "Menlo" : "monospace",
+    },
+    storageBannerButton: {
+      alignSelf: "flex-start",
+      marginTop: theme.space(2),
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.sm,
+      backgroundColor: colors.accentSoft,
+    },
+    storageBannerButtonText: { color: colors.text, fontSize: 12, fontWeight: "600" },
+    bubbleAction: { alignSelf: "flex-end", marginTop: theme.space(2), paddingVertical: theme.space(1) },
+    bubbleActionMine: { alignSelf: "flex-end" },
+    bubbleActionText: { color: colors.textMuted, fontSize: 11, fontWeight: "600" },
+    toolList: { gap: theme.space(2), marginBottom: theme.space(2) },
+    sectionLabel: {
+      color: colors.textFaint,
+      fontSize: 11,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+    },
+    status: { color: colors.textFaint, fontSize: 11, paddingHorizontal: theme.space(4), paddingBottom: theme.space(1) },
+    continueBar: {
+      marginHorizontal: theme.space(3),
+      marginBottom: theme.space(2),
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(3),
+      borderRadius: theme.radius.md,
+      backgroundColor: colors.accentSoft,
+      borderColor: colors.accent,
+      borderWidth: 1,
+      gap: theme.space(1),
+    },
+    continueText: { color: colors.text, fontWeight: "600", fontSize: 14 },
+    continueHint: { color: colors.textMuted, fontSize: 11 },
+    composer: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: theme.space(2),
+      padding: theme.space(3),
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    input: {
+      flex: 1,
+      maxHeight: 140,
+      minHeight: 44,
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      color: colors.text,
+      fontSize: 15,
+    },
+    send: {
+      backgroundColor: colors.accent,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(3),
+    },
+    sendDisabled: { opacity: 0.4 },
+    stop: { backgroundColor: colors.danger },
+    sendText: { color: "#fff", fontWeight: "600", fontSize: 14 },
+  });
 });

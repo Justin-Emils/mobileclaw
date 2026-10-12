@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Image, Pressable, StyleSheet, Text, View } from "react-native";
 import type { TranscriptEntry } from "@mobileclaw/core";
 import { safeStringify } from "@mobileclaw/core";
-import { statusColor, theme } from "@/ui/theme";
+import { createThemedStyles, statusColor, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 import { strings } from "@/ui/strings";
 
 type ToolEntry = Extract<TranscriptEntry, { kind: "tool" }>;
@@ -31,8 +31,11 @@ function statusLabel(status: ToolEntry["status"]): string {
  * shown so the user can audit exactly what left the device.
  */
 export function ToolCard({ entry }: { entry: ToolEntry }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const [open, setOpen] = useState(false);
-  const color = statusColor(entry.status);
+  // The palette is passed in rather than read from a constant, so the dot follows the theme.
+  const color = statusColor(theme.colors, entry.status);
   const title = entry.summary ?? entry.name;
   const shot = entry.evidence;
   const aspect = shot && shot.height > 0 ? shot.width / shot.height : 1;
@@ -93,47 +96,52 @@ export function ToolCard({ entry }: { entry: ToolEntry }) {
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: theme.colors.tool,
-    borderRadius: theme.radius.md,
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: "hidden",
-  },
-  head: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.space(2),
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-  },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  name: { color: theme.colors.text, fontSize: 12, fontWeight: "600", fontFamily: theme.font.mono },
-  summary: { color: theme.colors.textMuted, fontSize: 11, flex: 1 },
-  status: { fontSize: 10, textTransform: "uppercase" },
-  duration: { color: theme.colors.textFaint, fontSize: 10 },
-  body: {
-    padding: theme.space(3),
-    gap: theme.space(1),
-    borderTopColor: theme.colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  label: {
-    color: theme.colors.textFaint,
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1,
-    marginTop: theme.space(1),
-  },
-  code: { color: theme.colors.text, fontSize: 11, fontFamily: theme.font.mono, lineHeight: 16 },
-  badge: { color: theme.colors.textFaint, fontSize: 10 },
-  evidence: {
-    width: "100%",
-    borderRadius: theme.radius.md,
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginTop: theme.space(1),
-  },
-  note: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16 },
+const themedStyles = createThemedStyles((theme) => {
+  // The whole theme is in scope, so `theme.space`/`theme.radius`/`theme.font` keep working;
+  // only the palette is rebound to `colors`, which is what the style bodies below use.
+  const colors = theme.colors;
+  return StyleSheet.create({
+    card: {
+      backgroundColor: colors.tool,
+      borderRadius: theme.radius.md,
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: "hidden",
+    },
+    head: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space(2),
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+    },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    name: { color: colors.text, fontSize: 12, fontWeight: "600", fontFamily: theme.font.mono },
+    summary: { color: colors.textMuted, fontSize: 11, flex: 1 },
+    status: { fontSize: 10, textTransform: "uppercase" },
+    duration: { color: colors.textFaint, fontSize: 10 },
+    body: {
+      padding: theme.space(3),
+      gap: theme.space(1),
+      borderTopColor: colors.border,
+      borderTopWidth: StyleSheet.hairlineWidth,
+    },
+    label: {
+      color: colors.textFaint,
+      fontSize: 10,
+      textTransform: "uppercase",
+      letterSpacing: 1,
+      marginTop: theme.space(1),
+    },
+    code: { color: colors.text, fontSize: 11, fontFamily: theme.font.mono, lineHeight: 16 },
+    badge: { color: colors.textFaint, fontSize: 10 },
+    evidence: {
+      width: "100%",
+      borderRadius: theme.radius.md,
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+      marginTop: theme.space(1),
+    },
+    note: { color: colors.textMuted, fontSize: 11, lineHeight: 16 },
+  });
 });

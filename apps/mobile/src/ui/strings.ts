@@ -139,6 +139,12 @@ export const strings = {
   settings: {
     title: "设置",
     offlineWarningTitle: "离线演示模式",
+    /** 外观：主题跟随系统或强制某一种。 */
+    appearance: "外观",
+    themeSystem: "跟随系统",
+    themeLight: "浅色",
+    themeDark: "深色",
+    appearanceHint: "「跟随系统」会随手机的深色模式自动切换。",
     modelProvider: "模型服务商",
     baseUrl: "接口地址（OpenAI 兼容）",
     model: "模型名称",

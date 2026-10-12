@@ -4,7 +4,7 @@ import { Link, useFocusEffect } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics"]>>;
 
@@ -15,6 +15,8 @@ type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics
  * SecureStore and the runtime keeps it in memory only.
  */
 export default function SettingsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const { theme, mode: themeMode, setMode: setThemeMode } = useTheme();
   const state = useRuntimeState();
   const runtime = useRuntime();
 
@@ -161,6 +163,32 @@ export default function SettingsScreen() {
           <Text style={styles.warnText}>{state.error}</Text>
         </View>
       ) : null}
+
+      {/*
+        Appearance comes first: it is the only setting on this screen that changes what the user sees
+        as they touch it, and burying it under the provider and key fields would make a visible control
+        hard to find.
+      */}
+      <Section title={strings.settings.appearance}>
+        <View style={styles.chips}>
+          {(["system", "light", "dark"] as const).map((candidate) => (
+            <Pressable
+              key={candidate}
+              style={[styles.chip, themeMode === candidate ? styles.chipActive : null]}
+              onPress={() => setThemeMode(candidate)}
+            >
+              <Text style={styles.chipText}>
+                {candidate === "system"
+                  ? strings.settings.themeSystem
+                  : candidate === "light"
+                    ? strings.settings.themeLight
+                    : strings.settings.themeDark}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={styles.hint}>{strings.settings.appearanceHint}</Text>
+      </Section>
 
       <Section title={strings.settings.modelProvider}>
         <View style={styles.chips}>
@@ -463,6 +491,8 @@ export default function SettingsScreen() {
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+
+  const styles = useThemedStyles(themedStyles);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -472,6 +502,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+
+  const styles = useThemedStyles(themedStyles);
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
@@ -482,6 +514,8 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /** One line of the self-check panel: label, value, and a pass/fail marker. */
 function DiagRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   return (
     <View style={styles.diagRow}>
       <Text style={[styles.diagMark, { color: ok ? theme.colors.success : theme.colors.danger }]}>
@@ -493,88 +527,91 @@ function DiagRow({ label, value, ok }: { label: string; value: string; ok: boole
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
-  section: { gap: theme.space(3) },
-  sectionTitle: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  field: { gap: theme.space(1.5) },
-  label: { color: theme.colors.textMuted, fontSize: 12 },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    color: theme.colors.text,
-    fontSize: 14,
-  },
-  multiline: { minHeight: 96, textAlignVertical: "top" },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
-  chip: {
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.pill,
-    backgroundColor: theme.colors.surfaceAlt,
-  },
-  chipActive: { backgroundColor: theme.colors.accentSoft, borderColor: theme.colors.accent, borderWidth: 1 },
-  chipText: { color: theme.colors.text, fontSize: 12 },
-  row: { flexDirection: "row", gap: theme.space(2), flexWrap: "wrap" },
-  button: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(2.5),
-  },
-  buttonDisabled: { opacity: 0.5 },
-  buttonRow: { flexDirection: "row", gap: theme.space(2), marginTop: theme.space(2) },
-  buttonFlex: { flex: 1 },
-  buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
-  buttonGhost: {
-    backgroundColor: theme.colors.surfaceAlt,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(2.5),
-  },
-  buttonGhostText: { color: theme.colors.text, fontWeight: "600", fontSize: 13 },
-  hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
-  warning: { color: theme.colors.warning, fontSize: 12, lineHeight: 18, marginTop: theme.space(1) },
-  strong: { color: theme.colors.text, fontWeight: "600" },
-  statusBox: {
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    borderWidth: 1,
-  },
-  statusOk: { backgroundColor: "rgba(63,199,138,0.12)", borderColor: theme.colors.success },
-  statusBad: { backgroundColor: theme.colors.dangerSoft, borderColor: theme.colors.danger },
-  statusText: { fontSize: 13, fontWeight: "600" },
-  statusTextOk: { color: theme.colors.success },
-  statusTextBad: { color: theme.colors.danger },
-  diagBox: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.space(3),
-    gap: theme.space(2),
-  },
-  diagRow: { flexDirection: "row", alignItems: "flex-start", gap: theme.space(2) },
-  diagMark: { fontSize: 12, fontWeight: "700", width: 14 },
-  diagLabel: { color: theme.colors.textMuted, fontSize: 12, width: 96 },
-  diagValue: { color: theme.colors.text, fontSize: 12, flex: 1, fontFamily: theme.font.mono },
-  pluginRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  pluginName: { color: theme.colors.text, fontSize: 12, fontFamily: theme.font.mono, flex: 1 },
-  pluginMeta: { color: theme.colors.textMuted, fontSize: 11 },
-  warnBox: {
-    backgroundColor: theme.colors.dangerSoft,
-    borderRadius: theme.radius.md,
-    padding: theme.space(3),
-    gap: theme.space(1),
-  },
-  warnTitle: { color: theme.colors.danger, fontWeight: "600", fontSize: 13 },
-  warnText: { color: theme.colors.text, fontSize: 12 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
+    section: { gap: theme.space(3) },
+    sectionTitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    field: { gap: theme.space(1.5) },
+    label: { color: colors.textMuted, fontSize: 12 },
+    input: {
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      color: colors.text,
+      fontSize: 14,
+    },
+    multiline: { minHeight: 96, textAlignVertical: "top" },
+    chips: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
+    chip: {
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.pill,
+      backgroundColor: colors.surfaceAlt,
+    },
+    chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accent, borderWidth: 1 },
+    chipText: { color: colors.text, fontSize: 12 },
+    row: { flexDirection: "row", gap: theme.space(2), flexWrap: "wrap" },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(2.5),
+    },
+    buttonDisabled: { opacity: 0.5 },
+    buttonRow: { flexDirection: "row", gap: theme.space(2), marginTop: theme.space(2) },
+    buttonFlex: { flex: 1 },
+    buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+    buttonGhost: {
+      backgroundColor: colors.surfaceAlt,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(2.5),
+    },
+    buttonGhostText: { color: colors.text, fontWeight: "600", fontSize: 13 },
+    hint: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+    warning: { color: colors.warning, fontSize: 12, lineHeight: 18, marginTop: theme.space(1) },
+    strong: { color: colors.text, fontWeight: "600" },
+    statusBox: {
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      borderWidth: 1,
+    },
+    statusOk: { backgroundColor: "rgba(63,199,138,0.12)", borderColor: colors.success },
+    statusBad: { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
+    statusText: { fontSize: 13, fontWeight: "600" },
+    statusTextOk: { color: colors.success },
+    statusTextBad: { color: colors.danger },
+    diagBox: {
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      padding: theme.space(3),
+      gap: theme.space(2),
+    },
+    diagRow: { flexDirection: "row", alignItems: "flex-start", gap: theme.space(2) },
+    diagMark: { fontSize: 12, fontWeight: "700", width: 14 },
+    diagLabel: { color: colors.textMuted, fontSize: 12, width: 96 },
+    diagValue: { color: colors.text, fontSize: 12, flex: 1, fontFamily: theme.font.mono },
+    pluginRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    pluginName: { color: colors.text, fontSize: 12, fontFamily: theme.font.mono, flex: 1 },
+    pluginMeta: { color: colors.textMuted, fontSize: 11 },
+    warnBox: {
+      backgroundColor: colors.dangerSoft,
+      borderRadius: theme.radius.md,
+      padding: theme.space(3),
+      gap: theme.space(1),
+    },
+    warnTitle: { color: colors.danger, fontWeight: "600", fontSize: 13 },
+    warnText: { color: colors.text, fontSize: 12 },
+  });
 });

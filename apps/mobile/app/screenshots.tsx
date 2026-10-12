@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { useRuntime } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 import {
   RETENTION_CHOICES,
   retentionMs,
@@ -45,6 +45,8 @@ import {
  * wait three days.
  */
 export default function ScreenshotsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const runtime = useRuntime();
 
   const [files, setFiles] = useState<Array<ScreenshotFile & { expired: boolean }>>([]);
@@ -236,63 +238,66 @@ export default function ScreenshotsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.space(6) },
-  section: { gap: theme.space(3) },
-  sectionTitle: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
-  faint: { color: theme.colors.textFaint, fontSize: 11, lineHeight: 16 },
-  usage: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
-  warning: { color: theme.colors.warning, fontSize: 12, lineHeight: 18 },
-  notice: { color: theme.colors.success, fontSize: 12, lineHeight: 18 },
-  choices: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
-  choice: {
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.pill,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  choiceActive: { borderColor: theme.colors.accent, backgroundColor: theme.colors.accentSoft },
-  choiceText: { color: theme.colors.textMuted, fontSize: 12 },
-  choiceTextActive: { color: theme.colors.text, fontWeight: "600" },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.space(3),
-    padding: theme.space(2),
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  thumb: { width: 56, height: 96, borderRadius: theme.radius.sm, backgroundColor: theme.colors.surfaceAlt },
-  rowBody: { flex: 1, gap: theme.space(1) },
-  rowTime: { color: theme.colors.text, fontSize: 12 },
-  deleteButton: {
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.danger,
-    backgroundColor: theme.colors.dangerSoft,
-  },
-  deleteText: { color: theme.colors.danger, fontSize: 12, fontWeight: "600" },
-  clearButton: {
-    alignItems: "center",
-    paddingVertical: theme.space(3),
-    borderRadius: theme.radius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.danger,
-    backgroundColor: theme.colors.dangerSoft,
-  },
-  clearText: { color: theme.colors.danger, fontSize: 13, fontWeight: "600" },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
+    center: { flex: 1, alignItems: "center", justifyContent: "center", padding: theme.space(6) },
+    section: { gap: theme.space(3) },
+    sectionTitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    hint: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+    faint: { color: colors.textFaint, fontSize: 11, lineHeight: 16 },
+    usage: { color: colors.text, fontSize: 13, fontWeight: "600" },
+    warning: { color: colors.warning, fontSize: 12, lineHeight: 18 },
+    notice: { color: colors.success, fontSize: 12, lineHeight: 18 },
+    choices: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
+    choice: {
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.pill,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    choiceActive: { borderColor: colors.accent, backgroundColor: colors.accentSoft },
+    choiceText: { color: colors.textMuted, fontSize: 12 },
+    choiceTextActive: { color: colors.text, fontWeight: "600" },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space(3),
+      padding: theme.space(2),
+      borderRadius: theme.radius.md,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    thumb: { width: 56, height: 96, borderRadius: theme.radius.sm, backgroundColor: colors.surfaceAlt },
+    rowBody: { flex: 1, gap: theme.space(1) },
+    rowTime: { color: colors.text, fontSize: 12 },
+    deleteButton: {
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.sm,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      backgroundColor: colors.dangerSoft,
+    },
+    deleteText: { color: colors.danger, fontSize: 12, fontWeight: "600" },
+    clearButton: {
+      alignItems: "center",
+      paddingVertical: theme.space(3),
+      borderRadius: theme.radius.md,
+      borderWidth: 1,
+      borderColor: colors.danger,
+      backgroundColor: colors.dangerSoft,
+    },
+    clearText: { color: colors.danger, fontSize: 13, fontWeight: "600" },
+  });
 });

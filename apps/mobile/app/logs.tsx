@@ -4,7 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
 import { useRuntime } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 /**
  * The diagnostic log, on screen and shareable.
@@ -23,6 +23,8 @@ import { theme } from "@/ui/theme";
  * place for the truth to differ from the file.
  */
 export default function LogsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const runtime = useRuntime();
   const [text, setText] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -196,62 +198,65 @@ export default function LogsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  actions: {
-    flexDirection: "row",
-    gap: 8,
-    padding: 12,
-  },
-  button: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: theme.colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-  },
-  primary: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  buttonText: { color: theme.colors.text, fontSize: 13 },
-  primaryText: { color: theme.colors.background, fontWeight: "600" },
-  hint: {
-    color: theme.colors.textMuted,
-    fontSize: 12,
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-    lineHeight: 17,
-  },
-  status: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    fontFamily: "monospace",
-    paddingHorizontal: 12,
-    paddingBottom: 8,
-  },
-  backgroundBox: {
-    marginHorizontal: 12,
-    marginBottom: 10,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: theme.colors.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border,
-    gap: 8,
-  },
-  backgroundText: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
-  inlineButton: {
-    alignSelf: "flex-start",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: theme.colors.accent,
-  },
-  loading: { marginTop: 32 },
-  empty: { color: theme.colors.textMuted, textAlign: "center", marginTop: 32, paddingHorizontal: 24 },
-  scroll: { flex: 1, marginHorizontal: 12, marginBottom: 12 },
-  scrollContent: { paddingBottom: 24 },
-  // Monospace, and small: the value of this screen is being able to read many lines at once and
-  // copy them out verbatim, not comfortable prose.
-  log: { color: theme.colors.text, fontSize: 11, fontFamily: "monospace", lineHeight: 16 },
-  error: { color: theme.colors.danger, padding: 12 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    actions: {
+      flexDirection: "row",
+      gap: 8,
+      padding: 12,
+    },
+    button: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+    },
+    primary: { backgroundColor: colors.accent, borderColor: colors.accent },
+    buttonText: { color: colors.text, fontSize: 13 },
+    primaryText: { color: colors.background, fontWeight: "600" },
+    hint: {
+      color: colors.textMuted,
+      fontSize: 12,
+      paddingHorizontal: 12,
+      paddingBottom: 8,
+      lineHeight: 17,
+    },
+    status: {
+      color: colors.textFaint,
+      fontSize: 11,
+      fontFamily: "monospace",
+      paddingHorizontal: 12,
+      paddingBottom: 8,
+    },
+    backgroundBox: {
+      marginHorizontal: 12,
+      marginBottom: 10,
+      padding: 10,
+      borderRadius: 8,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      gap: 8,
+    },
+    backgroundText: { color: colors.text, fontSize: 12, lineHeight: 18 },
+    inlineButton: {
+      alignSelf: "flex-start",
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      backgroundColor: colors.accent,
+    },
+    loading: { marginTop: 32 },
+    empty: { color: colors.textMuted, textAlign: "center", marginTop: 32, paddingHorizontal: 24 },
+    scroll: { flex: 1, marginHorizontal: 12, marginBottom: 12 },
+    scrollContent: { paddingBottom: 24 },
+    // Monospace, and small: the value of this screen is being able to read many lines at once and
+    // copy them out verbatim, not comfortable prose.
+    log: { color: colors.text, fontSize: 11, fontFamily: "monospace", lineHeight: 16 },
+    error: { color: colors.danger, padding: 12 },
+  });
 });

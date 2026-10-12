@@ -4,7 +4,7 @@ import { RISK_LEVELS, type RiskLevel } from "@mobileclaw/core";
 import { useRuntime } from "@/ui/runtime-provider";
 import { DEFAULT_PERMISSIONS, type AppConfig } from "@/runtime/config";
 import { riskLabel, strings } from "@/ui/strings";
-import { riskColor, theme } from "@/ui/theme";
+import { createThemedStyles, riskColor, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 type Mode = "allow" | "ask" | "deny";
 const MODES: Mode[] = ["allow", "ask", "deny"];
@@ -24,6 +24,8 @@ const MODE_LABELS: Record<Mode, string> = {
  * fs_write". Per-tool session grants are handled by the approval sheet.
  */
 export default function PermissionsScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const runtime = useRuntime();
   const [config, setConfig] = useState<AppConfig>(() => runtime.getConfig());
   const [rootDraft, setRootDraft] = useState("");
@@ -77,7 +79,7 @@ export default function PermissionsScreen() {
           return (
             <View key={risk} style={styles.riskRow}>
               <View style={styles.riskLabel}>
-                <View style={[styles.dot, { backgroundColor: riskColor(risk) }]} />
+                <View style={[styles.dot, { backgroundColor: riskColor(theme.colors, risk) }]} />
                 <Text style={styles.riskText}>{riskLabel(risk)}</Text>
               </View>
               <View style={styles.segment}>
@@ -149,6 +151,8 @@ export default function PermissionsScreen() {
 }
 
 function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+
+  const styles = useThemedStyles(themedStyles);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
@@ -158,75 +162,78 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
-  section: { gap: theme.space(3) },
-  sectionTitle: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
-  riskRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space(3) },
-  riskLabel: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  riskText: { color: theme.colors.text, fontSize: 13 },
-  segment: {
-    flexDirection: "row",
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.pill,
-    padding: 2,
-  },
-  segmentItem: { paddingHorizontal: theme.space(3), paddingVertical: theme.space(1.5), borderRadius: theme.radius.pill },
-  segmentActive: { backgroundColor: theme.colors.accentSoft },
-  segmentText: { color: theme.colors.textMuted, fontSize: 12 },
-  segmentTextActive: { color: theme.colors.text, fontWeight: "600" },
-  ghost: {
-    alignSelf: "flex-start",
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.md,
-    backgroundColor: theme.colors.surfaceAlt,
-  },
-  ghostText: { color: theme.colors.text, fontSize: 12 },
-  rootRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: theme.space(3),
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-  },
-  rootText: { color: theme.colors.text, fontSize: 12, fontFamily: theme.font.mono, flexShrink: 1 },
-  remove: { color: theme.colors.danger, fontSize: 12 },
-  rootAdd: { flexDirection: "row", gap: theme.space(2) },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    color: theme.colors.text,
-    fontSize: 14,
-  },
-  rootInput: { flex: 1, fontFamily: theme.font.mono, fontSize: 12 },
-  button: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(4),
-    justifyContent: "center",
-  },
-  buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
-  toolWrap: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
-  toolChip: {
-    backgroundColor: theme.colors.tool,
-    borderRadius: theme.radius.pill,
-    paddingHorizontal: theme.space(2.5),
-    paddingVertical: theme.space(1.5),
-  },
-  toolChipText: { color: theme.colors.textMuted, fontSize: 11, fontFamily: theme.font.mono },
-  note: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
+    section: { gap: theme.space(3) },
+    sectionTitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    hint: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+    riskRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space(3) },
+    riskLabel: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
+    dot: { width: 8, height: 8, borderRadius: 4 },
+    riskText: { color: colors.text, fontSize: 13 },
+    segment: {
+      flexDirection: "row",
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.pill,
+      padding: 2,
+    },
+    segmentItem: { paddingHorizontal: theme.space(3), paddingVertical: theme.space(1.5), borderRadius: theme.radius.pill },
+    segmentActive: { backgroundColor: colors.accentSoft },
+    segmentText: { color: colors.textMuted, fontSize: 12 },
+    segmentTextActive: { color: colors.text, fontWeight: "600" },
+    ghost: {
+      alignSelf: "flex-start",
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.md,
+      backgroundColor: colors.surfaceAlt,
+    },
+    ghostText: { color: colors.text, fontSize: 12 },
+    rootRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: theme.space(3),
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+    },
+    rootText: { color: colors.text, fontSize: 12, fontFamily: theme.font.mono, flexShrink: 1 },
+    remove: { color: colors.danger, fontSize: 12 },
+    rootAdd: { flexDirection: "row", gap: theme.space(2) },
+    input: {
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      color: colors.text,
+      fontSize: 14,
+    },
+    rootInput: { flex: 1, fontFamily: theme.font.mono, fontSize: 12 },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(4),
+      justifyContent: "center",
+    },
+    buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+    toolWrap: { flexDirection: "row", flexWrap: "wrap", gap: theme.space(2) },
+    toolChip: {
+      backgroundColor: colors.tool,
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.space(2.5),
+      paddingVertical: theme.space(1.5),
+    },
+    toolChipText: { color: colors.textMuted, fontSize: 11, fontFamily: theme.font.mono },
+    note: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+  });
 });

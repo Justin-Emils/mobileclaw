@@ -3,7 +3,7 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from "react-native
 import { Link, useFocusEffect, useRouter } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, useThemedStyles } from "@/ui/theme-tokens";
 
 type Summary = { id: string; title: string; updatedAt: number };
 
@@ -18,6 +18,7 @@ type Summary = { id: string; title: string; updatedAt: number };
  * from a chat both show current data.
  */
 export default function ConversationsScreen() {
+  const styles = useThemedStyles(themedStyles);
   const state = useRuntimeState();
   const runtime = state.runtime;
   const router = useRouter();
@@ -121,45 +122,48 @@ function formatWhen(timestamp: number): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: theme.space(4),
-    paddingTop: theme.space(4),
-    paddingBottom: theme.space(2),
-    gap: theme.space(2),
-  },
-  title: { color: theme.colors.text, fontSize: 16, fontWeight: "600" },
-  headerButton: {
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2),
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.surfaceAlt,
-  },
-  headerButtonText: { color: theme.colors.text, fontSize: 13, fontWeight: "600" },
-  list: { paddingHorizontal: theme.space(4), paddingBottom: theme.space(6) },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: theme.space(3),
-    borderBottomColor: theme.colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: theme.space(2),
-  },
-  rowText: { flex: 1, gap: theme.space(1) },
-  rowTitle: { color: theme.colors.text, fontSize: 15 },
-  rowMeta: { color: theme.colors.textFaint, fontSize: 11 },
-  chevron: { color: theme.colors.textFaint, fontSize: 20 },
-  empty: { paddingVertical: theme.space(8), alignItems: "center" },
-  muted: { color: theme.colors.textMuted, fontSize: 13, textAlign: "center", lineHeight: 20 },
-  error: { color: theme.colors.danger, fontSize: 13, paddingHorizontal: theme.space(4) },
-  hint: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    textAlign: "center",
-    paddingBottom: theme.space(4),
-  },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingHorizontal: theme.space(4),
+      paddingTop: theme.space(4),
+      paddingBottom: theme.space(2),
+      gap: theme.space(2),
+    },
+    title: { color: colors.text, fontSize: 16, fontWeight: "600" },
+    headerButton: {
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2),
+      borderRadius: theme.radius.sm,
+      backgroundColor: colors.surfaceAlt,
+    },
+    headerButtonText: { color: colors.text, fontSize: 13, fontWeight: "600" },
+    list: { paddingHorizontal: theme.space(4), paddingBottom: theme.space(6) },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingVertical: theme.space(3),
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      gap: theme.space(2),
+    },
+    rowText: { flex: 1, gap: theme.space(1) },
+    rowTitle: { color: colors.text, fontSize: 15 },
+    rowMeta: { color: colors.textFaint, fontSize: 11 },
+    chevron: { color: colors.textFaint, fontSize: 20 },
+    empty: { paddingVertical: theme.space(8), alignItems: "center" },
+    muted: { color: colors.textMuted, fontSize: 13, textAlign: "center", lineHeight: 20 },
+    error: { color: colors.danger, fontSize: 13, paddingHorizontal: theme.space(4) },
+    hint: {
+      color: colors.textFaint,
+      fontSize: 11,
+      textAlign: "center",
+      paddingBottom: theme.space(4),
+    },
+  });
 });

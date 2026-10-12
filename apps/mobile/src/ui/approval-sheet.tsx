@@ -5,7 +5,7 @@ import type { ApprovalBroker, PendingApproval } from "@/runtime/approval";
 import type { Point } from "@/ui/point-mapping";
 import { PointPicker } from "@/ui/point-picker";
 import { riskLabel, strings } from "@/ui/strings";
-import { riskColor, theme } from "@/ui/theme";
+import { createThemedStyles, riskColor, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 /**
  * The permission prompt.
@@ -25,6 +25,8 @@ import { riskColor, theme } from "@/ui/theme";
  *    a coordinate nobody chose.
  */
 export function ApprovalSheet({ approvals }: { approvals?: ApprovalBroker }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const [pending, setPending] = useState<PendingApproval[]>([]);
   const [picking, setPicking] = useState(false);
   const [point, setPoint] = useState<Point>();
@@ -163,8 +165,8 @@ export function ApprovalSheet({ approvals }: { approvals?: ApprovalBroker }) {
           <Text style={styles.kicker}>{strings.approval.kicker}</Text>
           <View style={styles.titleRow}>
             <Text style={styles.title}>{current.request.tool}</Text>
-            <View style={[styles.risk, { borderColor: riskColor(current.request.risk) }]}>
-              <Text style={[styles.riskText, { color: riskColor(current.request.risk) }]}>
+            <View style={[styles.risk, { borderColor: riskColor(theme.colors, current.request.risk) }]}>
+              <Text style={[styles.riskText, { color: riskColor(theme.colors, current.request.risk) }]}>
                 {riskLabel(current.request.risk)}
               </Text>
             </View>
@@ -243,85 +245,88 @@ export function ApprovalSheet({ approvals }: { approvals?: ApprovalBroker }) {
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.6)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: theme.space(4),
-  },
-  sheet: {
-    width: "100%",
-    maxWidth: 520,
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.lg,
-    padding: theme.space(5),
-    gap: theme.space(3),
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  kicker: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  titleRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
-  title: { color: theme.colors.text, fontSize: 18, fontWeight: "600" },
-  risk: {
-    borderWidth: 1,
-    borderRadius: theme.radius.pill,
-    paddingHorizontal: theme.space(2),
-    paddingVertical: 2,
-  },
-  riskText: { fontSize: 11, textTransform: "uppercase" },
-  reason: { color: theme.colors.textMuted, fontSize: 13, lineHeight: 19 },
-  evidenceBox: { gap: theme.space(2) },
-  evidence: {
-    width: "100%",
-    aspectRatio: 9 / 19,
-    maxHeight: 220,
-    borderRadius: theme.radius.md,
-    borderColor: theme.colors.border,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  pointReadout: { color: theme.colors.textMuted, fontSize: 12 },
-  detailBox: {
-    maxHeight: 160,
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.radius.md,
-  },
-  detailContent: { padding: theme.space(3), gap: theme.space(2) },
-  detailText: { color: theme.colors.text, fontSize: 13, fontFamily: theme.font.mono },
-  paths: { color: theme.colors.textMuted, fontSize: 12, fontFamily: theme.font.mono },
-  neverRemember: { color: theme.colors.warning, fontSize: 12, lineHeight: 18 },
-  queue: { color: theme.colors.warning, fontSize: 12 },
-  actions: { flexDirection: "row", gap: theme.space(2), justifyContent: "flex-end", flexWrap: "wrap" },
-  button: {
-    paddingHorizontal: theme.space(4),
-    paddingVertical: theme.space(2.5),
-    borderRadius: theme.radius.md,
-  },
-  deny: { backgroundColor: theme.colors.dangerSoft },
-  denyText: { color: theme.colors.danger, fontWeight: "600" },
-  once: { backgroundColor: theme.colors.surfaceAlt },
-  onceText: { color: theme.colors.text, fontWeight: "600" },
-  always: { backgroundColor: theme.colors.accent },
-  alwaysText: { color: "#fff", fontWeight: "600" },
-  pick: { backgroundColor: theme.colors.surfaceAlt },
-  pickText: { color: theme.colors.text, fontWeight: "600" },
-  disabled: { opacity: 0.4 },
-  planRestatement: { color: theme.colors.text, fontSize: 16, fontWeight: "600", lineHeight: 24 },
-  planBlock: { gap: theme.space(1.5) },
-  planBlockTitle: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  planStep: { color: theme.colors.text, fontSize: 13, lineHeight: 20 },
-  planApps: { color: theme.colors.textMuted, fontSize: 12, fontFamily: theme.font.mono },
-  planDanger: { color: theme.colors.warning },
-  planNote: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    backdrop: {
+      flex: 1,
+      backgroundColor: "rgba(0,0,0,0.6)",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: theme.space(4),
+    },
+    sheet: {
+      width: "100%",
+      maxWidth: 520,
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.lg,
+      padding: theme.space(5),
+      gap: theme.space(3),
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    kicker: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    titleRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
+    title: { color: colors.text, fontSize: 18, fontWeight: "600" },
+    risk: {
+      borderWidth: 1,
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.space(2),
+      paddingVertical: 2,
+    },
+    riskText: { fontSize: 11, textTransform: "uppercase" },
+    reason: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+    evidenceBox: { gap: theme.space(2) },
+    evidence: {
+      width: "100%",
+      aspectRatio: 9 / 19,
+      maxHeight: 220,
+      borderRadius: theme.radius.md,
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+    },
+    pointReadout: { color: colors.textMuted, fontSize: 12 },
+    detailBox: {
+      maxHeight: 160,
+      backgroundColor: colors.background,
+      borderRadius: theme.radius.md,
+    },
+    detailContent: { padding: theme.space(3), gap: theme.space(2) },
+    detailText: { color: colors.text, fontSize: 13, fontFamily: theme.font.mono },
+    paths: { color: colors.textMuted, fontSize: 12, fontFamily: theme.font.mono },
+    neverRemember: { color: colors.warning, fontSize: 12, lineHeight: 18 },
+    queue: { color: colors.warning, fontSize: 12 },
+    actions: { flexDirection: "row", gap: theme.space(2), justifyContent: "flex-end", flexWrap: "wrap" },
+    button: {
+      paddingHorizontal: theme.space(4),
+      paddingVertical: theme.space(2.5),
+      borderRadius: theme.radius.md,
+    },
+    deny: { backgroundColor: colors.dangerSoft },
+    denyText: { color: colors.danger, fontWeight: "600" },
+    once: { backgroundColor: colors.surfaceAlt },
+    onceText: { color: colors.text, fontWeight: "600" },
+    always: { backgroundColor: colors.accent },
+    alwaysText: { color: "#fff", fontWeight: "600" },
+    pick: { backgroundColor: colors.surfaceAlt },
+    pickText: { color: colors.text, fontWeight: "600" },
+    disabled: { opacity: 0.4 },
+    planRestatement: { color: colors.text, fontSize: 16, fontWeight: "600", lineHeight: 24 },
+    planBlock: { gap: theme.space(1.5) },
+    planBlockTitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    planStep: { color: colors.text, fontSize: 13, lineHeight: 20 },
+    planApps: { color: colors.textMuted, fontSize: 12, fontFamily: theme.font.mono },
+    planDanger: { color: colors.warning },
+    planNote: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+  });
 });

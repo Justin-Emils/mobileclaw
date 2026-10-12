@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, 
 import type { ScreenProbeRecord, ScreenProbeStatus } from "@mobileclaw/capabilities";
 import { useRuntime } from "@/ui/runtime-provider";
 import { strings } from "@/ui/strings";
-import { theme } from "@/ui/theme";
+import { createThemedStyles, type ThemeColors, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 /**
  * Which installed apps can actually be automated through the semantic tree.
@@ -25,6 +25,8 @@ import { theme } from "@/ui/theme";
  *    under each status is the part that makes the table useful.
  */
 export default function ScreenProbeScreen() {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const runtime = useRuntime();
 
   const [apps, setApps] = useState<{ packageId: string; label: string }[]>([]);
@@ -232,13 +234,19 @@ const STATUS: Record<ScreenProbeStatus, { label: string; advice: string; tone: "
   failed: { label: strings.probe.statusFailed, advice: strings.probe.adviceFailed, tone: "bad" },
 };
 
-const TONE_COLOR = {
-  good: theme.colors.accent,
-  warn: theme.colors.warning,
-  bad: theme.colors.danger,
-} as const;
+/**
+ * Tone colour for a probe result.
+ *
+ * A function of the palette, not a module constant: a constant would freeze whichever palette was
+ * loaded first, which is the defect this whole change removes.
+ */
+function toneColor(colors: ThemeColors, tone: "good" | "warn" | "bad"): string {
+  return tone === "good" ? colors.accent : tone === "warn" ? colors.warning : colors.danger;
+}
 
 function ProbeRow({ record, onForget }: { record: ScreenProbeRecord; onForget?: () => void }) {
+  const styles = useThemedStyles(themedStyles);
+  const { theme } = useTheme();
   const status = STATUS[record.status];
   return (
     <View style={styles.resultRow}>
@@ -246,8 +254,8 @@ function ProbeRow({ record, onForget }: { record: ScreenProbeRecord; onForget?: 
         <Text style={styles.appLabel} numberOfLines={1}>
           {record.label || record.packageId}
         </Text>
-        <View style={[styles.statusPill, { borderColor: TONE_COLOR[status.tone] }]}>
-          <Text style={[styles.statusText, { color: TONE_COLOR[status.tone] }]}>{status.label}</Text>
+        <View style={[styles.statusPill, { borderColor: toneColor(theme.colors, status.tone) }]}>
+          <Text style={[styles.statusText, { color: toneColor(theme.colors, status.tone) }]}>{status.label}</Text>
         </View>
       </View>
       <Text style={styles.appPackage} numberOfLines={1}>
@@ -265,88 +273,91 @@ function ProbeRow({ record, onForget }: { record: ScreenProbeRecord; onForget?: 
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.colors.background },
-  content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space(3), padding: theme.space(6) },
-  section: { gap: theme.space(3) },
-  sectionTitle: {
-    color: theme.colors.textFaint,
-    fontSize: 11,
-    letterSpacing: 1,
-    textTransform: "uppercase",
-  },
-  hint: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
-  note: { color: theme.colors.textMuted, fontSize: 12, lineHeight: 18 },
-  faint: { color: theme.colors.textFaint, fontSize: 11, lineHeight: 16 },
-  warning: {
-    color: theme.colors.warning,
-    fontSize: 12,
-    lineHeight: 18,
-    backgroundColor: theme.colors.warningSoft ?? theme.colors.surfaceAlt,
-    padding: theme.space(3),
-    borderRadius: theme.radius.md,
-  },
-  input: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    color: theme.colors.text,
-    fontSize: 14,
-  },
-  list: { maxHeight: 280 },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: theme.space(3),
-    paddingVertical: theme.space(2.5),
-    paddingHorizontal: theme.space(2),
-    borderRadius: theme.radius.md,
-  },
-  rowSelected: { backgroundColor: theme.colors.surfaceAlt },
-  check: {
-    width: 20,
-    height: 20,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  checkOn: { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent },
-  checkMark: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  rowText: { flexShrink: 1 },
-  appLabel: { color: theme.colors.text, fontSize: 14 },
-  appPackage: { color: theme.colors.textFaint, fontSize: 11, fontFamily: theme.font.mono },
-  actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  selected: { color: theme.colors.textMuted, fontSize: 12 },
-  button: {
-    backgroundColor: theme.colors.accent,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: theme.space(5),
-    paddingVertical: theme.space(2.5),
-  },
-  buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
-  disabled: { opacity: 0.4 },
-  stopButton: { backgroundColor: theme.colors.dangerSoft },
-  stopText: { color: theme.colors.danger, fontWeight: "600", fontSize: 13 },
-  progressRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
-  resultRow: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    padding: theme.space(3),
-    gap: theme.space(1),
-  },
-  resultHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space(2) },
-  statusPill: {
-    borderWidth: 1,
-    borderRadius: theme.radius.pill,
-    paddingHorizontal: theme.space(2),
-    paddingVertical: 1,
-  },
-  statusText: { fontSize: 10 },
-  advice: { color: theme.colors.text, fontSize: 12, lineHeight: 18 },
-  forget: { alignSelf: "flex-start", paddingTop: theme.space(1) },
-  forgetText: { color: theme.colors.accent, fontSize: 12 },
+const themedStyles = createThemedStyles((theme) => {
+  const colors = theme.colors;
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    content: { padding: theme.space(4), gap: theme.space(6), paddingBottom: theme.space(12) },
+    center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space(3), padding: theme.space(6) },
+    section: { gap: theme.space(3) },
+    sectionTitle: {
+      color: colors.textFaint,
+      fontSize: 11,
+      letterSpacing: 1,
+      textTransform: "uppercase",
+    },
+    hint: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+    note: { color: colors.textMuted, fontSize: 12, lineHeight: 18 },
+    faint: { color: colors.textFaint, fontSize: 11, lineHeight: 16 },
+    warning: {
+      color: colors.warning,
+      fontSize: 12,
+      lineHeight: 18,
+      backgroundColor: colors.warningSoft ?? colors.surfaceAlt,
+      padding: theme.space(3),
+      borderRadius: theme.radius.md,
+    },
+    input: {
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      color: colors.text,
+      fontSize: 14,
+    },
+    list: { maxHeight: 280 },
+    row: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: theme.space(3),
+      paddingVertical: theme.space(2.5),
+      paddingHorizontal: theme.space(2),
+      borderRadius: theme.radius.md,
+    },
+    rowSelected: { backgroundColor: colors.surfaceAlt },
+    check: {
+      width: 20,
+      height: 20,
+      borderRadius: 6,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    checkOn: { backgroundColor: colors.accent, borderColor: colors.accent },
+    checkMark: { color: "#fff", fontSize: 13, fontWeight: "700" },
+    rowText: { flexShrink: 1 },
+    appLabel: { color: colors.text, fontSize: 14 },
+    appPackage: { color: colors.textFaint, fontSize: 11, fontFamily: theme.font.mono },
+    actions: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+    selected: { color: colors.textMuted, fontSize: 12 },
+    button: {
+      backgroundColor: colors.accent,
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.space(5),
+      paddingVertical: theme.space(2.5),
+    },
+    buttonText: { color: "#fff", fontWeight: "600", fontSize: 13 },
+    disabled: { opacity: 0.4 },
+    stopButton: { backgroundColor: colors.dangerSoft },
+    stopText: { color: colors.danger, fontWeight: "600", fontSize: 13 },
+    progressRow: { flexDirection: "row", alignItems: "center", gap: theme.space(2) },
+    resultRow: {
+      backgroundColor: colors.surface,
+      borderRadius: theme.radius.md,
+      padding: theme.space(3),
+      gap: theme.space(1),
+    },
+    resultHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: theme.space(2) },
+    statusPill: {
+      borderWidth: 1,
+      borderRadius: theme.radius.pill,
+      paddingHorizontal: theme.space(2),
+      paddingVertical: 1,
+    },
+    statusText: { fontSize: 10 },
+    advice: { color: colors.text, fontSize: 12, lineHeight: 18 },
+    forget: { alignSelf: "flex-start", paddingTop: theme.space(1) },
+    forgetText: { color: colors.accent, fontSize: 12 },
+  });
 });
