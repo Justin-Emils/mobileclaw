@@ -160,6 +160,10 @@ export interface NativeShizukuModule {
    * whether a heads-up banner appears over another app, which is the point of the approval notice.
    */
   prepareApprovalChannel?(): Promise<boolean>;
+  /** Post an approval question with its two buttons, on the interrupting channel. */
+  postApprovalNotification?(approvalId: string, title: string, body: string): Promise<boolean>;
+  /** Take the question down once it has been answered, by either route. */
+  dismissApprovalNotification?(approvalId: string): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

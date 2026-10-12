@@ -41,10 +41,10 @@ import {
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
 import { startRunService } from "./run-service";
+import { ApprovalBroker, type PendingApproval } from "./approval";
 import {
   postApprovalNotification,
-  prepareApprovalNotifications,
-  readApprovalResponse,
+  setApprovalNotificationPorts,
   withdrawApprovalNotification,
 } from "./approval-notify";
 import { createEventLog } from "./services/event-log";
@@ -118,7 +118,11 @@ function testOverrides(): { baseUrl?: string; model?: string; apiKey?: string } 
  * file agent inside its own directories, and the diagnostics screen says exactly
  * what is missing and why.
  */
-export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
+export async function bootstrapRuntime(
+  // Named `share` rather than `overrides`: `overrides` is already taken below by the test-only
+  // endpoint settings, and the two are unrelated.
+  share: { approvals?: ApprovalBroker } = {},
+): Promise<MobileClawRuntime> {
   // --- persistence ---------------------------------------------------------
   const db = await openDatabaseAsync("mobileclaw.db");
   const kv = new AdapterKeyValueStore(new SqliteKvAdapter(db));
@@ -250,26 +254,24 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
 
   // --- approval notifications ----------------------------------------------
   //
-  // The channel is declared natively (`prepareApprovalChannel`) and the notification is posted
-  // through `expo-notifications`. That split is not stylistic: importance decides whether Android
-  // shows a heads-up banner over another app, and `expo-notifications` never sets it — it creates a
-  // channel on first use at default importance. But the *buttons* have to arrive back in JavaScript,
-  // which is what `expo-notifications` does and a native notification would not.
+  // Both halves are native: the notice is built in `MobileClawApprovalReceiver` because its buttons
+  // need `PendingIntent`s, and it posts on an `IMPORTANCE_HIGH` channel created there, because
+  // importance is what decides whether Android shows a heads-up banner over another app.
   //
-  // Registered here, before the runtime exists, because it must be listening by the time the first
-  // question is asked; `runtime` is read from the closure at call time, not captured as a value.
-  let runtime: MobileClawRuntime | undefined;
-  await prepareApprovalNotifications({
-    prepareChannel: async () => {
-      await nativeShizuku?.prepareApprovalChannel?.();
+  // The answer comes back as a `mobileclaw://approval?...` URL, which `runtime-provider` reads and
+  // hands to the shared `ApprovalBroker`. That indirection is deliberate: a button press cannot reach
+  // a JavaScript listener, and this app's own scheme is the one path between native and JavaScript
+  // already known to work on this device.
+  setApprovalNotificationPorts({
+    post: async (approvalId, title, body) => {
+      await nativeShizuku?.postApprovalNotification?.(approvalId, title, body);
+    },
+    dismiss: async (approvalId) => {
+      await nativeShizuku?.dismissApprovalNotification?.(approvalId);
     },
   });
-  Notifications.addNotificationResponseReceivedListener((response) => {
-    const answer = readApprovalResponse(response);
-    if (!answer || !runtime) return;
-    eventLog.info("approval", "answered from notification", { approved: answer.approved });
-    runtime.answerApproval(answer.approvalId, answer.approved);
-  });
+  // Channel first, so it exists before any question is asked. Idempotent.
+  await nativeShizuku?.prepareApprovalChannel?.();
 
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend(privileged);
@@ -314,7 +316,10 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   );
 
   // --- runtime -------------------------------------------------------------
-  runtime = new MobileClawRuntime({
+  const runtime = new MobileClawRuntime({
+    // Shared with the caller when one is supplied, so an answer that arrived before the runtime
+    // existed still finds its question. See the note on `bootstrapRuntime`.
+    ...(share.approvals ? { approvals: share.approvals } : {}),
     config: { ...config, roots },
     secrets,
     kv,
@@ -424,7 +429,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
    * to a decision already made.
    */
   const posted = new Map<string, string>();
-  runtime.approvals.onPendingChange = (pending) => {
+  runtime.approvals.onPendingChange = (pending: readonly PendingApproval[]) => {
     const waiting = new Set(pending.map((entry) => entry.id));
     for (const [id, notificationId] of [...posted]) {
       if (waiting.has(id)) continue;

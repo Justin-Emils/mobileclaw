@@ -486,6 +486,14 @@ const SHIZUKU_PROVIDER = "rikka.shizuku.ShizukuProvider";
  */
 const FOREGROUND_SERVICE_NAME = "dev.mobileclaw.app.shizuku.MobileClawForegroundService";
 
+/**
+ * Receives an approval button press, posted by the notification's own `PendingIntent`.
+ *
+ * A `BroadcastReceiver` rather than an Activity, so a press does not have to start a task of its own;
+ * the receiver decides what to do with the answer.
+ */
+const APPROVAL_RECEIVER_NAME = "dev.mobileclaw.app.shizuku.MobileClawApprovalReceiver";
+
 /** Idempotency marker for the gradle patch, which has two separate insertions. */
 const SHIZUKU_GRADLE_MARKER = "MOBILECLAW_SHIZUKU";
 
@@ -584,21 +592,41 @@ const withMobileClawForegroundService: ConfigPlugin = (config) =>
       throw new Error("withMobileClawForegroundService: the manifest has no <application> element");
     }
 
-    const host = application as typeof application & { service?: ManifestService[] };
+    const host = application as typeof application & {
+      service?: ManifestService[];
+      receiver?: { $: Record<string, string> }[];
+    };
     const services = (host.service ??= []);
-    if (services.some((entry) => entry.$["android:name"] === FOREGROUND_SERVICE_NAME)) return cfg;
+    if (!services.some((entry) => entry.$["android:name"] === FOREGROUND_SERVICE_NAME)) {
+      services.push({
+        $: {
+          "android:name": FOREGROUND_SERVICE_NAME,
+          "android:exported": "false",
+          "android:stopWithTask": "false",
+          // Required from targetSdk 34. `dataSync` is the declared type whose meaning matches what
+          // this service does: holding the process up while the user's own task runs. It is also why
+          // `FOREGROUND_SERVICE_DATA_SYNC` is in `android.permissions` above.
+          "android:foregroundServiceType": "dataSync",
+        },
+      });
+    }
 
-    services.push({
-      $: {
-        "android:name": FOREGROUND_SERVICE_NAME,
-        "android:exported": "false",
-        "android:stopWithTask": "false",
-        // Required from targetSdk 34. `dataSync` is the declared type whose meaning matches what
-        // this service does: holding the process up while the user's own task runs. It is also why
-        // `FOREGROUND_SERVICE_DATA_SYNC` is in `android.permissions` above.
-        "android:foregroundServiceType": "dataSync",
-      },
-    });
+    /**
+     * The receiver that carries an approval button press back into the app.
+     *
+     * Declared rather than registered at runtime, because a run can outlive the JavaScript context
+     * being focused and an approval must not become unanswerable because of it. `exported="false"`:
+     * only this app's own `PendingIntent`s may reach it.
+     */
+    const receivers = (host.receiver ??= []);
+    if (!receivers.some((entry) => entry.$["android:name"] === APPROVAL_RECEIVER_NAME)) {
+      receivers.push({
+        $: {
+          "android:name": APPROVAL_RECEIVER_NAME,
+          "android:exported": "false",
+        },
+      });
+    }
 
     // The permission pair is declared in `android.permissions` so Expo emits it, but a build that
     // reaches here without it would fail at runtime with a SecurityException rather than at build
@@ -789,7 +817,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.6.0",
+    version: "0.6.1",
     orientation: "portrait",
     scheme: "mobileclaw",
     /**
@@ -829,7 +857,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       // Android decides "is this an upgrade" from versionCode, not versionName, and the
       // Expo template defaults it to 1 for every build. Keep it in step with `version`:
       // 0.2.0 ships as code 2.
-      versionCode: 25,
+      versionCode: 26,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.

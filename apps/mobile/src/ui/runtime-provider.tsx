@@ -1,7 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import * as Linking from "expo-linking";
 import { bootstrapRuntime } from "@/runtime/bootstrap";
 import { MobileClawRuntime } from "@/runtime/runtime";
 import { ApprovalBroker } from "@/runtime/approval";
+import { readApprovalUrl } from "@/runtime/approval-notify";
 import { DEFAULT_CONFIG, type AppConfig } from "@/runtime/config";
 import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage";
 import { MemorySecretStore } from "@/runtime/services/secrets";
@@ -32,14 +34,39 @@ const RuntimeContext = createContext<RuntimeState>({ status: "loading", degraded
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<RuntimeState>({ status: "loading", degraded: false });
   const started = useRef(false);
+  /**
+   * The broker exists before the runtime does, because the answer to an approval can arrive with the
+   * very launch that starts the app: a button press posts the notification's answer as a URL, and the
+   * app may not have been running at all.
+   */
+  const broker = useRef(new ApprovalBroker());
 
   useEffect(() => {
     if (started.current) return;
     started.current = true;
 
+    /**
+     * Apply an answer that arrived as a URL.
+     *
+     * Both delivery paths are needed. `getInitialURL` covers the cold start — the app was not running
+     * when the button was pressed, which is the common case because a run long enough to need approval
+     * usually means the user has moved on. The subscription covers the app already being alive, where
+     * the launch lands as a new intent instead.
+     *
+     * `readApprovalUrl` returns nothing for any other link, so `mobileclaw://logs` and friends are
+     * ignored here rather than being mistaken for a decision.
+     */
+    const apply = (url: string | null | undefined) => {
+      const answer = readApprovalUrl(url);
+      if (!answer) return;
+      broker.current.answer(answer.approvalId, { approved: answer.approved });
+    };
+    void Linking.getInitialURL().then(apply).catch(() => undefined);
+    const subscription = Linking.addEventListener("url", (event) => apply(event.url));
+
     void (async () => {
       try {
-        const runtime = await bootstrapRuntime();
+        const runtime = await bootstrapRuntime({ approvals: broker.current });
         setState({ runtime, status: "ready", degraded: false });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -58,6 +85,8 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
         }
       }
     })();
+
+    return () => subscription.remove();
   }, []);
 
   const value = useMemo(() => state, [state]);

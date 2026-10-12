@@ -407,6 +407,37 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Post an approval question with its two buttons, on the interrupting channel.
+     *
+     * Done natively rather than through `expo-notifications` for one reason: the buttons have to work
+     * **from the notification shade while another app is in front**, and a notification action can
+     * only be declared with an Android `PendingIntent`. There is no way to reach a JavaScript
+     * listener from one, so the whole notice lives on this side and the answer comes back as an
+     * Intent extra handled by [MobileClawApprovalReceiver].
+     */
+    @ReactMethod
+    fun postApprovalNotification(
+        approvalId: String,
+        title: String,
+        body: String,
+        promise: Promise,
+    ) {
+        run(promise) {
+            MobileClawApprovalReceiver.post(reactContext, approvalId, title, body)
+            true
+        }
+    }
+
+    /** Take the question down once it has been answered, by either route. */
+    @ReactMethod
+    fun dismissApprovalNotification(approvalId: String, promise: Promise) {
+        run(promise) {
+            MobileClawApprovalReceiver.dismiss(reactContext, approvalId)
+            true
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class
