@@ -76,6 +76,13 @@ export const strings = {
   },
 
   approval: {
+    /**
+     * 用通知按钮作答后，应用被拉起时短暂显示的一句。
+     *
+     * 这个界面存在的唯一原因：Android 的通知按钮只能是 PendingIntent，答案只能以 URL 回来，
+     * 而没有对应路由时 Expo Router 会渲染「找不到页面」—— 用户在回答之后看到报错。
+     */
+    handling: "正在处理你的授权…",
     /** 权限弹窗 */
     kicker: "需要你的授权",
     moreWaiting: (n: number) => `还有 ${n} 个请求在排队`,

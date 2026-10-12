@@ -27,6 +27,8 @@ export default function RootLayout() {
           <Stack.Screen name="screen-probe" options={{ title: strings.probe.title }} />
           <Stack.Screen name="screenshots" options={{ title: strings.shots.title }} />
           <Stack.Screen name="logs" options={{ title: strings.logs.title }} />
+        {/* Where a notification button's answer lands before it redirects home. See app/approval.tsx. */}
+        <Stack.Screen name="approval" options={{ headerShown: false }} />
         </Stack>
       </RuntimeProvider>
     </SafeAreaProvider>
