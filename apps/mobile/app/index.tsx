@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
+
   FlatList,
   Keyboard,
-
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   StyleSheet,
@@ -53,11 +53,17 @@ export default function ChatScreen() {
   const router = useRouter();
   const { setParams } = router;
   /**
-   * Height of the software keyboard, in points. Zero when it is closed.
+   * How far the composer must move up to clear the keyboard, in points. Zero when there is none.
    *
-   * Measured rather than inferred — see the note where it is used as padding on the composer.
+   * Not simply the keyboard's height: the window may *already* have lost that much if the platform
+   * resized it for the keyboard, and adding the full height again would leave a keyboard-sized gap.
+   * The overlap is therefore measured — see the effect below.
    */
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardInset, setKeyboardInset] = useState(0);
+  /** Whether a keyboard is currently up, for the baseline bookkeeping. */
+  const keyboardRef = useRef(0);
+  /** The window height with no keyboard, for measuring how much of it the keyboard took. */
+  const fullWindowHeight = useRef(0);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [tools, setTools] = useState<TranscriptEntry[]>([]);
   const [draft, setDraft] = useState("");
@@ -144,6 +150,45 @@ export default function ChatScreen() {
       };
     }, [ready, runtime]),
   );
+
+  /*
+   * Work out how far the composer has to move up to clear the keyboard.
+   *
+   * The keyboard reports its own height, but that is not the same as the overlap. When the platform
+   * resizes the window for the keyboard — which some ROMs still do despite edge-to-edge — the window
+   * has already lost that height, and moving up by the full amount would leave a large empty band. So
+   * the window's own loss is subtracted. Measuring both is what makes this independent of whether
+   * `adjustResize` happens to be in force, a question with different answers across this project's
+   * targets.
+   *
+   * The keyboard's **toolbar** — the row of emoji, voice and settings keys above the letters — is part
+   * of `endCoordinates.height`. On a device the composer sat behind exactly that row when a fixed
+   * offset was assumed, which is why the reported number is used rather than a table lookup.
+   */
+  useEffect(() => {
+    const rememberWholeWindow = () => {
+      const height = Dimensions.get("window").height;
+      if (height > 0) fullWindowHeight.current = height;
+    };
+    rememberWholeWindow();
+
+    const show = Keyboard.addListener("keyboardDidShow", (event) => {
+      const reported = event.endCoordinates?.height ?? 0;
+      const lost = Math.max(0, fullWindowHeight.current - Dimensions.get("window").height);
+      setKeyboardInset(Math.max(0, Math.round(reported - lost)));
+      keyboardRef.current = 1;
+    });
+    const hide = Keyboard.addListener("keyboardDidHide", () => {
+      keyboardRef.current = 0;
+      setKeyboardInset(0);
+      // The window is whole again, so the baseline is valid once more.
+      rememberWholeWindow();
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   /**
    * Ask for the dialog-based storage permissions once, on first launch.
@@ -302,18 +347,20 @@ export default function ChatScreen() {
   const data = useMemo(() => bubbles, [bubbles]);
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      // Android needs `padding` here, not `undefined`.
-      //
-      // With `behavior={undefined}` this view did nothing on Android, which used to be fine
-      // because the platform resized the window itself (`adjustResize`). At targetSdk 35+
-      // edge-to-edge is always on, and that resize no longer happens -- so the keyboard
-      // covered the composer with nothing compensating, and the user could not see what they
-      // were typing. Reproduced on Android 16 / API 36.
-      behavior="padding"
-      keyboardVerticalOffset={insets.top}
-    >
+    /*
+     * A plain View, not `KeyboardAvoidingView`.
+     *
+     * That component had two problems here, and the second was the worse one. It does nothing useful
+     * on this target — at targetSdk 35+ edge-to-edge is always on, so the platform no longer resizes
+     * the window for the keyboard and there is no frame change for it to react to. And its `padding`
+     * behaviour adds the keyboard's height to the *bottom* of the container, which pushes the composer
+     * **down behind the keys** rather than above them: the reply to a "the keyboard covers the input"
+     * report made the covering worse.
+     *
+     * The composer is instead positioned absolutely at the keyboard's top edge, which cannot push
+     * anything off-screen.
+     */
+    <View style={styles.root}>
       <View style={styles.header}>
         <Text style={styles.headerModel} numberOfLines={1}>
           {runtime ? `${runtime.providerInfo().label} · ${runtime.providerInfo().model}` : strings.chat.starting}
@@ -401,15 +448,15 @@ export default function ChatScreen() {
         style={[
           styles.composer,
           /*
-           * The keyboard's own height, as bottom padding.
+           * Sits on the keyboard's top edge, rather than being pushed down by it.
            *
-           * `KeyboardAvoidingView` above is not enough on this target: at targetSdk 35+ edge-to-edge is
-           * always on, so the platform no longer resizes the window for the keyboard and the avoiding
-           * view has no frame change to react to — on a device the composer slid up but was still behind
-           * the keys. The height from `keyboardDidShow` is the real number, so padding by it cannot be
-           * wrong by the amount that an assumption about insets would be.
+           * `bottom: keyboardInset` moves the whole row up out of the keyboard's way. The inset is the
+           * keyboard's reported height **minus whatever the window already lost**: if the platform did
+           * resize for the keyboard, adding the full height again would leave a keyboard-sized gap.
+           * Both cases happen — it depends on the ROM and the target SDK — so the overlap is measured
+           * rather than assumed.
            */
-          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+          { bottom: keyboardInset },
         ]}
       >
         <TextInput
@@ -439,7 +486,7 @@ export default function ChatScreen() {
       </View>
 
       <ApprovalSheet approvals={runtime?.approvals} />
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -614,7 +661,15 @@ const themedStyles = createThemedStyles((theme) => {
     },
     headerButtonText: { color: colors.text, fontSize: 12 },
     center: { flex: 1, alignItems: "center", justifyContent: "center", gap: theme.space(3) },
-    listContent: { padding: theme.space(4), gap: theme.space(3) },
+    /**
+     * Room under the last message for the absolutely-positioned composer.
+     *
+     * An estimate rather than a measurement: the composer grows with a multi-line draft, and measuring
+     * it would mean a layout pass per keystroke for a gap that only has to be roughly right. Erring
+     * large is the safe direction — the cost is a little empty space, and the alternative is the last
+     * message hidden behind the input.
+     */
+    listContent: { padding: theme.space(4), gap: theme.space(3), paddingBottom: theme.space(20) },
     empty: { paddingTop: theme.space(16), gap: theme.space(3) },
     emptyTitle: { color: colors.text, fontSize: 20, fontWeight: "600" },
     muted: { color: colors.textMuted, fontSize: 13, lineHeight: 20 },
@@ -684,11 +739,23 @@ const themedStyles = createThemedStyles((theme) => {
     },
     continueText: { color: colors.text, fontWeight: "600", fontSize: 14 },
     continueHint: { color: colors.textMuted, fontSize: 11 },
+    /**
+     * Anchored to the bottom of the screen and lifted by `keyboardInset` at the call site.
+     *
+     * Absolute rather than a flex child: a flex row below the list gets *pushed* by anything added to
+     * the container's bottom, so a keyboard offset would move it the wrong way — which is what made the
+     * first attempt at this worse than the bug it was fixing.
+     */
     composer: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
       flexDirection: "row",
       alignItems: "flex-end",
       gap: theme.space(2),
       padding: theme.space(3),
+      backgroundColor: colors.background,
       borderTopColor: colors.border,
       borderTopWidth: StyleSheet.hairlineWidth,
     },
