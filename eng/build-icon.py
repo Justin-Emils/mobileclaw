@@ -1,23 +1,22 @@
 """Turn the supplied logo into launcher assets.
 
-Three problems, all of them things the device showed rather than reasoning:
+The artwork is a **white line drawing with an outer glow, on black**. That makes two things true at
+once, and both matter:
 
-1. **The supplied file has a white background.** Left alone that is a white square on a launcher, and
-   the corners are what the user saw as black wedges. The white is removed by flood-filling inwards
-   from the border, so only white *connected to the edge* goes — the pale cream inside the wreath
-   belongs to the drawing.
+1. **The background is dark, so the drawing is bright.** The obvious approach — keep the picture and
+   put a plate behind it — is wrong twice over: an opaque foreground hides the adaptive icon's
+   background layer entirely (which is what made a previous icon show as solid black no matter what
+   colour was configured), and a black plate is not what the drawing is meant to sit on.
 
-2. **The previous icon filled its canvas edge to edge.** A launcher applies its own mask, and artwork
-   that touches the corners gets them cut into black wedges. Every mask shape Android uses — circle,
-   squircle, rounded square — contains a circle of the standard 66/108 of the canvas, so the artwork
-   is fitted inside that circle with margin.
+   So the black is *removed* by flood-filling inwards from the border. Only black connected to the
+   edge goes; the dark interior of the hand and leaves is enclosed by the outline and stays.
 
-3. **The artwork is cream on white**, so it needs a dark plate behind it to be legible at all. The
-   background colour here is the same one `app.config.ts` gives the adaptive icon, and the foreground
-   is composited over it rather than merely stacked: pre-compositing removes the light fringe that
-   transparent edges leave against a dark launcher.
+2. **A bright line drawing is legible on white**, which the previous artwork was not — it was cream
+   (253,234,192) at about 4% contrast against white, so a white background made it disappear. That is
+   why the background colour could not be white before and can be now.
 
-The source is small (186x230), so the upscale is computed and reported rather than hidden.
+The artwork is fitted inside the circle every Android launcher mask contains (66/108 of the canvas),
+so no shape cuts it.
 """
 
 from collections import deque
@@ -26,8 +25,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 SRC = Path(
-    r"C:\Users\woshi\.dsh\attachments\v1\objects\d9"
-    r"\d96f5ed25a04604c1c5b5f0c18f6d6528037947a714b226796e9c2a67c493884"
+    r"C:\Users\woshi\.dsh\attachments\v1\objects\95"
+    r"\95b65782e57046a45a7175c51cbbf5117946a854c09d1b3328753b9a6b8cd79c"
 )
 ASSETS = Path(r"E:\code\mobileclaw\apps\mobile\assets")
 PREVIEW = Path(r"E:\code\mobileclaw\.logs\icon-preview")
@@ -38,46 +37,31 @@ for old in PREVIEW.glob("*.png"):
 
 CANVAS = 1024
 VISIBLE = 66 / 108
-# Must match `android.adaptiveIcon.backgroundColor` in `app.config.ts`.
+
+# Must match `android.adaptiveIcon.backgroundColor` in `app.config.ts`, and is chosen from the
+# candidates this script renders. White is right for this drawing: the lines are white, so a white
+# plate reads as the line art floating on nothing, which is how the source presents it.
+ICON_BACKGROUND = (255, 255, 255)
+
+# How much of the visible circle's diameter the artwork's longest side may span. By the longest
+# *side*, not the diagonal: a diagonal fit is the conservative answer for a shape whose extremes sit
+# opposite each other, and for a roughly circular logo it shrinks the result to about 43% of the
+# canvas — visibly small beside every other icon on a launcher.
+ART_IN_VISIBLE = 0.94
+
+# How far from pure black still counts as background, and how far below opaque counts as nothing.
 #
-# Brand blue rather than white: the artwork is cream (253,234,192), about 4% contrast against white,
-# which makes the wreath and hand effectively disappear and leaves only the blue flower and a few
-# hairlines. Chosen from the options this script can render side by side; the hue also echoes the
-# flower already in the drawing.
-ICON_BACKGROUND = (0x1E, 0x5A, 0xAA)
-
-# How much of the visible circle's diameter the artwork's longest side may span.
-#
-# Deliberately by the longest *side*, not the diagonal. Fitting the diagonal is the conservative
-# answer for a shape whose extremes sit opposite each other, but this logo is roughly its own circle,
-# and a diagonal fit shrank it to 43% of the canvas — visibly small next to every other icon on the
-# screen, which is how it looked in the preview.
-ART_IN_VISIBLE = 0.92
-
-# How far from pure white still counts as background.
-#
-# The source is a JPEG whose "white" is a gradient, not a constant, so a tight tolerance leaves a
-# speckled halo of near-white pixels that survive as opaque. Measured: the cream body is warm, with a
-# channel spread of 61 (253,234,192), so a tolerance this wide cannot reach it — the spread test is
-# what protects the drawing, not this number.
-BACKGROUND_TOLERANCE = 70
-
-# Alpha below this becomes fully transparent, and the edge is then eroded by this many pixels.
-#
-# Both exist for the same defect, seen in the preview: a ragged bright fringe around the artwork. The
-# source is a JPEG whose background is a gradient rather than a constant, so pixels just off the fill
-# threshold survive as opaque near-white and draw themselves as a halo. Cutting the weak ones and
-# shaving the boundary removes it; the drawing is solidly painted, so neither touches its interior.
-ALPHA_FLOOR = 96
-EDGE_EROSION = 2
+# The source is a JPEG, so its "black" is a gradient rather than a constant and its brightest areas
+# carry a glow. The tolerance is generous because the only thing it can wrongly remove is dark pixels
+# touching the edge, and the drawing's own dark areas (inside the hand, inside the leaves) are
+# enclosed by the outline and unreachable from the border.
+BACKGROUND_TOLERANCE = 90
+ALPHA_FLOOR = 64
+EDGE_EROSION = 1
 
 
-def drop_white_background(image: Image.Image) -> Image.Image:
-    """Make white that touches the border transparent, and nothing else.
-
-    A flood fill from the edges rather than "every white pixel": the drawing contains pale cream
-    (253, 234, 192), which is bright enough that a global threshold would punch holes in it.
-    """
+def drop_dark_background(image: Image.Image) -> Image.Image:
+    """Make black that touches the border transparent, and nothing else."""
     rgba = image.convert("RGBA")
     width, height = rgba.size
     pixels = rgba.load()
@@ -86,14 +70,7 @@ def drop_white_background(image: Image.Image) -> Image.Image:
         r, g, b, a = pixels[x, y]
         if a == 0:
             return True
-        bright = (
-            r > 255 - BACKGROUND_TOLERANCE
-            and g > 255 - BACKGROUND_TOLERANCE
-            and b > 255 - BACKGROUND_TOLERANCE
-        )
-        # Desaturated as well: the cream is warm, so its blue channel sits far below its red one and
-        # it fails this test even where it is bright.
-        return bright and max(r, g, b) - min(r, g, b) < 18
+        return r < BACKGROUND_TOLERANCE and g < BACKGROUND_TOLERANCE and b < BACKGROUND_TOLERANCE
 
     seen = bytearray(width * height)
     queue: deque[tuple[int, int]] = deque()
@@ -118,23 +95,22 @@ def drop_white_background(image: Image.Image) -> Image.Image:
                 seen[ny * width + nx] = 1
                 queue.append((nx, ny))
 
-    # Cut the partly-decided pixels, erode the boundary, then soften what remains. Flood filling
-    # decides per pixel, so the edge comes out stepped and carries a bright fringe; a minimum filter
-    # shaves that off and a sub-pixel blur on the alpha channel alone restores a smooth outline,
-    # without touching any colour.
+    # The glow is a *soft* brightening around each line, so its outer skirt is nearly black. Left
+    # alone that skirt reads as a grey halo against a white plate. Cutting the weak pixels and
+    # shaving the boundary removes it without touching the lines, which are solidly bright.
     alpha = rgba.split()[-1].point(lambda value: 0 if value < ALPHA_FLOOR else value)
     alpha = alpha.filter(ImageFilter.MinFilter(EDGE_EROSION * 2 + 1))
-    rgba.putalpha(alpha.filter(ImageFilter.GaussianBlur(0.6)))
+    rgba.putalpha(alpha.filter(ImageFilter.GaussianBlur(0.5)))
     return rgba
 
 
 source = Image.open(SRC).convert("RGB")
-art = drop_white_background(source)
+art = drop_dark_background(source)
 box = art.split()[-1].getbbox()
 if box is None:
     raise SystemExit("the artwork is empty after removing the background")
 art = art.crop(box)
-print(f"source {source.size} -> artwork {art.size} after removing the white background")
+print(f"source {source.size} -> artwork {art.size} after removing the black background")
 
 diameter = CANVAS * VISIBLE
 side = diameter * ART_IN_VISIBLE
@@ -142,60 +118,60 @@ scale = side / max(art.size)
 scaled = art.resize(
     (max(1, round(art.width * scale)), max(1, round(art.height * scale))), Image.LANCZOS
 )
-print(f"artwork spans {ART_IN_VISIBLE:.0%} of the visible circle, upscaled {scale:.2f}x")
+print(f"artwork spans {ART_IN_VISIBLE:.0%} of the visible circle, scaled {scale:.2f}x")
 
-# Composited over the icon's own background colour, not merely stacked on top of it: an
-# anti-aliased edge keeps a little of the white it was cut from, and stacking leaves that as a bright
-# fringe against a dark background.
-#
-# The two outputs differ in what surrounds the artwork, and getting that wrong was visible on a
-# device as a **black** icon:
-#
-#   * `adaptive-icon.png` is the **foreground layer**, so it must be transparent outside the
-#     artwork. An adaptive icon draws `<background>` and then this on top; a foreground that fills
-#     its canvas hides the background completely, which is why a `#121822` colour showed through as
-#     black no matter what the background layer said.
-#   * `icon.png` is a standalone square for launchers too old to composite layers, so it carries the
-#     flat colour itself.
-artwork = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
-artwork.paste(scaled, ((CANVAS - scaled.width) // 2, (CANVAS - scaled.height) // 2), scaled)
+# The foreground layer: transparent outside the artwork, so the adaptive icon's background layer
+# shows through. An opaque foreground hides that layer completely -- which is what made a previous
+# icon render as solid black whatever colour was configured.
+foreground = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+foreground.paste(scaled, ((CANVAS - scaled.width) // 2, (CANVAS - scaled.height) // 2), scaled)
 
-# The flat square: the artwork's *colours* blended over the background where it is opaque. Blending
-# rather than pasting keeps the anti-aliased edge from carrying a white fringe.
+# The standalone square for launchers too old to composite layers, so it carries the colour itself.
 flat = Image.new("RGB", (CANVAS, CANVAS), ICON_BACKGROUND)
-flat.paste(artwork, (0, 0), artwork)
+flat.paste(foreground, (0, 0), foreground)
 
+foreground.save(ASSETS / "adaptive-icon.png")
 flat.save(ASSETS / "icon.png")
-artwork.save(ASSETS / "adaptive-icon.png")
-print(f"icon.png (opaque, #{ICON_BACKGROUND[0]:02x}{ICON_BACKGROUND[1]:02x}{ICON_BACKGROUND[2]:02x})")
-print("adaptive-icon.png (transparent outside the artwork, so the background layer shows)")
+alpha = foreground.split()[-1].histogram()
+total = sum(alpha)
+print(
+    f"adaptive-icon.png: {alpha[0] / total:.1%} transparent; "
+    f"icon.png: opaque #{ICON_BACKGROUND[0]:02x}{ICON_BACKGROUND[1]:02x}{ICON_BACKGROUND[2]:02x}"
+)
 
-# --- previews ----------------------------------------------------------------
+# --- previews, one per candidate background -----------------------------------
 diameter_px = int(CANVAS * VISIBLE)
 offset = (CANVAS - diameter_px) // 2
 
 
 def masked_with(background: tuple[int, int, int]) -> Image.Image:
     """What a launcher shows: the background layer, the foreground over it, then the round mask."""
-    plate_full = Image.new("RGB", (CANVAS, CANVAS), background)
-    plate_full.paste(artwork, (0, 0), artwork)
-    inner = plate_full.crop((offset, offset, offset + diameter_px, offset + diameter_px)).resize(
-        (420, 420), Image.LANCZOS
+    plate = Image.new("RGB", (CANVAS, CANVAS), background)
+    plate.paste(foreground, (0, 0), foreground)
+    inner = plate.crop((offset, offset, offset + diameter_px, offset + diameter_px)).resize(
+        (300, 300), Image.LANCZOS
     )
-    circle = Image.new("L", (420, 420), 0)
-    ImageDraw.Draw(circle).ellipse((0, 0, 419, 419), fill=255)
-    out = Image.new("RGB", (420, 420), (70, 70, 70))
+    circle = Image.new("L", (300, 300), 0)
+    ImageDraw.Draw(circle).ellipse((0, 0, 299, 299), fill=255)
+    out = Image.new("RGB", (300, 300), (140, 140, 140))
     out.paste(inner, (0, 0), circle)
     return out
 
 
-guide = Image.new("RGB", (CANVAS, CANVAS), ICON_BACKGROUND)
-guide.paste(artwork, (0, 0), artwork)
-drawn = ImageDraw.Draw(guide)
-drawn.ellipse((offset, offset, offset + diameter_px, offset + diameter_px), outline=(255, 60, 60), width=4)
-guide.resize((420, 420), Image.LANCZOS).save(PREVIEW / "guide.png")
-
-masked_with(ICON_BACKGROUND).save(PREVIEW / "masked.png")
-masked_with((255, 255, 255)).save(PREVIEW / "masked-white.png")
-masked_with((242, 238, 230)).save(PREVIEW / "masked-light.png")
-print("previews: guide.png, masked.png (dark bg), masked-white.png, masked-light.png")
+candidates = [
+    ("white", (255, 255, 255)),
+    ("navy", (18, 24, 34)),
+    ("brandblue", (0x1E, 0x5A, 0xAA)),
+    ("mid", (90, 96, 110)),
+]
+sheet = Image.new("RGB", (len(candidates) * 320 + 20, 340), (255, 255, 255))
+draw = ImageDraw.Draw(sheet)
+for index, (name, colour) in enumerate(candidates):
+    x = 20 + index * 320
+    sheet.paste(masked_with(colour), (x, 20))
+    draw.text((x + 4, 328), name, fill=(0, 0, 0))
+sheet.save(PREVIEW / "options.png")
+for name, colour in candidates:
+    if colour == ICON_BACKGROUND:
+        masked_with(colour).resize((420, 420), Image.LANCZOS).save(PREVIEW / "masked.png")
+print(f"previews: options.png ({', '.join(name for name, _ in candidates)}), masked.png (chosen)")

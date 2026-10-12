@@ -789,7 +789,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     // The EAS account that owns the project; required so builds resolve the
     // correct project when an account belongs to several organizations.
     owner: "justin_emils",
-    version: "0.5.0",
+    version: "0.5.1",
     orientation: "portrait",
     scheme: "mobileclaw",
     /**
@@ -814,22 +814,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         /**
          * The background **layer**. Must match `ICON_BACKGROUND` in `eng/build-icon.py`.
          *
-         * The foreground is transparent so this shows through — and getting that wrong was a real
-         * bug, not a preference: an opaque foreground hides this layer entirely, so the icon came out
-         * black whatever colour was set here.
+         * The foreground is transparent so this shows through — an opaque foreground hides this
+         * layer entirely, which is what made an earlier icon render as solid black whatever colour
+         * was set here.
          *
-         * Brand blue rather than white. The artwork is cream (253,234,192), which has about 4%
-         * contrast against white, so a white background makes the wreath and hand effectively
-         * disappear. Measured against the alternatives the icon script can render side by side, this
-         * keeps the cream body and the blue flower legible together, and echoes the flower already in
-         * the drawing.
+         * White, now that the artwork allows it. The drawing is **white lines with a glow**, so a
+         * white plate reads as the line art floating on nothing; the dark areas inside it are the
+         * fill of the hand and leaves, not background showing through. This is what the user asked
+         * for from the start — the earlier artwork could not do it, being cream (253,234,192) at
+         * about 4% contrast against white, which made it disappear.
          */
-        backgroundColor: "#1E5AAA",
+        backgroundColor: "#FFFFFF",
       },
       // Android decides "is this an upgrade" from versionCode, not versionName, and the
       // Expo template defaults it to 1 for every build. Keep it in step with `version`:
       // 0.2.0 ships as code 2.
-      versionCode: 23,
+      versionCode: 24,
       // targetSdk 36 is what SDK 57 builds; edge-to-edge is always on there, and
       // `exec` of app-private binaries is forbidden at API 29+, which is why
       // bundled tools must ship as jniLibs instead.
