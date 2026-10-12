@@ -4,7 +4,7 @@ import { Link, useFocusEffect } from "expo-router";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { DEFAULT_PRESETS, type AppConfig } from "@/runtime/config";
 import { strings } from "@/ui/strings";
-import { createThemedStyles, useTheme, useThemedStyles } from "@/ui/theme-tokens";
+import { createThemedStyles, themeRegistry, useTheme, useThemedStyles } from "@/ui/theme-tokens";
 
 type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics"]>>;
 
@@ -16,7 +16,7 @@ type Diagnostics = Awaited<ReturnType<ReturnType<typeof useRuntime>["diagnostics
  */
 export default function SettingsScreen() {
   const styles = useThemedStyles(themedStyles);
-  const { theme, mode: themeMode, setMode: setThemeMode } = useTheme();
+  const { theme, preference: themePreference, setPreference: setThemePreference } = useTheme();
   const state = useRuntimeState();
   const runtime = useRuntime();
 
@@ -168,22 +168,25 @@ export default function SettingsScreen() {
         Appearance comes first: it is the only setting on this screen that changes what the user sees
         as they touch it, and burying it under the provider and key fields would make a visible control
         hard to find.
+
+        The chips are generated from the registry, so a theme added there appears here with no edit to
+        this file — including its own label.
       */}
       <Section title={strings.settings.appearance}>
         <View style={styles.chips}>
-          {(["system", "light", "dark"] as const).map((candidate) => (
+          <Pressable
+            style={[styles.chip, themePreference === "system" ? styles.chipActive : null]}
+            onPress={() => setThemePreference("system")}
+          >
+            <Text style={styles.chipText}>{strings.settings.themeSystem}</Text>
+          </Pressable>
+          {themeRegistry().map((entry) => (
             <Pressable
-              key={candidate}
-              style={[styles.chip, themeMode === candidate ? styles.chipActive : null]}
-              onPress={() => setThemeMode(candidate)}
+              key={entry.id}
+              style={[styles.chip, themePreference === entry.id ? styles.chipActive : null]}
+              onPress={() => setThemePreference(entry.id)}
             >
-              <Text style={styles.chipText}>
-                {candidate === "system"
-                  ? strings.settings.themeSystem
-                  : candidate === "light"
-                    ? strings.settings.themeLight
-                    : strings.settings.themeDark}
-              </Text>
+              <Text style={styles.chipText}>{entry.label}</Text>
             </Pressable>
           ))}
         </View>

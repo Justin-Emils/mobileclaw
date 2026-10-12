@@ -1,16 +1,23 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useColorScheme } from "react-native";
-import { ThemeProvider, type ResolvedMode, type ThemeMode } from "@/ui/theme-tokens";
+import { ThemeProvider, type ThemePreference } from "@/ui/theme-tokens";
 
 /**
  * The theme preference, persisted, wrapping the app.
  *
  * ## Where it is stored, and why not in the app's config
  *
- * The theme has to be known BEFORE the runtime exists: the first frame is painted before
+ * The theme has to be known **before** the runtime exists: the first frame is painted before
  * bootstrapRuntime resolves, and a palette that arrives late paints one set of colours and then swaps
  * them. expo-secure-store is the only durable storage available that early, and while a colour
  * preference is not a secret it is small and already wired.
+ *
+ * ## Why it stores a string, not a union
+ *
+ * The stored value is a **theme id**, and theme ids come from the registry. Persisting a closed union
+ * would mean a saved preference could not name a theme the registry gained later. An id the registry
+ * does not know is treated as "system" rather than as an error -- see `themeDefinition`, which has the
+ * same posture for the same reason.
  */
 
 const THEME_KEY = "mobileclaw.theme";
@@ -19,10 +26,6 @@ const THEME_KEY = "mobileclaw.theme";
 export interface ThemeStorage {
   getItemAsync(key: string): Promise<string | null>;
   setItemAsync(key: string, value: string): Promise<void>;
-}
-
-function isMode(value: unknown): value is ThemeMode {
-  return value === "system" || value === "light" || value === "dark";
 }
 
 export function ThemePreferenceProvider({
@@ -34,8 +37,8 @@ export function ThemePreferenceProvider({
 }) {
   // useColorScheme is the platform's own answer, and it changes while the app runs if the user flips
   // the system setting -- which is what "follow the phone's theme" has to mean.
-  const systemMode: ResolvedMode = useColorScheme() === "light" ? "light" : "dark";
-  const [mode, setModeState] = useState<ThemeMode>("system");
+  const systemAppearance: "light" | "dark" = useColorScheme() === "light" ? "light" : "dark";
+  const [preference, setPreferenceState] = useState<ThemePreference>("system");
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
@@ -43,7 +46,10 @@ export function ThemePreferenceProvider({
     void storage
       .getItemAsync(THEME_KEY)
       .then((stored) => {
-        if (!cancelled && isMode(stored)) setModeState(stored);
+        // Any non-empty string is accepted: the registry decides whether it means anything, and it
+        // falls back rather than failing. Rejecting unknown ids here would need this file to know the
+        // registry, which is the coupling the registry exists to remove.
+        if (!cancelled && typeof stored === "string" && stored !== "") setPreferenceState(stored);
       })
       .catch(() => {
         // A store that cannot be read is not a reason to refuse to render; the default stands.
@@ -56,9 +62,9 @@ export function ThemePreferenceProvider({
     };
   }, [storage]);
 
-  const setMode = useCallback(
-    (next: ThemeMode) => {
-      setModeState(next);
+  const setPreference = useCallback(
+    (next: ThemePreference) => {
+      setPreferenceState(next);
       void storage.setItemAsync(THEME_KEY, next).catch(() => {
         // The change still applies for this session; failing to persist it is not worth an error.
       });
@@ -71,7 +77,11 @@ export function ThemePreferenceProvider({
   if (!loaded) return null;
 
   return (
-    <ThemeProvider mode={mode} systemMode={systemMode} setMode={setMode}>
+    <ThemeProvider
+      preference={preference}
+      systemAppearance={systemAppearance}
+      setPreference={setPreference}
+    >
       {children}
     </ThemeProvider>
   );

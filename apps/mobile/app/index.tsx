@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
+
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -50,6 +52,12 @@ export default function ChatScreen() {
   const params = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
   const { setParams } = router;
+  /**
+   * Height of the software keyboard, in points. Zero when it is closed.
+   *
+   * Measured rather than inferred — see the note where it is used as padding on the composer.
+   */
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [tools, setTools] = useState<TranscriptEntry[]>([]);
   const [draft, setDraft] = useState("");
@@ -389,7 +397,21 @@ export default function ChatScreen() {
         </Pressable>
       ) : null}
 
-      <View style={styles.composer}>
+      <View
+        style={[
+          styles.composer,
+          /*
+           * The keyboard's own height, as bottom padding.
+           *
+           * `KeyboardAvoidingView` above is not enough on this target: at targetSdk 35+ edge-to-edge is
+           * always on, so the platform no longer resizes the window for the keyboard and the avoiding
+           * view has no frame change to react to — on a device the composer slid up but was still behind
+           * the keys. The height from `keyboardDidShow` is the real number, so padding by it cannot be
+           * wrong by the amount that an assumption about insets would be.
+           */
+          keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null,
+        ]}
+      >
         <TextInput
           style={styles.input}
           value={draft}
