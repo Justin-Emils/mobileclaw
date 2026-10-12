@@ -38,7 +38,13 @@ for old in PREVIEW.glob("*.png"):
 
 CANVAS = 1024
 VISIBLE = 66 / 108
-ICON_BACKGROUND = (18, 24, 34)
+# Must match `android.adaptiveIcon.backgroundColor` in `app.config.ts`.
+#
+# Brand blue rather than white: the artwork is cream (253,234,192), about 4% contrast against white,
+# which makes the wreath and hand effectively disappear and leaves only the blue flower and a few
+# hairlines. Chosen from the options this script can render side by side; the hue also echoes the
+# flower already in the drawing.
+ICON_BACKGROUND = (0x1E, 0x5A, 0xAA)
 
 # How much of the visible circle's diameter the artwork's longest side may span.
 #
@@ -138,32 +144,58 @@ scaled = art.resize(
 )
 print(f"artwork spans {ART_IN_VISIBLE:.0%} of the visible circle, upscaled {scale:.2f}x")
 
-# Composited over the icon's own background colour, not merely stacked on top of it: an anti-aliased
-# edge keeps a little of the white it was cut from, and stacking leaves that as a bright fringe
-# against a dark launcher.
-canvas = Image.new("RGB", (CANVAS, CANVAS), ICON_BACKGROUND)
-canvas.paste(scaled, ((CANVAS - scaled.width) // 2, (CANVAS - scaled.height) // 2), scaled)
+# Composited over the icon's own background colour, not merely stacked on top of it: an
+# anti-aliased edge keeps a little of the white it was cut from, and stacking leaves that as a bright
+# fringe against a dark background.
+#
+# The two outputs differ in what surrounds the artwork, and getting that wrong was visible on a
+# device as a **black** icon:
+#
+#   * `adaptive-icon.png` is the **foreground layer**, so it must be transparent outside the
+#     artwork. An adaptive icon draws `<background>` and then this on top; a foreground that fills
+#     its canvas hides the background completely, which is why a `#121822` colour showed through as
+#     black no matter what the background layer said.
+#   * `icon.png` is a standalone square for launchers too old to composite layers, so it carries the
+#     flat colour itself.
+artwork = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+artwork.paste(scaled, ((CANVAS - scaled.width) // 2, (CANVAS - scaled.height) // 2), scaled)
 
-# The legacy icon is the same picture. It exists for launchers too old to use an adaptive icon, and
-# they mask it the same way, so the same safe area applies -- which is what removes the corner wedges.
-canvas.save(ASSETS / "icon.png")
-canvas.convert("RGBA").save(ASSETS / "adaptive-icon.png")
-print(f"icon.png and adaptive-icon.png: {CANVAS}x{CANVAS} on #{ICON_BACKGROUND[0]:02x}{ICON_BACKGROUND[1]:02x}{ICON_BACKGROUND[2]:02x}")
+# The flat square: the artwork's *colours* blended over the background where it is opaque. Blending
+# rather than pasting keeps the anti-aliased edge from carrying a white fringe.
+flat = Image.new("RGB", (CANVAS, CANVAS), ICON_BACKGROUND)
+flat.paste(artwork, (0, 0), artwork)
+
+flat.save(ASSETS / "icon.png")
+artwork.save(ASSETS / "adaptive-icon.png")
+print(f"icon.png (opaque, #{ICON_BACKGROUND[0]:02x}{ICON_BACKGROUND[1]:02x}{ICON_BACKGROUND[2]:02x})")
+print("adaptive-icon.png (transparent outside the artwork, so the background layer shows)")
 
 # --- previews ----------------------------------------------------------------
 diameter_px = int(CANVAS * VISIBLE)
 offset = (CANVAS - diameter_px) // 2
 
-guide = canvas.copy()
-ImageDraw.Draw(guide).ellipse(
-    (offset, offset, offset + diameter_px, offset + diameter_px), outline=(255, 60, 60), width=4
-)
+
+def masked_with(background: tuple[int, int, int]) -> Image.Image:
+    """What a launcher shows: the background layer, the foreground over it, then the round mask."""
+    plate_full = Image.new("RGB", (CANVAS, CANVAS), background)
+    plate_full.paste(artwork, (0, 0), artwork)
+    inner = plate_full.crop((offset, offset, offset + diameter_px, offset + diameter_px)).resize(
+        (420, 420), Image.LANCZOS
+    )
+    circle = Image.new("L", (420, 420), 0)
+    ImageDraw.Draw(circle).ellipse((0, 0, 419, 419), fill=255)
+    out = Image.new("RGB", (420, 420), (70, 70, 70))
+    out.paste(inner, (0, 0), circle)
+    return out
+
+
+guide = Image.new("RGB", (CANVAS, CANVAS), ICON_BACKGROUND)
+guide.paste(artwork, (0, 0), artwork)
+drawn = ImageDraw.Draw(guide)
+drawn.ellipse((offset, offset, offset + diameter_px, offset + diameter_px), outline=(255, 60, 60), width=4)
 guide.resize((420, 420), Image.LANCZOS).save(PREVIEW / "guide.png")
 
-inner = canvas.crop((offset, offset, offset + diameter_px, offset + diameter_px)).resize((420, 420), Image.LANCZOS)
-circle = Image.new("L", (420, 420), 0)
-ImageDraw.Draw(circle).ellipse((0, 0, 419, 419), fill=255)
-plate = Image.new("RGB", (420, 420), (70, 70, 70))
-plate.paste(inner, (0, 0), circle)
-plate.save(PREVIEW / "masked.png")
-print("previews: guide.png (circle boundary on the canvas), masked.png (what a launcher shows)")
+masked_with(ICON_BACKGROUND).save(PREVIEW / "masked.png")
+masked_with((255, 255, 255)).save(PREVIEW / "masked-white.png")
+masked_with((242, 238, 230)).save(PREVIEW / "masked-light.png")
+print("previews: guide.png, masked.png (dark bg), masked-white.png, masked-light.png")
