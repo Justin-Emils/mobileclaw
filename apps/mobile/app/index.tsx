@@ -14,6 +14,7 @@ import { Link, useFocusEffect, useLocalSearchParams, useRouter } from "expo-rout
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import type { AgentEvent, ChatMessage, TranscriptEntry } from "@mobileclaw/core";
+import { rememberApprovalOrigin } from "@/runtime/approval-origin";
 import { useRuntime, useRuntimeState } from "@/ui/runtime-provider";
 import { ApprovalSheet } from "@/ui/approval-sheet";
 import { ToolCard } from "@/ui/tool-card";
@@ -108,6 +109,19 @@ export default function ChatScreen() {
   // Re-probe on focus: the user grants access in system settings and comes back.
   useFocusEffect(
     useCallback(() => {
+      /*
+       * Remember which conversation is in front, for the approval screen to come back to.
+       *
+       * An approval is asked while the agent operates another app, so answering it arrives as a URL
+       * that lands on `app/approval.tsx` — a different route — and that screen has no way to know what
+       * the user was looking at. Without this it redirected to `/`, and **`/` with no `?id=` is a new
+       * conversation**, so answering a question about the run in front of the user replaced it with an
+       * empty chat.
+       *
+       * Recorded on focus rather than in an effect on `conversationId`: focus is what defines "the
+       * screen the user was on", and a backgrounded screen must not overwrite it.
+       */
+      rememberApprovalOrigin(conversationId);
       if (!ready || !runtime) return;
       let cancelled = false;
       void runtime.checkStorageAccess().then((report) => {
