@@ -323,6 +323,17 @@ export class MobileClawRuntime {
     return reader(RUN_LOG_FILE_NAME, offset, length);
   }
 
+  /**
+   * Answer a pending approval by id, from outside the app.
+   *
+   * Used by the notification buttons: the question is asked while the agent operates another app, so
+   * the answer usually arrives without MobileClaw ever being opened. An unknown id is ignored — the
+   * sheet may have answered it first, or the run may have been cancelled.
+   */
+  answerApproval(id: string, approved: boolean): void {
+    this.approvals.answer(id, { approved });
+  }
+
   /** Clear the record, for when the user wants a clean capture of the next run. */
   async clearRunLog(): Promise<void> {
     try {

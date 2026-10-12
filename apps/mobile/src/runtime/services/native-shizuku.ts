@@ -152,6 +152,14 @@ export interface NativeShizukuModule {
   ): Promise<{ size: number; offset: number; content: string; eof: boolean }>;
   /** Copy a file inside this app's storage into `Download`, for reading over USB. */
   exportOwnFile?(relativePath: string): Promise<string>;
+  /**
+   * Declare the approval notification channel at `IMPORTANCE_HIGH`.
+   *
+   * Not channelled through `expo-notifications` because that library creates an Android channel on
+   * first use at default importance and never revisits it — and importance is exactly what decides
+   * whether a heads-up banner appears over another app, which is the point of the approval notice.
+   */
+  prepareApprovalChannel?(): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

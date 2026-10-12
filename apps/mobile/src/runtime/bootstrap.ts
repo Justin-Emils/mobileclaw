@@ -41,6 +41,12 @@ import {
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
 import { startRunService } from "./run-service";
+import {
+  postApprovalNotification,
+  prepareApprovalNotifications,
+  readApprovalResponse,
+  withdrawApprovalNotification,
+} from "./approval-notify";
 import { createEventLog } from "./services/event-log";
 import { createFileLogSink } from "./log-sink";
 import type {
@@ -242,6 +248,29 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
     },
   });
 
+  // --- approval notifications ----------------------------------------------
+  //
+  // The channel is declared natively (`prepareApprovalChannel`) and the notification is posted
+  // through `expo-notifications`. That split is not stylistic: importance decides whether Android
+  // shows a heads-up banner over another app, and `expo-notifications` never sets it — it creates a
+  // channel on first use at default importance. But the *buttons* have to arrive back in JavaScript,
+  // which is what `expo-notifications` does and a native notification would not.
+  //
+  // Registered here, before the runtime exists, because it must be listening by the time the first
+  // question is asked; `runtime` is read from the closure at call time, not captured as a value.
+  let runtime: MobileClawRuntime | undefined;
+  await prepareApprovalNotifications({
+    prepareChannel: async () => {
+      await nativeShizuku?.prepareApprovalChannel?.();
+    },
+  });
+  Notifications.addNotificationResponseReceivedListener((response) => {
+    const answer = readApprovalResponse(response);
+    if (!answer || !runtime) return;
+    eventLog.info("approval", "answered from notification", { approved: answer.approved });
+    runtime.answerApproval(answer.approvalId, answer.approved);
+  });
+
   // --- shell backends ------------------------------------------------------
   const shell = await pickShellBackend(privileged);
 
@@ -285,7 +314,7 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
   );
 
   // --- runtime -------------------------------------------------------------
-  const runtime = new MobileClawRuntime({
+  runtime = new MobileClawRuntime({
     config: { ...config, roots },
     secrets,
     kv,
@@ -381,6 +410,38 @@ export async function bootstrapRuntime(): Promise<MobileClawRuntime> {
       await kv.set(CONFIG_KEY, JSON.stringify(next));
     },
   });
+
+  /**
+   * Mirror the waiting approvals into notifications.
+   *
+   * This is the whole point of the approval notification: the question is asked while the agent is
+   * operating another app, so the in-app sheet is behind whatever is on screen and the run stops
+   * invisibly. Posting from the queue means the question appears wherever the user is looking, and
+   * answering it — by button or by sheet — clears it from both places.
+   *
+   * The notification id is tracked per approval so the sheet can withdraw the notification when it is
+   * the one that got answered first; leaving a stale question on screen would invite a second answer
+   * to a decision already made.
+   */
+  const posted = new Map<string, string>();
+  runtime.approvals.onPendingChange = (pending) => {
+    const waiting = new Set(pending.map((entry) => entry.id));
+    for (const [id, notificationId] of [...posted]) {
+      if (waiting.has(id)) continue;
+      posted.delete(id);
+      void withdrawApprovalNotification(notificationId);
+    }
+    for (const entry of pending) {
+      if (posted.has(entry.id)) continue;
+      posted.set(entry.id, entry.id);
+      void postApprovalNotification(entry).catch((error: unknown) => {
+        eventLog.warn("approval", "could not post the approval notification", {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+  };
+
   await runtime.start();
   return runtime;
 }

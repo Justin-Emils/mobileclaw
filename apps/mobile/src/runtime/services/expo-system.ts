@@ -32,6 +32,31 @@ export interface ExpoSystemPorts {
   setClipboard?(text: string): Promise<void>;
   shareText?(text: string, title?: string): Promise<void>;
   notify?(notification: { title: string; body?: string }): Promise<void>;
+  /**
+   * Ask the user to answer a pending approval, from outside the app.
+   *
+   * A separate port from `notify` because the two are different in every way that matters. A plain
+   * notification is a message; this one is a *question the run is blocked on*, and it has to be
+   * answerable without opening the app:
+   *
+   *  - every screen tool asks for approval before it touches anything, and the run is suspended until
+   *    it is answered;
+   *  - the agent is by definition operating **another app** when that happens, so MobileClaw is in
+   *    the background and its approval sheet is invisible — the run waits, and the user sees nothing
+   *    at all. That is the whole reason this exists.
+   *
+   * So it needs a channel that interrupts (a heads-up banner over whatever is on screen) and buttons
+   * that resolve the approval in place. `id` comes back so the notification can be withdrawn once the
+   * question is answered some other way.
+   */
+  notifyApproval?(notification: {
+    /** Matches `PendingApproval.id`, so the answer can be routed back to the waiting promise. */
+    approvalId: string;
+    title: string;
+    body: string;
+  }): Promise<string>;
+  /** Withdraw an approval notification, by the id `notifyApproval` returned. */
+  dismissApproval?(id: string): Promise<void>;
   createCalendarEvent?(event: {
     title: string;
     startMs: number;
@@ -104,6 +129,23 @@ export class ExpoSystemService implements SystemService {
   async notify(notification: { title: string; body?: string }): Promise<void> {
     if (!this.ports.notify) throw new CoreError("E_TOOL_FAILED", "notifications are unavailable");
     await this.ports.notify(notification);
+  }
+
+  /** Post the approval question. Returns `undefined` where the platform has no such channel. */
+  async askApproval(notification: {
+    approvalId: string;
+    title: string;
+    body: string;
+  }): Promise<string | undefined> {
+    // Absent rather than fatal: on iOS there is no equivalent interruption, and the in-app sheet is
+    // still there. The caller only uses the id to dismiss, so nothing depends on it existing.
+    if (!this.ports.notifyApproval) return undefined;
+    return this.ports.notifyApproval(notification);
+  }
+
+  async withdrawApproval(id: string | undefined): Promise<void> {
+    if (id === undefined || !this.ports.dismissApproval) return;
+    await this.ports.dismissApproval(id);
   }
 
   async createCalendarEvent(event: {

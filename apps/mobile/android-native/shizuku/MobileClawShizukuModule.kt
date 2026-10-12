@@ -387,6 +387,26 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Declare the approval notification channel, so it exists before the first question is asked.
+     *
+     * Called at startup rather than lazily: `expo-notifications` creates an Android channel on first
+     * use at *default* importance and never revisits it, so a channel that is not already present
+     * ends up silent — no heads-up banner — which is precisely the failure the approval
+     * notification exists to fix.
+     *
+     * Idempotent: recreating a channel only refreshes its name and description.
+     */
+    @ReactMethod
+    fun prepareApprovalChannel(promise: Promise) {
+        run(promise) {
+            val manager = reactContext.getSystemService(android.content.Context.NOTIFICATION_SERVICE)
+                as android.app.NotificationManager
+            MobileClawForegroundService.ensureApprovalChannel(manager)
+            true
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class

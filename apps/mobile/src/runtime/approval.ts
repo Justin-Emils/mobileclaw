@@ -45,6 +45,17 @@ export class ApprovalBroker {
   /** Auto-answer hook used by tests and by the "auto-approve in dev" toggle. */
   autoAnswer?: (request: PermissionRequest) => ApprovalAnswer | undefined;
 
+  /**
+   * Called whenever the waiting set changes: a question appeared, or one was answered.
+   *
+   * The broker itself stays free of any notion of *how* the user is asked. It exists because the
+   * in-app sheet is not enough on this platform: the agent asks for approval while it is operating
+   * another app, so MobileClaw is in the background and its sheet is invisible. The run waits and the
+   * user sees nothing. The subscriber is what puts the question somewhere visible — a notification —
+   * and takes it away again when the answer arrives by either route.
+   */
+  onPendingChange?: (pending: readonly PendingApproval[]) => void;
+
   /** The gate's approval callback: parks the run until the user answers. */
   async handle(request: PermissionRequest): Promise<ApprovalAnswer> {
     const preset = this.autoAnswer?.(request);
@@ -92,6 +103,13 @@ export class ApprovalBroker {
 
   private notify(): void {
     for (const listener of [...this.listeners]) listener();
+    // A throwing subscriber must not derail an approval: the answer path is the run's only way
+    // forward, and a notification that cannot be posted is not a reason to lose the question.
+    try {
+      this.onPendingChange?.(this.queue);
+    } catch {
+      // Deliberately swallowed; the in-app sheet still shows it.
+    }
   }
 }
 

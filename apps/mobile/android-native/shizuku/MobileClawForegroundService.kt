@@ -138,6 +138,44 @@ class MobileClawForegroundService : Service() {
         const val NOTIFICATION_ID = 4399
 
         /**
+         * The channel approval questions are posted on.
+         *
+         * Separate from `CHANNEL_ID` because the two notices are opposites. The run notice says
+         * "still working" and must be silent — a LOW channel. An approval question is a request the
+         * whole run is **blocked on**, asked while the user is looking at another app, so it has to
+         * interrupt: HIGH is what makes Android show a heads-up banner over whatever is on screen.
+         *
+         * Created here rather than through `expo-notifications` because importance is not something
+         * that library sets, and a LOW channel would be silent and invisible in a tray the user has
+         * no reason to open — which is the exact failure this channel exists to fix.
+         */
+        const val APPROVAL_CHANNEL_ID = "mobileclaw-approval"
+        private const val APPROVAL_CHANNEL_NAME = "需要你的授权"
+        private const val APPROVAL_CHANNEL_DESCRIPTION = "运行中被暂停的步骤，需要你确认后才能继续"
+
+        /**
+         * Declare the approval channel. Called from module construction so it exists before any
+         * question is asked; creating an existing channel is a no-op that also refreshes its name.
+         */
+        fun ensureApprovalChannel(manager: NotificationManager) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val channel = NotificationChannel(
+                APPROVAL_CHANNEL_ID,
+                APPROVAL_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = APPROVAL_CHANNEL_DESCRIPTION
+                // The question is not a feed item; a badge would linger after it was answered.
+                setShowBadge(false)
+                enableVibration(true)
+                // Visible on the lock screen: the phone may well be in a pocket when a run stops to
+                // ask, and an answer that cannot be given from there is an answer that is not given.
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            manager.createNotificationChannel(channel)
+        }
+
+        /**
          * The text that says why this notice is here.
          *
          * This is the one piece of user-facing wording that cannot live in `ui/strings.ts`: the
