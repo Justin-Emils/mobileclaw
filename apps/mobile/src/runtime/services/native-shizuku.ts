@@ -164,6 +164,13 @@ export interface NativeShizukuModule {
   postApprovalNotification?(approvalId: string, title: string, body: string): Promise<boolean>;
   /** Take the question down once it has been answered, by either route. */
   dismissApprovalNotification?(approvalId: string): Promise<boolean>;
+  /**
+   * Empty the approval inbox after its contents have been applied.
+   *
+   * The native receiver appends a decision when a notification button is pressed; the runtime reads the
+   * file and then clears it, which is what makes the handover idempotent.
+   */
+  clearApprovalInbox?(): Promise<boolean>;
 }
 
 export function loadNativeShizuku(): NativeShizukuModule | undefined {

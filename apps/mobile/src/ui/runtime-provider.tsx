@@ -1,9 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import * as Linking from "expo-linking";
 import { bootstrapRuntime } from "@/runtime/bootstrap";
 import { MobileClawRuntime } from "@/runtime/runtime";
 import { ApprovalBroker } from "@/runtime/approval";
-import { readApprovalUrl } from "@/runtime/approval-notify";
 import { DEFAULT_CONFIG, type AppConfig } from "@/runtime/config";
 import { AdapterKeyValueStore, MemoryKvAdapter } from "@/runtime/services/storage";
 import { MemorySecretStore } from "@/runtime/services/secrets";
@@ -45,24 +43,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     if (started.current) return;
     started.current = true;
 
-    /**
-     * Apply an answer that arrived as a URL.
+    /*
+     * Nothing here listens for the approval answer any more.
      *
-     * Both delivery paths are needed. `getInitialURL` covers the cold start — the app was not running
-     * when the button was pressed, which is the common case because a run long enough to need approval
-     * usually means the user has moved on. The subscription covers the app already being alive, where
-     * the launch lands as a new intent instead.
+     * It used to: the native receiver started this activity with the answer as a
+     * `mobileclaw://approval?…` URL, and this effect read it off `Linking`. That mechanism was removed
+     * because it brought the app to the front every time — the opposite of what answering from the
+     * notification is for — and because the launch cleared the task, which remounted the chat screen and
+     * turned the just-approved run into a fresh conversation.
      *
-     * `readApprovalUrl` returns nothing for any other link, so `mobileclaw://logs` and friends are
-     * ignored here rather than being mistaken for a decision.
+     * The answer now travels through a file that the runtime polls while a question is outstanding; see
+     * `approval-inbox.ts`. This listener was left in place for a version, which was worse than dead code:
+     * it made the URL route look like a live delivery path when nothing builds one any more.
      */
-    const apply = (url: string | null | undefined) => {
-      const answer = readApprovalUrl(url);
-      if (!answer) return;
-      broker.current.answer(answer.approvalId, { approved: answer.approved });
-    };
-    void Linking.getInitialURL().then(apply).catch(() => undefined);
-    const subscription = Linking.addEventListener("url", (event) => apply(event.url));
 
     void (async () => {
       try {
@@ -86,7 +79,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       }
     })();
 
-    return () => subscription.remove();
+    return undefined;
   }, []);
 
   const value = useMemo(() => state, [state]);

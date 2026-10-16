@@ -1,41 +1,62 @@
-import { describe, expect, it } from "vitest";
-import { readApprovalUrl } from "@/runtime/approval-notify";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  postApprovalNotification,
+  setApprovalNotificationPorts,
+  withdrawApprovalNotification,
+} from "@/runtime/approval-notify";
 
-describe("readApprovalUrl", () => {
-  it("reads an approval", () => {
-    expect(readApprovalUrl("mobileclaw://approval?id=approval_7&approved=true")).toEqual({
-      approvalId: "approval_7",
-      approved: true,
+/**
+ * What is left to test here is the port plumbing.
+ *
+ * The URL parsing that used to live in this module is gone: the native receiver no longer starts the
+ * app with an answer, because that brought MobileClaw to the front every time and cleared the task,
+ * which turned the approved run into a new conversation. Answers arrive through a file instead, and
+ * that parsing is covered by `approval-inbox.test.ts`.
+ */
+
+afterEach(() => {
+  setApprovalNotificationPorts({});
+  vi.restoreAllMocks();
+});
+
+describe("postApprovalNotification", () => {
+  it("hands the question to the native port", async () => {
+    const post = vi.fn(async () => undefined);
+    setApprovalNotificationPorts({ post });
+    await postApprovalNotification({ id: "approval_7", title: "标题", detail: "细节" });
+    expect(post).toHaveBeenCalledWith("approval_7", "标题", "细节");
+  });
+
+  it("does nothing when no port is installed", async () => {
+    // A host without the native module still runs; the in-app sheet remains the way to answer.
+    await expect(
+      postApprovalNotification({ id: "a", title: "t", detail: "d" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("surfaces a port that fails, so the caller can log it", async () => {
+    // The runtime logs this and carries on; swallowing it here would hide a channel that never got
+    // created, which is the difference between a visible question and a run that looks hung.
+    setApprovalNotificationPorts({
+      post: async () => {
+        throw new Error("no channel");
+      },
     });
+    await expect(postApprovalNotification({ id: "a", title: "t", detail: "d" })).rejects.toThrow(
+      "no channel",
+    );
+  });
+});
+
+describe("withdrawApprovalNotification", () => {
+  it("takes the question down by id", async () => {
+    const dismiss = vi.fn(async () => undefined);
+    setApprovalNotificationPorts({ dismiss });
+    await withdrawApprovalNotification("approval_7");
+    expect(dismiss).toHaveBeenCalledWith("approval_7");
   });
 
-  it("reads a denial as an answer, not as no answer", () => {
-    // The distinction the feature turns on. A missing answer read as a denial would stop runs
-    // silently; read as consent it would perform a mutating action nobody agreed to.
-    expect(readApprovalUrl("mobileclaw://approval?id=approval_7&approved=false")).toEqual({
-      approvalId: "approval_7",
-      approved: false,
-    });
-  });
-
-  it("ignores a deep link that is not an approval answer", () => {
-    // The app receives every mobileclaw:// link here, including the ones that navigate.
-    expect(readApprovalUrl("mobileclaw://logs")).toBeUndefined();
-    expect(readApprovalUrl("mobileclaw://")).toBeUndefined();
-  });
-
-  it("ignores a missing or unreadable approved flag", () => {
-    expect(readApprovalUrl("mobileclaw://approval?id=approval_7")).toBeUndefined();
-    expect(readApprovalUrl("mobileclaw://approval?id=approval_7&approved=yes")).toBeUndefined();
-  });
-
-  it("ignores a missing id", () => {
-    expect(readApprovalUrl("mobileclaw://approval?approved=true")).toBeUndefined();
-  });
-
-  it("reports nothing for no url at all", () => {
-    expect(readApprovalUrl(null)).toBeUndefined();
-    expect(readApprovalUrl(undefined)).toBeUndefined();
-    expect(readApprovalUrl("")).toBeUndefined();
+  it("does nothing when no port is installed", async () => {
+    await expect(withdrawApprovalNotification("approval_7")).resolves.toBeUndefined();
   });
 });

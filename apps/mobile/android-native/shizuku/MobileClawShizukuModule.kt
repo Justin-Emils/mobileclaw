@@ -438,6 +438,22 @@ class MobileClawShizukuModule(private val reactContext: ReactApplicationContext)
     }
 
     /**
+     * Empty the approval inbox, once its contents have been applied.
+     *
+     * The receiver appends and this clears; nothing else touches the file. Truncating rather than
+     * deleting keeps the inode, so a decision appended between the read and the clear is not lost to a
+     * racing re-create.
+     */
+    @ReactMethod
+    fun clearApprovalInbox(promise: Promise) {
+        run(promise) {
+            val file = File(reactContext.filesDir, MobileClawApprovalReceiver.INBOX_FILE)
+            if (file.exists()) file.writeText("")
+            true
+        }
+    }
+
+    /**
      * The Activity this module is attached to, when there is one.
      *
      * Named `attachedActivity` rather than `currentActivity` on purpose. The base class

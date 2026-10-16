@@ -5,9 +5,10 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import org.json.JSONObject
+import java.io.File
 
 /**
  * Delivers an approval button press back into the app.
@@ -35,27 +36,49 @@ class MobileClawApprovalReceiver : BroadcastReceiver() {
         val approvalId = intent.getStringExtra(EXTRA_APPROVAL_ID) ?: return
         val approved = intent.getBooleanExtra(EXTRA_APPROVED, false)
 
-        // Withdraw the question first: the user has answered, and a notice that stays on screen
-        // invites a second answer to a decision already made.
+        // Withdraw the question: the user has answered, and a notice that stays on screen invites a
+        // second answer to a decision already made. This is also the button's only visible feedback
+        // now that a press no longer opens the app.
         dismiss(context, approvalId)
 
-        // The answer travels as this app's own URL scheme rather than as an Intent extra.
-        //
-        // An extra on the launch intent never reaches React Native: `Linking` only surfaces the
-        // intent's *data* URI. Using the scheme the app already registers means the answer arrives
-        // through the same path as `mobileclaw://logs`, which is known to work on this device, and
-        // needs no new plumbing between the native and JavaScript halves.
-        val url = Uri.parse("mobileclaw://approval")
-            .buildUpon()
-            .appendQueryParameter("id", approvalId)
-            .appendQueryParameter("approved", approved.toString())
-            .build()
+        /*
+         * Hand the answer to the running app **without bringing it forward**.
+         *
+         * The first version started the launch activity with the answer as a URL. That worked, and it
+         * was wrong: it put MobileClaw in front of whatever the user was doing, every time — which is
+         * exactly what the notification exists to avoid. Worse, the launch used
+         * `FLAG_ACTIVITY_CLEAR_TOP` with an `ACTION_VIEW`, so the stack was cleared and the chat screen
+         * remounted, and the redirected `/?id=…` was briefly absent: the run the user had just approved
+         * was replaced by a fresh conversation.
+         *
+         * The process is still alive when a button is pressed — the run is parked mid-step and the
+         * foreground service is holding it up — so the answer can be handed over in-process. A file is
+         * the channel: it needs no receiver registration ordering, survives the JavaScript side being
+         * between polls, and can be read whenever the runtime next looks. See `approval-inbox.ts`.
+         */
+        appendDecision(context, approvalId, approved)
+    }
 
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName) ?: return
-        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-        launch.data = url
-        launch.action = Intent.ACTION_VIEW
-        context.startActivity(launch)
+    /**
+     * Append one decision to the inbox.
+     *
+     * Append rather than replace: two questions can be waiting at once (the run asks again while the
+     * first is unanswered is prevented, but a second run can start), and a replace would silently drop
+     * the earlier answer. One JSON object per line keeps the writer simple and the reader tolerant of a
+     * torn last line.
+     */
+    private fun appendDecision(context: Context, approvalId: String, approved: Boolean) {
+        try {
+            val file = File(context.filesDir, INBOX_FILE)
+            val line = JSONObject()
+                .put("approvalId", approvalId)
+                .put("approved", approved)
+                .put("at", System.currentTimeMillis())
+                .toString()
+            file.appendText("$line\n")
+        } catch (ignored: Throwable) {
+            // A write that fails leaves the question in the in-app sheet, which is still there.
+        }
     }
 
     companion object {
@@ -63,6 +86,9 @@ class MobileClawApprovalReceiver : BroadcastReceiver() {
         const val EXTRA_APPROVED = "mobileclaw.approved"
         const val ACTION_APPROVE = "dev.mobileclaw.app.APPROVE"
         const val ACTION_DENY = "dev.mobileclaw.app.DENY"
+
+        /** Where a button press leaves its answer for the running app. Must match `approval-inbox.ts`. */
+        const val INBOX_FILE = "mobileclaw-approvals.jsonl"
 
         /**
          * A stable notification id per approval.

@@ -41,6 +41,7 @@ import {
 } from "./screenshots";
 import { createRunKeepAwake } from "./foreground";
 import { startRunService } from "./run-service";
+import { readInbox } from "./approval-inbox";
 import { ApprovalBroker, type PendingApproval } from "./approval";
 import {
   postApprovalNotification,
@@ -57,6 +58,14 @@ import type {
   ShellRunOptions,
   ShellService,
 } from "@mobileclaw/core";
+
+/**
+ * How often to look for an answer left by a notification button.
+ *
+ * Half a second: a person who has just tapped a button should not perceive a delay, and the check is a
+ * read of a file that is empty most of the time. It runs **only while a question is outstanding**.
+ */
+const APPROVAL_POLL_MS = 500;
 
 const CONFIG_KEY = "mobileclaw.config";
 
@@ -459,6 +468,61 @@ export async function bootstrapRuntime(
           });
         });
     }
+  };
+
+  /*
+   * Collect answers that arrived from the notification.
+   *
+   * The native receiver appends a decision to a file rather than starting an activity — see
+   * `approval-inbox.ts` for why the original “launch with a URL” shape was wrong twice over. This is the
+   * other half: it reads that file, applies the decisions to the broker, and clears it.
+   *
+   * Polled **only while something is waiting**, and only for a question that is still outstanding. A
+   * timer that runs for the life of the app would wake the JavaScript thread every half second during
+   * every idle moment to look at a file that is empty; gated this way it costs nothing until there is a
+   * reason to look, and stops as soon as the answer arrives by either route.
+   */
+  const inboxTimer = { current: undefined as ReturnType<typeof setInterval> | undefined };
+  const stopInboxPoll = () => {
+    if (inboxTimer.current !== undefined) {
+      clearInterval(inboxTimer.current);
+      inboxTimer.current = undefined;
+    }
+  };
+  const startInboxPoll = () => {
+    if (inboxTimer.current !== undefined) return;
+    inboxTimer.current = setInterval(() => {
+      void (async () => {
+        const waiting = runtime.approvals.pending();
+        if (waiting.length === 0) {
+          // Answered somewhere else (the in-app sheet) while a poll was in flight.
+          stopInboxPoll();
+          return;
+        }
+        const decisions = await readInbox(nativeShizuku?.readOwnFile?.bind(nativeShizuku));
+        if (decisions.length === 0) return;
+        // Cleared *before* applying: applying resolves promises, and a second poll firing in between
+        // would otherwise read the same decisions again.
+        await nativeShizuku?.clearApprovalInbox?.();
+        const outstanding = new Set(waiting.map((entry) => entry.id));
+        for (const decision of decisions) {
+          // A decision for a question that is no longer waiting is stale — answered in the app, or from
+          // an earlier run. Applying it would be a no-op at best and a surprise approval at worst.
+          if (!outstanding.has(decision.approvalId)) continue;
+          eventLog.info("approval", "answered from the notification", {
+            approvalId: decision.approvalId,
+            approved: decision.approved,
+          });
+          runtime.answerApproval(decision.approvalId, decision.approved);
+        }
+      })();
+    }, APPROVAL_POLL_MS);
+  };
+  const originalPendingChange = runtime.approvals.onPendingChange;
+  runtime.approvals.onPendingChange = (pending) => {
+    originalPendingChange?.(pending);
+    if (pending.length > 0) startInboxPoll();
+    else stopInboxPoll();
   };
 
   await runtime.start();
